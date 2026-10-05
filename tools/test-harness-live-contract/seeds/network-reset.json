@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#network-reset — the config-v6.boolean.json body served with ETag \"v1-reset\" by the real cdn Worker, then cut mid-stream: the full length is advertised, half is sent, and the socket is destroyed. The SDK must report fetchFailed (transport), not parseFailed.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": {
+          "u": "https://cdn.confeature.io",
+          "r": 0,
+          "s": "v1"
+        },
+        "f": {
+          "feature.dark-mode": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-dark-mode",
+            "r": []
+          },
+          "feature.beta-toggle": {
+            "t": 0,
+            "v": {
+              "b": false
+            },
+            "i": "v-beta-toggle",
+            "r": []
+          },
+          "feature.unused-key": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-unused-key",
+            "r": []
+          }
+        },
+        "s": []
+      },
+      "etag": "\"v1-reset\"",
+      "fault": "close-mid-response"
+    }
+  ]
+}

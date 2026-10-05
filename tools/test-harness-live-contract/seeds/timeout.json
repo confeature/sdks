@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#timeout — the payload exists and is never delivered: the proxy holds the request past the SDK's configured request timeout, so the client aborts in flight and reports errorClass=timeout (distinct from the generic fetchFailed). The nominal 200 status and headers are never sent. 2000ms is comfortably above every SDK's default request timeout in the live suites and well under the harness's shutdown grace.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+        "f": {},
+        "s": []
+      },
+      "etag": "\"unused-timeout\"",
+      "fault": { "kind": "timeout", "ms": 2000 }
+    }
+  ]
+}

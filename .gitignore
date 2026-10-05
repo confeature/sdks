@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.log
+coverage/
+.nyc_output/
+*.lcov
+lcov.info
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Environment files, Wrangler state and key material, at any depth.
+.env
+.env.*
+!.env.example
+.wrangler/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Compiled CLI binaries.
+/apps/cli/dist/
+
+# Written by tools/repo-gates/verify-fmt-lint.mjs on every run.
+.vp-untracked-ignore

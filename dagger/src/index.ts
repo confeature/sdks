@@ -1,0 +1,1001 @@
+/**
+ * Confeature Dagger module — Phase 3 (4 platform-majors + wire-cases).
+ *
+ * Phase 2 (#201, merged 2026-05-27) introduced `jsTest()` running sdk-node's
+ * vitest suite inside `node:22-bookworm-slim`. Phase 3 (#202) widens this to:
+ *
+ *   - `jsTest`        sdk-node           (Phase 2, preserved verbatim)
+ *   - `browserTest`   sdk-browser-js     (NEW — shares the node container)
+ *   - `pythonTest`    sdk-python         (NEW — python:3.13-bookworm-slim + uv)
+ *   - `goTest`        sdk-go             (NEW — golang:1.23-bookworm + staticcheck)
+ *   - `wireCases`     sdk-node + sdk-browser-js tests/wire/  (NEW)
+ *   - `prepushAll`    orchestrator       (NEW — Promise.all over the 5 above)
+ *
+ * The hook (root package.json `simple-git-hooks.pre-push`) invokes
+ * `pnpm dagger:all`, which gates on Dagger CLI + Docker availability and then
+ * calls `prepushAll`. Red OR > 5 min aggregate blocks the push (SC-001 hard
+ * assertion). Per-family aliases (`pnpm dagger:{js,browser,python,go,wire}`)
+ * exist for single-family debugging (FR-010) and intentionally do NOT enforce
+ * SC-001 — the aggregate budget only applies to `prepushAll`.
+ *
+ * Image pin policy (research R18): `<major>-<os-family>` tags only — no
+ * `:latest`, no `@sha256:` digests. Bumping a pin requires an explicit PR.
+ *
+ * Cache volume names (research R17, total ~850 MB warm steady state):
+ *   - pnpm-store, pnpm-vstore      (jsTest / browserTest / wireCases)
+ *   - uv-cache, uv-python          (pythonTest)
+ *   - go-mod-cache, go-build-cache (goTest)
+ *
+ * Full design: spec 053 (the Dagger local runner).
+ */
+import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
+
+// SC-001 + Principle VII line 168 — "≤ 5 minutes wall-clock"
+const BUDGET_MS = 300_000;
+
+/**
+ * Build the shared JS-family container (node:22-bookworm-slim + pnpm caches +
+ * frozen-lockfile install). Used by `jsTest`, `browserTest`, and `wireCases`.
+ *
+ * The Container is a Dagger lazy graph node — adding more `.withExec(...)` to
+ * the returned value does NOT re-run the install layer. Dagger's content-addressable
+ * scheduler dedupes the install across all three callers when invoked under one
+ * session (i.e. inside `prepushAll`).
+ *
+ * Observable behaviour MUST stay byte-identical to Phase 2's `jsTest` chain — the
+ * helper is a private TS-level refactor, not exposed via @func() to the Dagger
+ * schema. See spec 053 T004.
+ */
+function nodeContainer(source: Directory): Container {
+  return (
+    dag
+      .container()
+      .from("node:22-bookworm-slim")
+      .withEnvVariable("CI", "true")
+      .withExec([
+        "bash",
+        "-c",
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates >/dev/null && rm -rf /var/lib/apt/lists/*",
+      ])
+      // Two cache volumes mounted OUTSIDE /work to avoid the EBUSY rmdir conflict
+      // documented in research R3 (Phase 2) + spike #346. The relocated virtual store
+      // (`--virtual-store-dir=/pnpm/vstore`) means pnpm's "Recreating node_modules"
+      // step rmdirs a path inside /work/node_modules/.pnpm — now an EMPTY directory
+      // (not a mount point), so EBUSY no longer fires.
+      .withMountedCache("/root/.local/share/pnpm/store", dag.cacheVolume("pnpm-store"))
+      .withMountedCache("/pnpm/vstore", dag.cacheVolume("pnpm-vstore"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work")
+      .withExec(["corepack", "enable"])
+      .withExec(["pnpm", "install", "--frozen-lockfile", "--virtual-store-dir=/pnpm/vstore"])
+  );
+}
+
+/**
+ * The JS-family packages the Dagger gates test — the ONE list (#789). Each
+ * function takes its `--filter` from here, and `jsWorkspace` builds every one
+ * of them *with* its workspace dependencies (`<pkg>...`), in pnpm's graph order,
+ * before any test runs:
+ *
+ *   - the dependencies, because their `exports` point into gitignored `dist/`:
+ *     the gates only ever passed on the operator's uploaded `dist/`, and 9 of
+ *     14 `prepushAll` functions were red from a clean tree;
+ *   - the package itself, because suites read their OWN `dist/` — the
+ *     bundle-size tests of sdk-deno / sdk-bun / sdk-react skip without it, and
+ *     each `postbuild` runs that package's size budget. Building only the
+ *     dependencies (`^...`) turned those into silent skips (#789 review).
+ *
+ * Packages with no `build` script are skipped. A per-function build would be a
+ * different exec per function — never deduped — and a hand-written
+ * `-F sdk-shared -F …` a second spelling of the graph.
+ */
+const JS_TESTED = {
+  node: "@confeature/sdk-node",
+  browserJs: "@confeature/sdk-browser-js",
+  deno: "@confeature/sdk-deno",
+  bun: "@confeature/sdk-bun",
+  angular: "@confeature/sdk-angular",
+  react: "@confeature/sdk-react",
+  cloudflareWorker: "@confeature/sdk-cloudflare-worker",
+  harness: "@confeature/test-harness-live-contract",
+} as const;
+
+/**
+ * `nodeContainer` plus ONE build exec over `JS_TESTED`. Identical in
+ * every caller, so Dagger runs it once per session. The trade-off, accepted: a
+ * failed dependency build reddens every JS-family function, under whichever
+ * name rejects first — the build step's own error names the package.
+ */
+function jsWorkspace(source: Directory): Container {
+  return nodeContainer(source).withExec([
+    "pnpm",
+    ...Object.values(JS_TESTED).flatMap((pkg) => ["--filter", `${pkg}...`]),
+    "--if-present",
+    "run",
+    "build",
+  ]);
+}
+
+/**
+ * Build the shared Android-SDK container (JDK 17 + cmdline-tools + platform-34 +
+ * build-tools), used by `androidTest` and `kotlinMpTest`. Both apply the Android
+ * Gradle Plugin (kotlin-mp's `androidTarget` needs ANDROID_HOME even to
+ * *configure* its `jvmTest` task), so neither can run on a bare JDK image.
+ *
+ * The ~1.5 GB SDK is mounted as a cache volume and the install is guarded by an
+ * idempotent existence check, so only the first cold run pays the download. The
+ * Gradle wrapper requires JDK 17+ (AGP 8.x); the project compiles to its own
+ * target. License acceptance is non-interactive (`yes | sdkmanager --licenses`).
+ */
+function androidSdkContainer(source: Directory): Container {
+  const cmdlineTools =
+    "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip";
+  // Pin to linux/amd64: AGP fetches `com.android.tools.build:aapt2:*:linux`, an
+  // x86-64-only native binary (Google ships no linux-aarch64 aapt2). On the
+  // operator's arm64 host the default arm64 container can't start the aapt2
+  // daemon ("Daemon startup failed", #364). Forcing amd64 runs aapt2 under
+  // emulation. Release-gate-only (localGate:false), so the emulation slowdown
+  // never touches the local prepushAll budget.
+  return dag
+    .container({ platform: "linux/amd64" as Platform })
+    .from("eclipse-temurin:17-jdk")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("ANDROID_HOME", "/opt/android-sdk")
+    .withEnvVariable("ANDROID_SDK_ROOT", "/opt/android-sdk")
+    .withEnvVariable("GRADLE_USER_HOME", "/cache/gradle")
+    .withMountedCache("/cache/gradle", dag.cacheVolume("gradle-cache"))
+    .withMountedCache("/opt/android-sdk", dag.cacheVolume("android-sdk-34"))
+    .withExec([
+      "bash",
+      "-eu",
+      "-c",
+      // Newline-joined script (NOT `&&`-joined — the if/then/fi block would
+      // break). `bash -eu` stops on any failed line.
+      [
+        "apt-get update >/dev/null",
+        "apt-get install -y --no-install-recommends curl unzip ca-certificates >/dev/null",
+        "rm -rf /var/lib/apt/lists/*",
+        // Idempotent install: skip if the cached SDK volume already has it.
+        'TOOLS="$ANDROID_HOME/cmdline-tools/latest/bin"',
+        'if [ ! -x "$TOOLS/sdkmanager" ]; then',
+        '  mkdir -p "$ANDROID_HOME/cmdline-tools"',
+        `  curl -sLo /tmp/cmdtools.zip ${cmdlineTools}`,
+        '  unzip -q /tmp/cmdtools.zip -d "$ANDROID_HOME/cmdline-tools"',
+        '  mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"',
+        '  yes | "$TOOLS/sdkmanager" --licenses >/dev/null',
+        `  "$TOOLS/sdkmanager" 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' >/dev/null`,
+        "fi",
+      ].join("\n"),
+    ])
+    .withMountedDirectory("/work", source);
+}
+
+/**
+ * An SDK's `liveSuite.runner` from `dagger/sdk-manifest.json` — the one command
+ * that runs its live wire-cases, shared with contract-live.yml (#783). Throws
+ * when the SDK has none: a Dagger live gate with nothing to run must fail, not
+ * pass.
+ */
+async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> {
+  const manifest = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
+    sdks: Array<{ name: string; liveSuite?: { runner: string } }>;
+  };
+  const runner = manifest.sdks.find((s) => s.name === sdk)?.liveSuite?.runner;
+  if (!runner) throw new Error(`dagger/sdk-manifest.json has no ${sdk} liveSuite.runner`);
+  return runner;
+}
+
+@object()
+export class Confeature {
+  /**
+   * Run apps/sdk-node's vitest suite inside node:22-bookworm-slim.
+   *
+   * Behaviour preserved verbatim from Phase 2 — the suffix string still reads
+   * "(Phase 2 jsTest)" to make the contract diff obvious during review.
+   *
+   * @param source The workspace root (a local caller goes through tools/dagger-call; CI passes `--source=.` on a fresh checkout).
+   */
+  @func()
+  async jsTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.node, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Phase 2 jsTest)`;
+  }
+
+  /**
+   * Run `packages/sdk-shared`'s vitest suite — the reference evaluation engine
+   * AND the ConfigCat conformance corpus (`parity-upstream.test.ts`, which
+   * replays the vendored upstream matrix from `@confeature/test-fixtures-sdk-parity`).
+   * This is the gate that keeps the decision engine at ConfigCat parity locally
+   * (spec 117 / epic #382, Principle VII — the ~1300-case corpus runs in the
+   * local pre-push pipeline, never per-PR CI). Shares the JS-family install layer.
+   *
+   * @param source The workspace root (a local caller goes through tools/dagger-call; CI passes `--source=.` on a fresh checkout).
+   */
+  @func()
+  async sharedTest(source: Directory): Promise<string> {
+    const result = await nodeContainer(source)
+      .withExec(["pnpm", "--filter", "@confeature/sdk-shared", "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (sharedTest #382 — eval-engine conformance corpus)`;
+  }
+
+  /**
+   * Run apps/sdk-browser-js's vitest suite inside the shared node container.
+   *
+   * Reuses `jsWorkspace(source)` — no new image, no new cache volume.
+   *
+   * @param source The workspace root.
+   */
+  @func()
+  async browserTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.browserJs, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Phase 3 browserTest)`;
+  }
+
+  // Tier-1 SDK gates (#355, epic #354). The five JS-family wrappers
+  // (deno, bun, angular, react, cloudflare-worker) all test via vitest on
+  // Node — deno/bun use `@types/*` for typing but run their suites under the
+  // default vitest Node pool, angular under jsdom + @analogjs/vitest-angular,
+  // cloudflare-worker against an in-memory KVNamespace mock (NOT workerd).
+  // So each reuses the shared `jsWorkspace(source)` exactly like
+  // `browserTest` — no new image, no native runtime, no new cache volume.
+  // Flipping each SDK's manifest entry to `covered` (with the kebab name
+  // below) enrols it in `release-gate.yml` + `sdk-publish.yml`; adding it to
+  // `prepushAll` enrols it in the local gate (Principle VII v1.3.0 — the
+  // canonical suite tracks the manifest's covered set).
+
+  /** Run apps/sdk-deno's vitest suite inside the shared node container. */
+  @func()
+  async denoTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.deno, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 1 denoTest)`;
+  }
+
+  /** Run apps/sdk-bun's vitest suite inside the shared node container. */
+  @func()
+  async bunTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.bun, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 1 bunTest)`;
+  }
+
+  /** Run apps/sdk-angular's vitest suite (jsdom + @analogjs/vitest-angular). */
+  @func()
+  async angularTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.angular, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 1 angularTest)`;
+  }
+
+  /** Run apps/sdk-react's vitest suite inside the shared node container. */
+  @func()
+  async reactTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.react, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 1 reactTest)`;
+  }
+
+  /** Run apps/sdk-cloudflare-worker's vitest suite (in-memory KV mock, not workerd). */
+  @func()
+  async cloudflareWorkerTest(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.cloudflareWorker, "test", "run"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 1 cloudflareWorkerTest)`;
+  }
+
+  // Tier-2 SDK gates (#356, epic #354). Standard-toolchain SDKs — unlike
+  // Tier 1, each needs its OWN base image + toolchain (JDK/Gradle, .NET SDK,
+  // PHP+composer, Ruby+bundler, cargo, Dart), so each mirrors the goTest /
+  // pythonTest custom-container pattern with its own cache volume(s) rather
+  // than the shared nodeContainer. Each runs that SDK's canonical lint+test
+  // chain; the manifest marks them covered (release-gate + sdk-publish).
+  //
+  // DELIBERATELY NOT added to prepushAll: 6 heavyweight heterogeneous
+  // toolchain containers running in parallel exceed the NFR-004 8 GB local
+  // budget and OOM-kill the Dagger engine (verified during #356). They are
+  // `localGate: false` in sdk-manifest.json — release-gate-only — per the
+  // constitution v1.3.0 "demote the slowest tier to release-gate-only"
+  // clause. In release-gate.yml each runs on its own CI runner, so there is
+  // no shared-memory OOM. (Re-home them locally only with a concurrency
+  // limiter that respects the 8 GB / 5-min budget.)
+
+  /**
+   * Run apps/sdk-java's Gradle `check` (spotless + test + jacoco).
+   *
+   * Runs on JDK 21 — modern Gradle requires JVM 17+ to *execute* even though
+   * the project compiles to a Java 11 bytecode target (sourceCompatibility 11).
+   */
+  @func()
+  async javaTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("eclipse-temurin:21-jdk")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("GRADLE_USER_HOME", "/cache/gradle")
+      .withMountedCache("/cache/gradle", dag.cacheVolume("gradle-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-java")
+      // `sh ./gradlew` runs the wrapper regardless of the file's exec bit;
+      // `--no-daemon` is mandatory in ephemeral containers (no reuse).
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 javaTest)`;
+  }
+
+  /**
+   * Run apps/sdk-java's Gradle `spotlessApply` and return the formatted
+   * sdk-java directory so the host can re-export the canonically-formatted
+   * sources. Use when `javaTest`'s spotlessCheck fails and there is no local
+   * JDK to run the formatter: `dagger call java-format --source=. export
+   * --path=apps/sdk-java`.
+   */
+  @func()
+  javaFormat(source: Directory): Directory {
+    return dag
+      .container()
+      .from("eclipse-temurin:21-jdk")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("GRADLE_USER_HOME", "/cache/gradle")
+      .withMountedCache("/cache/gradle", dag.cacheVolume("gradle-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-java")
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon spotlessApply"])
+      .directory("/work/apps/sdk-java");
+  }
+
+  /**
+   * Run apps/sdk-dotnet's `dotnet test` on the .NET 10 SDK. The test project
+   * targets net8.0;net10.0 and runs the suite on each, but the sdk:10.0 image
+   * ships only the .NET 10 runtime — so the .NET 8 shared runtime is copied in
+   * from the official runtime image, else the net8.0 testhost cannot start.
+   */
+  @func()
+  async dotnetTest(source: Directory): Promise<string> {
+    const net8Runtime = dag
+      .container()
+      .from("mcr.microsoft.com/dotnet/runtime:8.0")
+      .directory("/usr/share/dotnet/shared/Microsoft.NETCore.App");
+    const result = await dag
+      .container()
+      .from("mcr.microsoft.com/dotnet/sdk:10.0")
+      .withDirectory("/usr/share/dotnet/shared/Microsoft.NETCore.App", net8Runtime)
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+      .withEnvVariable("DOTNET_NOLOGO", "1")
+      .withEnvVariable("NUGET_PACKAGES", "/cache/nuget")
+      .withMountedCache("/cache/nuget", dag.cacheVolume("nuget-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-dotnet")
+      .withExec(["bash", "-eu", "-c", "dotnet test --configuration Release"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 dotnetTest)`;
+  }
+
+  /** Run apps/sdk-php's composer `test` (phpunit) on PHP 8.3 + composer. */
+  @func()
+  async phpTest(source: Directory): Promise<string> {
+    // composer binary copied from the official image (no curl-install needed).
+    const composerBin = dag.container().from("composer:2").file("/usr/bin/composer");
+    const result = await dag
+      .container()
+      .from("php:8.3-cli")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
+      .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
+      // git + unzip for composer; libonig/libxml/libzip for the
+      // mbstring/dom/xml/zip extensions phpunit 10 requires; pcov (built via
+      // $PHPIZE_DEPS) is the code-coverage driver — without it phpunit emits a
+      // "No code coverage driver available" warning and exits 1 even though the
+      // suite passes.
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        'apt-get update >/dev/null && apt-get install -y --no-install-recommends git unzip libonig-dev libxml2-dev libzip-dev $PHPIZE_DEPS >/dev/null && docker-php-ext-install -j"$(nproc)" mbstring dom xml zip >/dev/null && pecl install pcov >/dev/null && docker-php-ext-enable pcov && rm -rf /var/lib/apt/lists/*',
+      ])
+      .withFile("/usr/local/bin/composer", composerBin)
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-php")
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "composer install --no-interaction --no-progress && composer test",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 phpTest)`;
+  }
+
+  /** Run apps/sdk-ruby's `rake` default (rubocop + rspec) on Ruby 3.3. */
+  @func()
+  async rubyTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("ruby:3.3")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("BUNDLE_PATH", "/cache/bundle")
+      .withMountedCache("/cache/bundle", dag.cacheVolume("bundle-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-ruby")
+      .withExec(["bash", "-eu", "-c", "bundle install && bundle exec rake"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 rubyTest)`;
+  }
+
+  /**
+   * Run apps/sdk-rust's MSRV guard + format check + tests (#363).
+   *
+   * Two rustc floors, because the dev-deps need a higher one than the library:
+   *  - LIBRARY MSRV = 1.86 — what a consumer needs; what Cargo.toml advertises.
+   *    The locked NON-dev tree needs ≥1.86 (icu_* 2.2, idna_adapter 1.2.2,
+   *    base16ct 0.3 edition2024). `cargo +1.86 build --lib` is the guard: it
+   *    compiles only the lib target (no dev-deps), so a green run proves the
+   *    advertised MSRV genuinely builds.
+   *  - TEST floor = 1.88 (the image default) — the `wiremock` 0.6.5 dev-dep uses
+   *    let-chains (stabilised in 1.88), so `cargo test` needs ≥1.88.
+   * If Cargo.toml's `rust-version` changes, bump the `+1.86` toolchain below in
+   * lockstep; if a dev-dep raises the test floor, bump the `rust:1.88` image.
+   */
+  @func()
+  async rustTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("rust:1.88-bookworm")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("CARGO_HOME", "/cache/cargo")
+      // Target dir OUTSIDE /work so the cache mount never collides with the
+      // mounted source directory (the EBUSY class of conflict).
+      .withEnvVariable("CARGO_TARGET_DIR", "/cache/target")
+      .withMountedCache("/cache/cargo", dag.cacheVolume("cargo-home"))
+      .withMountedCache("/cache/target", dag.cacheVolume("cargo-target"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-rust")
+      // MSRV guard (cargo +1.86 build --lib, no dev-deps) then fmt+test on the
+      // image's 1.88 default; rustfmt add is idempotent. clippy is left to the
+      // SDK's own CI for now.
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "rustup toolchain install 1.86 --profile minimal && cargo +1.86 build --lib && rustup component add rustfmt && cargo fmt --check && cargo test",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 rustTest)`;
+  }
+
+  /** Run apps/sdk-dart's `dart analyze && dart test` on the stable Dart SDK. */
+  @func()
+  async dartTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("dart:stable")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("PUB_CACHE", "/cache/pub")
+      .withMountedCache("/cache/pub", dag.cacheVolume("pub-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-dart")
+      .withExec(["bash", "-eu", "-c", "dart pub get && dart analyze && dart test"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 2 dartTest)`;
+  }
+
+  // Tier-3 SDK gates (#357, epic #354). Heaviest toolchains. Like Tier 2 these
+  // are `localGate: false` (release-gate-only) — too heavy for the local 8 GB
+  // budget. elixir + cpp have self-contained containers and ARE covered.
+  //
+  // android + kotlin-mp share `androidSdkContainer()` (both apply the Android
+  // Gradle Plugin — kotlin-mp's androidTarget needs ANDROID_HOME even to
+  // configure jvmTest). RESOLVED in #364 (spec 114): the earlier "AAPT2 Daemon
+  // startup failed" wall was an arch mismatch — AGP fetches an x86-64-only
+  // `aapt2` (Google ships no linux-aarch64 build), which can't start on an
+  // arm64 container. `androidSdkContainer` is now pinned to `linux/amd64` so
+  // aapt2 runs under emulation. Both are `covered` (localGate:false,
+  // release-gate-only — the emulated run is too slow for the local budget).
+
+  /** Run apps/sdk-elixir's `mix test` on Elixir 1.17 / OTP 27. */
+  @func()
+  async elixirTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("elixir:1.17")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("MIX_ENV", "test")
+      .withMountedCache("/work/apps/sdk-elixir/deps", dag.cacheVolume("mix-deps"))
+      .withMountedCache("/work/apps/sdk-elixir/_build", dag.cacheVolume("mix-build"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-elixir")
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "mix local.hex --force && mix local.rebar --force && mix deps.get && mix test",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 3 elixirTest)`;
+  }
+
+  /** Build + run apps/sdk-cpp's Catch2 suite (C++17, libcurl + OpenSSL 3, FetchContent). */
+  @func()
+  async cppTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("debian:bookworm")
+      .withEnvVariable("CI", "true")
+      // FetchContent pulls nlohmann/json + Catch2 over the network at configure
+      // time; cmake-built artefacts are cached under /cache/cpp-build.
+      .withMountedCache("/cache/cpp-build", dag.cacheVolume("cpp-build"))
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-cpp")
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON && cmake --build /cache/cpp-build && ctest --test-dir /cache/cpp-build --output-on-failure",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 3 cppTest)`;
+  }
+
+  /** Run apps/sdk-android's `testDebugUnitTest` on JDK 17 + Android SDK 34. */
+  @func()
+  async androidTest(source: Directory): Promise<string> {
+    const result = await androidSdkContainer(source)
+      .withWorkdir("/work/apps/sdk-android")
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon testDebugUnitTest"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 3 androidTest)`;
+  }
+
+  /** Run apps/sdk-kotlin-mp's `jvmTest` (KMP; the Android plugin needs the SDK to configure). */
+  @func()
+  async kotlinMpTest(source: Directory): Promise<string> {
+    const result = await androidSdkContainer(source)
+      .withWorkdir("/work/apps/sdk-kotlin-mp")
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon jvmTest"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Tier 3 kotlinMpTest)`;
+  }
+
+  /**
+   * Run apps/sdk-python's full `python:ready` chain inside python:3.13-bookworm-slim.
+   *
+   * Chain: `uv sync --frozen --extra dev && uv run ruff check && uv run ruff format
+   * --check && uv run mypy --strict src && uv run pytest && uv run pytest -m slow
+   * && uv build`. The `[dev]` extra pulls `configcat-client>=10.0,<11.0` for the
+   * API-surface conformance test (constitution Principle II); that test runs
+   * transitively under `uv run pytest`.
+   *
+   * uv install: pinned to a specific 0.4.x release via UV_INSTALL_VERSION. We use
+   * the official install script (R11). Switching to the `astral/uv:*` base image
+   * is left as a follow-on (research R11 alternatives).
+   *
+   * @param source The workspace root. Workdir is /work/apps/sdk-python.
+   */
+  @func()
+  async pythonTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("python:3.13-slim-bookworm")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("UV_INSTALL_VERSION", "0.4.30")
+      .withExec([
+        "bash",
+        "-c",
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withMountedCache("/root/.cache/uv", dag.cacheVolume("uv-cache"))
+      .withMountedCache("/root/.local/share/uv/python", dag.cacheVolume("uv-python"))
+      .withExec([
+        "bash",
+        "-euo",
+        "pipefail",
+        "-c",
+        // uv 0.4.x installs to $CARGO_HOME/bin (defaults to $HOME/.cargo/bin).
+        // We pin install location via CARGO_HOME so the subsequent PATH update
+        // resolves the binary deterministically across uv releases.
+        //
+        // `-euo pipefail` is load-bearing: without `pipefail`, a curl failure
+        // (DNS / 502 / network outage) before any bytes hit stdout leaves
+        // `sh` receiving empty input and exiting 0 — uv would be silently
+        // absent and the subsequent `uv sync` would fail with the opaque
+        // "uv: command not found" rather than surfacing the actual download
+        // failure here.
+        "CARGO_HOME=/root/.cargo curl -LsSf https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh | sh",
+      ])
+      .withEnvVariable(
+        "PATH",
+        "/root/.cargo/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      )
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-python")
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "uv sync --frozen --extra dev && uv run ruff check && uv run ruff format --check && uv run mypy --strict src && uv run pytest && uv run pytest -m slow && uv build",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Phase 3 pythonTest)`;
+  }
+
+  /**
+   * Run apps/sdk-go's full `go:ready` chain inside golang:1.23-bookworm.
+   *
+   * Chain: `gofmt -l . | wc -l == 0 && go vet ./... && staticcheck ./... &&
+   * go test -cover ./... && go build ./...`. Module-declared Go version
+   * (apps/sdk-go/go.mod) is 1.23 — that's the source of truth, NOT ci.yml's
+   * 1.22 pin (skew tracked for Phase 4 / #203 per research R12).
+   *
+   * staticcheck is pinned to 2024.1.1 — NOT @latest (Principle VII cost
+   * discipline says toolchains are pinned, not floating).
+   *
+   * @param source The workspace root. Workdir is /work/apps/sdk-go.
+   */
+  @func()
+  async goTest(source: Directory): Promise<string> {
+    // Run `go test` under a non-root user (`runner`, UID 1000). Reason:
+    // sdk-go's TestFileCache_FallbackOnUnwritableDir depends on POSIX DAC
+    // semantics — UID 0 bypasses chmod 0o555 read-only restrictions, so
+    // the test never triggers its "WARNING on unwritable dir" path when
+    // running as root inside the container. Running as non-root also
+    // reproduces the host workflow (operator runs as a normal user).
+    //
+    // Cache volume NAMES (`go-mod-cache`, `go-build-cache`) are preserved
+    // verbatim per contract pre-push-hook.md. The MOUNT PATHS shift one
+    // hop (from /go/pkg/mod + /root/.cache/go-build to /cache/go-mod +
+    // /cache/go-build) so the runner user can write to them; GOMODCACHE
+    // + GOCACHE env vars redirect Go's toolchain accordingly.
+    // `staticcheck` is installed under root (GOBIN=/usr/local/bin) so it
+    // resolves on PATH for the unprivileged runner user.
+    const result = await dag
+      .container()
+      .from("golang:1.23-bookworm")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("GOMODCACHE", "/cache/go-mod")
+      .withEnvVariable("GOCACHE", "/cache/go-build")
+      .withMountedCache("/cache/go-mod", dag.cacheVolume("go-mod-cache"))
+      .withMountedCache("/cache/go-build", dag.cacheVolume("go-build-cache"))
+      .withExec(["useradd", "-m", "-u", "1000", "runner"])
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        // Install staticcheck under root with GOBIN forced to /usr/local/bin so
+        // it resolves on PATH for the unprivileged runner user. Then chown the
+        // shared cache volumes (which `go install` will have populated with
+        // root-owned entries) so the runner user can read/write them.
+        "GOBIN=/usr/local/bin go install honnef.co/go/tools/cmd/staticcheck@2024.1.1",
+      ])
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-go")
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        // The chown runs in THIS exec, not the install one: that layer is
+        // cached, so a chown there is skipped while the cache volumes keep
+        // changing underneath it — and the runner then cannot write to
+        // /cache/go-build ("permission denied"). Here it runs every time.
+        "chown -R runner:runner /cache && runuser -u runner -- bash -eu -c " +
+          `'test -z "$(gofmt -l .)" && go vet ./... && staticcheck ./... && go test -cover ./... && go build ./...'`,
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Phase 3 goTest)`;
+  }
+
+  /**
+   * Run the wire-protocol corpus consumers in sdk-node + sdk-browser-js.
+   *
+   * Both consumers reference `packages/test-fixtures-sdk-parity/fixtures/wire-cases.json`
+   * via vitest discovery in their respective `tests/wire/` directories. The
+   * positional `tests/wire` filter restricts vitest to those subtrees only
+   * (research R13). Python's `tests/wire/` is picked up transitively by
+   * `pythonTest`'s `uv run pytest` — there is NO Python-specific wireCases step.
+   *
+   * @param source The workspace root.
+   */
+  @func()
+  async wireCases(source: Directory): Promise<string> {
+    const result = await jsWorkspace(source)
+      .withExec([
+        "pnpm",
+        "--filter",
+        JS_TESTED.node,
+        "--filter",
+        JS_TESTED.browserJs,
+        "test",
+        "run",
+        "--",
+        "tests/wire",
+      ])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (Phase 3 wireCases)`;
+  }
+
+  /**
+   * Boot the live-contract harness and run the live wire canary(ies) (#343).
+   *
+   * `@confeature/test-harness-live-contract` boots the reference origin via **in-process
+   * Miniflare** (workerd in-process — no `wrangler dev` subprocess, no port
+   * races, no network egress; see the harness's `src/wrangler-host.ts`) and
+   * serves seeded wire-contract responses over a real localhost HTTP socket.
+   * That hermetic, sandbox-safe boot (#341) is what lets the suite run inside
+   * the Dagger sandbox at pre-push — no service bindings, no host networking.
+   *
+   * On the shared `jsWorkspace(source)` — the same install layer and the same
+   * single workspace build as `jsTest` / `browserTest` / `wireCases`, which
+   * builds the harness itself (its `dist/cli.js` is gitignored output the live
+   * runner boots). Dagger dedupes both across callers under one `prepushAll`
+   * session. Then two stages:
+   *
+   *   1. The harness package's own live self-test (`test:live`).
+   *   2. The sdk-node live wire-cases, run by the manifest's node
+   *      `liveSuite.runner` (#783): the harness wrapper boots the harness,
+   *      hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes
+   *      its exit code through — the same command contract-live runs. The
+   *      suite never boots a harness of its own.
+   *
+   * @param source The workspace root.
+   */
+  @func()
+  async liveContract(source: Directory): Promise<string> {
+    const runner = await liveSuiteRunner(source, "node");
+    const result = await jsWorkspace(source)
+      .withExec(["pnpm", "--filter", JS_TESTED.harness, "test:live"])
+      .withExec(["bash", "-euo", "pipefail", "-c", runner])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (liveContract #343)`;
+  }
+
+  /**
+   * Run the sdk-python live wire-cases against the harness (#380, #783).
+   *
+   * WHY A DEDICATED FUNC (not folded into `liveContract`): it needs BOTH
+   * toolchains in one container — Node to build and boot the harness CLI,
+   * uv/CPython to run pytest.
+   *
+   * WHY ONE CONTAINER + LOOPBACK (not a Dagger service binding): the harness
+   * binds **127.0.0.1 only** by deliberate security design — its `/admin/*`
+   * seed and fault routes are loopback-guarded (`proxy-server.ts`,
+   * `admin-routes.ts`). A cross-container service binding would force it onto
+   * `0.0.0.0` and expose those routes on the sandbox network.
+   *
+   * The command is the manifest's python `liveSuite.runner`: the harness
+   * wrapper (`--corpus-seed --exec`) boots the harness, hands pytest
+   * `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes its exit code
+   * through — one spelling of the boot, shared with contract-live and with
+   * `liveContract`. The wrapper logs to stderr, so stdout's last line stays
+   * the pytest summary. Built on `jsWorkspace(source)` (which builds the
+   * harness CLI) plus the same pinned
+   * uv install and `uv-cache` / `uv-python` volumes as `pythonTest`.
+   *
+   * @param source The workspace root.
+   */
+  @func()
+  async livePythonContract(source: Directory): Promise<string> {
+    const runner = await liveSuiteRunner(source, "python");
+    const result = await jsWorkspace(source)
+      .withEnvVariable("UV_INSTALL_VERSION", "0.4.30")
+      .withExec([
+        "bash",
+        "-c",
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends curl >/dev/null && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withMountedCache("/root/.cache/uv", dag.cacheVolume("uv-cache"))
+      .withMountedCache("/root/.local/share/uv/python", dag.cacheVolume("uv-python"))
+      .withExec([
+        "bash",
+        "-euo",
+        "pipefail",
+        "-c",
+        // Same pinned uv install as pythonTest (Principle VII — toolchains
+        // are pinned, not floating). `-euo pipefail` surfaces a curl failure
+        // instead of leaving uv silently absent.
+        "CARGO_HOME=/root/.cargo curl -LsSf https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh | sh",
+      ])
+      .withEnvVariable(
+        "PATH",
+        "/root/.cargo/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      )
+      // Sync the python project (uv downloads a managed CPython + httpx + the
+      // [dev] extra) so `uv run pytest` can drive the canary.
+      .withWorkdir("/work/apps/sdk-python")
+      .withExec(["uv", "sync", "--frozen", "--extra", "dev"])
+      .withWorkdir("/work")
+      .withExec(["bash", "-euo", "pipefail", "-c", runner])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (livePythonContract #380)`;
+  }
+
+  /**
+   * Run the native Deno CLI's quality gate (`apps/cli`) inside the official
+   * `denoland/deno` container — the FIRST real Deno-runtime gate in the repo
+   * (spec 179, FR-010 / Principle VII). NOT built on `nodeContainer`: the CLI
+   * is a native `deno.json` project outside the pnpm workspace, so it needs the
+   * Deno toolchain, not node + pnpm.
+   *
+   * Runs `deno fmt --check`, `deno lint`, then `deno test -A` against
+   * `apps/cli`. The Deno module cache is mounted at `/deno-dir` (the default
+   * `DENO_DIR`) so std-lib (`jsr:@std/*`) downloads are cached across runs.
+   * Pinned to a concrete patch tag (`denoland/deno:2.8.3`, multi-arch incl.
+   * arm64): Deno publishes NO floating `<major>` tag — only version-pinned
+   * `2.8.x` / `alpine-2.8.x` / … — so the original `:2` pin could never
+   * resolve the image (#655 review). A specific tag is the reproducible
+   * fallback the image-pin policy (research R18) intends; bump on a Deno
+   * upgrade.
+   *
+   * Gated locally via `prepushAll` only — deliberately kept OFF the hosted CI
+   * matrix and out of `ready:deploy` (the CLI is not a deployed Worker).
+   *
+   * @param source The workspace root. Workdir is /work/apps/cli.
+   */
+  @func()
+  async cliTest(source: Directory): Promise<string> {
+    const result = await dag
+      .container()
+      .from("denoland/deno:2.8.3")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("DENO_DIR", "/deno-dir")
+      .withMountedCache("/deno-dir", dag.cacheVolume("deno-cli-cache"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/cli")
+      .withExec(["bash", "-eu", "-c", "deno fmt --check && deno lint && deno test -A"])
+      .stdout();
+    const lastLine = result.trim().split("\n").slice(-1)[0];
+    return `${lastLine} (cliTest #653)`;
+  }
+
+  /**
+   * Orchestrator — fan out the 5 functions in parallel via `Promise.all` and
+   * enforce the SC-001 aggregate wall-clock budget (≤ BUDGET_MS / 5 min).
+   *
+   * Per research R14, the Dagger TS SDK's `dag.container()` calls are lazy —
+   * Dagger Engine schedules the underlying container builds on its parallel
+   * build queue when the 5 awaits are wrapped in `Promise.all`. Fail-fast
+   * semantics: any single rejection causes `Promise.all` to reject; Dagger
+   * cancels orphan containers on session exit.
+   *
+   * The SC-001 throw is the in-module (layer 1) defence-in-depth half of the
+   * R15 contract; the `timeout 360s` wrapper in `pnpm dagger:all` is layer 2.
+   *
+   * The error message wording is fixed by `contracts/pre-push-hook.md` §"Failure
+   * modes — operator-facing messages" and IS the string T017's fault-injection
+   * test will grep for. Do not reword without updating that contract.
+   *
+   * @param source The workspace root.
+   * @returns Multi-line string concatenating each function's last-line + final
+   *          `[prepushAll] OK in <N>ms` marker on green.
+   */
+  @func()
+  async prepushAll(source: Directory): Promise<string> {
+    const started = performance.now();
+    // Wrap each entry with a name-preserving `.catch()` so the contract's
+    // "name the failing function" requirement (contracts/pre-push-hook.md
+    // line 106, e.g. `pythonTest failed: ...`) is code-guaranteed rather
+    // than Dagger Engine internals-dependent. T018 confirmed the engine
+    // currently surfaces the function name in GraphQL error wrapping, but
+    // a future engine version could change that — this catch makes the
+    // wording immune to engine drift.
+    // Each function's own wall-clock, so an overrun names what dominates
+    // instead of a bare total (#789: the budget is judged per function).
+    const timings: Array<[string, number]> = [];
+    const wrapWithName = (name: string, p: Promise<string>): Promise<string> =>
+      p
+        .then((line) => {
+          timings.push([name, Math.round(performance.now() - started)]);
+          return line;
+        })
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`${name} failed: ${msg}`);
+        });
+    const timingReport = (): string =>
+      [...timings]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, ms]) => `${name}=${ms}ms`)
+        .join(" ");
+    const [
+      jsLine,
+      browserLine,
+      pythonLine,
+      goLine,
+      wireLine,
+      denoLine,
+      bunLine,
+      angularLine,
+      reactLine,
+      cloudflareWorkerLine,
+      liveContractLine,
+      livePythonContractLine,
+      sharedLine,
+      cliLine,
+    ] = await Promise.all([
+      wrapWithName("jsTest", this.jsTest(source)),
+      wrapWithName("browserTest", this.browserTest(source)),
+      wrapWithName("pythonTest", this.pythonTest(source)),
+      wrapWithName("goTest", this.goTest(source)),
+      wrapWithName("wireCases", this.wireCases(source)),
+      // Tier-1 (#355): JS-family wrappers, all vitest-on-Node in the shared container.
+      wrapWithName("denoTest", this.denoTest(source)),
+      wrapWithName("bunTest", this.bunTest(source)),
+      wrapWithName("angularTest", this.angularTest(source)),
+      wrapWithName("reactTest", this.reactTest(source)),
+      wrapWithName("cloudflareWorkerTest", this.cloudflareWorkerTest(source)),
+      // Live-contract harness (#343): in-process Miniflare boot of the reference origin,
+      // shares the same nodeContainer install layer as the JS-family gates.
+      wrapWithName("liveContract", this.liveContract(source)),
+      // sdk-python live canary (#380): boots the harness over loopback in a
+      // combined node+uv container and runs the python wire canary against it.
+      wrapWithName("livePythonContract", this.livePythonContract(source)),
+      // Eval-engine conformance corpus (#382): sdk-shared replays the vendored
+      // ConfigCat matrix; shares the JS-family install layer.
+      wrapWithName("sharedTest", this.sharedTest(source)),
+      // Native Deno CLI gate (#653): the first Deno-runtime gate — fmt/lint/test
+      // in the official denoland/deno container, not the shared nodeContainer.
+      wrapWithName("cliTest", this.cliTest(source)),
+    ]);
+    const elapsed = Math.round(performance.now() - started);
+    if (elapsed > BUDGET_MS) {
+      throw new Error(
+        `[prepushAll] SC-001 budget exceeded: ${elapsed}ms > ${BUDGET_MS}ms. Aggregate wall-clock budget enforced per constitution Principle VII. Finished at: ${timingReport()}`,
+      );
+    }
+    return [
+      jsLine,
+      browserLine,
+      pythonLine,
+      goLine,
+      wireLine,
+      denoLine,
+      bunLine,
+      angularLine,
+      reactLine,
+      cloudflareWorkerLine,
+      liveContractLine,
+      livePythonContractLine,
+      sharedLine,
+      cliLine,
+      `[prepushAll] finished at: ${timingReport()}`,
+      `[prepushAll] OK in ${elapsed}ms`,
+    ].join("\n");
+  }
+}

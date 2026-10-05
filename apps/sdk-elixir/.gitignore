@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+
+/_build/
+/deps/
+/cover/
+/doc/
+erl_crash.dump
+*.ez
+*.beam
+.elixir_ls/

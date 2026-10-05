@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#invalid-sdk-key-404 — payload null (absent from KV) plus the canned \"404\" fault, which serves the corpus's 404 byte for byte (application/json, {\"error\": \"unknown sdk key\"}). The fault is required for fidelity: without it the upstream answers its own unknown-key response, which since #785 is ConfigCat's 403 AccessDenied (application/xml), not this case's 404. The case pins 404 → invalidSdkKey classification, which ConfigCat SDKs implement.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": null,
+      "fault": "404"
+    }
+  ]
+}

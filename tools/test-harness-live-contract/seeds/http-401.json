@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#http-401 — a forced 401 with no body. 401 is not an invalid-key status in ConfigCat (only 403/404 are), so the SDK must report a transient fetchFailed. Payload null: the response is replaced whole.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": null,
+      "fault": {
+        "kind": "status",
+        "status": 401,
+        "headers": {
+          "Content-Type": "text/plain"
+        }
+      }
+    }
+  ]
+}

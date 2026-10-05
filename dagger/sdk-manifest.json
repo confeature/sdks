@@ -1,0 +1,57 @@
+{
+  "$comment": "liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. contract-live.yml runs it; dagger livePythonContract reads python's from here. Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate.",
+  "sdks": [
+    {
+      "name": "node",
+      "daggerFn": "js-test",
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-node exec vp test run tests/wire/wire-cases.live.test.ts tests/wire/configcat-stock.live.test.ts",
+        "path": "apps/sdk-node/tests/wire/wire-cases.live.test.ts"
+      }
+    },
+    { "name": "browser-js", "daggerFn": "browser-test", "status": "covered" },
+    {
+      "name": "python",
+      "daggerFn": "python-test",
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
+        "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py",
+        "toolchain": "uv"
+      }
+    },
+    { "name": "go", "daggerFn": "go-test", "status": "covered" },
+
+    { "name": "deno", "daggerFn": "deno-test", "status": "covered" },
+    { "name": "bun", "daggerFn": "bun-test", "status": "covered" },
+    { "name": "angular", "daggerFn": "angular-test", "status": "covered" },
+    { "name": "react", "daggerFn": "react-test", "status": "covered" },
+    { "name": "cloudflare-worker", "daggerFn": "cloudflare-worker-test", "status": "covered" },
+
+    { "name": "java", "daggerFn": "java-test", "status": "covered", "localGate": false },
+    { "name": "dotnet", "daggerFn": "dotnet-test", "status": "covered", "localGate": false },
+    { "name": "php", "daggerFn": "php-test", "status": "covered", "localGate": false },
+    { "name": "ruby", "daggerFn": "ruby-test", "status": "covered", "localGate": false },
+    { "name": "rust", "daggerFn": "rust-test", "status": "covered", "localGate": false },
+    { "name": "dart", "daggerFn": "dart-test", "status": "covered", "localGate": false },
+
+    { "name": "kotlin-mp", "daggerFn": "kotlin-mp-test", "status": "covered", "localGate": false },
+    { "name": "android", "daggerFn": "android-test", "status": "covered", "localGate": false },
+    { "name": "elixir", "daggerFn": "elixir-test", "status": "covered", "localGate": false },
+    { "name": "cpp", "daggerFn": "cpp-test", "status": "covered", "localGate": false },
+
+    {
+      "name": "swift",
+      "daggerFn": null,
+      "status": "exempt",
+      "reason": "macOS-only Apple toolchain — cannot run in the Dagger Linux matrix; gated by the local pre-push native Swift gate (scripts/swift-precheck.sh) instead (Phase 6, #205)"
+    },
+    {
+      "name": "unreal",
+      "daggerFn": null,
+      "status": "exempt",
+      "reason": "UE CI impractical in a standard Dagger container (size/license/GPU)"
+    }
+  ]
+}

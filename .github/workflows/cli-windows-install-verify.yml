@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: MIT
+
+# End-to-end verification of the confeature CLI Windows installer (#702, #801).
+# It runs the WORKING-TREE install.ps1 on a `windows-latest` runner against the
+# REAL public host, https://cli.confeature.io, and asserts the full contract: a
+# checksum-verified download, a successful install, the binary resolving from a
+# FRESH shell through the user-PATH entry, and a SECOND run that does NOT
+# duplicate that entry (the idempotency fix from PR #701).
+#
+# There is no mirror any more (#801). The host is public, so the literal
+# download path users take is the one under test.
+#
+# Two modes:
+#   - pinned (`version` set): installs `-Version X.Y.Z`. cli-release.yml runs it
+#     after `upload` and BEFORE `promote`, so a release whose Windows install
+#     is broken never becomes `latest`.
+#     It first exercises the checkout's latest code path against the CURRENT
+#     `latest` (the previous release), so a broken latest path is caught
+#     before anything is promoted, not after.
+#   - unpinned (`version` empty): installs with no `-Version`, through
+#     `<host>/latest`, and must get `expect` when given (cli-release.yml passes
+#     the tag, so a `latest` that did not move is a failure, not a pass). It
+#     also runs the SERVED script the way users do, `irm … | iex`, under
+#     Windows PowerShell 5.1 (`shell: powershell`); the other steps run pwsh 7.
+#
+# Windows runners bill at x2, but this runs only per release or on manual
+# dispatch, never per PR, so it stays within the Principle VII cost budget.
+
+name: cli-windows-install-verify
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "CLI version (X.Y.Z) or cli-v* tag to verify pinned. Empty = the unpinned latest path."
+        required: false
+        type: string
+        default: ""
+      expect:
+        description: "Unpinned only: the version `latest` must resolve to (X.Y.Z or cli-v* tag)."
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CLI version (X.Y.Z) or cli-v* tag. Blank = verify the unpinned latest path."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-windows-install:
+    name: verify install.ps1 (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (working-tree install.ps1)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve the expected version and the install mode
+        id: resolve
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_EXPECT: ${{ inputs.expect }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $v = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($v)) {
+            # Unpinned: the version users get is whatever `latest` says…
+            $v = ([string](Invoke-WebRequest -Uri "https://cli.confeature.io/latest" -UseBasicParsing).Content).Trim()
+            "pinned=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            # …and it must be the release just promoted, when the caller says so.
+            $expect = $env:INPUT_EXPECT -replace '^cli-v', ''
+            if ($expect -and $v -ne $expect) { throw "latest is '$v', expected '$expect' - promote did not take effect" }
+          } else {
+            "pinned=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+          # The release caller passes github.ref_name = cli-vX.Y.Z; strip the prefix.
+          $v = $v -replace '^cli-v', ''
+          if ($v -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+\z') { throw "bad version '$v' (expected X.Y.Z)" }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Verifying confeature CLI $v"
+
+      - name: Pre-promote - the checkout's latest path, against the current latest
+        if: steps.resolve.outputs.pinned == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          # No -Version: resolves <host>/latest (the PREVIOUS release at this
+          # point). The pinned install below overwrites it and is asserted.
+          $log = & ./apps/cli/install.ps1 *>&1 | Out-String
+          Write-Host $log
+          if ($log -notmatch 'checksum verified') { throw "FAIL: the latest path of the checkout's install.ps1 is broken" }
+
+      - name: Install (first run) — checksum verified + binary installed
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          PINNED: ${{ steps.resolve.outputs.pinned }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          # Run the WORKING-TREE installer against the real host, pinned or not.
+          # *>&1 merges Write-Host (stream 6) so we can assert on the output.
+          $installArgs = @()
+          if ($env:PINNED -eq "true") { $installArgs = @("-Version", $env:VERSION) }
+          $log = & ./apps/cli/install.ps1 @installArgs *>&1 | Out-String
+          Write-Host $log
+          if ($log -notmatch 'checksum verified') {
+            throw "FAIL: install.ps1 did not report 'checksum verified' (AC: checksum verification succeeds)"
+          }
+          $dest = Join-Path $env:LOCALAPPDATA "Programs\confeature\confeature.exe"
+          if (-not (Test-Path $dest)) { throw "FAIL: $dest was not installed" }
+          Write-Host "OK: checksum verified + binary installed at $dest"
+
+      - name: confeature --version resolves from a FRESH shell (user-PATH took effect)
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          # A fresh shell reads PATH from the registry (Machine + User) — where
+          # install.ps1 wrote the entry; THIS job's process still holds its OLD
+          # PATH. Spawn a child pwsh that reconstructs PATH the way a new shell
+          # would, then resolve `confeature` THROUGH that PATH (not by full path).
+          $out = pwsh -NoProfile -Command {
+            $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+              [Environment]::GetEnvironmentVariable('Path', 'User')
+            "RESOLVED:" + (Get-Command confeature -ErrorAction Stop).Source
+            "VERSION:" + (confeature --version)
+          } | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) {
+            throw "FAIL: confeature did not resolve from a fresh shell (user-PATH entry missing?)"
+          }
+          if ($out -notmatch ('VERSION:\s*' + [Regex]::Escape($env:VERSION))) {
+            throw "FAIL: 'confeature --version' did not report $env:VERSION from a fresh shell"
+          }
+          Write-Host "OK: confeature --version == $env:VERSION resolved from a fresh shell"
+
+      - name: Second run does NOT duplicate the user-PATH entry (#701 idempotency)
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          PINNED: ${{ steps.resolve.outputs.pinned }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\confeature"
+          $installArgs = @()
+          if ($env:PINNED -eq "true") { $installArgs = @("-Version", $env:VERSION) }
+          & ./apps/cli/install.ps1 @installArgs *>&1 | Out-String | Write-Host
+          $user = [Environment]::GetEnvironmentVariable("Path", "User")
+          $hits = @($user -split ';' | Where-Object { $_.TrimEnd('\') -eq $installDir.TrimEnd('\') })
+          Write-Host ("user-PATH occurrences of {0}: {1}" -f $installDir, $hits.Count)
+          if ($hits.Count -ne 1) {
+            throw "FAIL: install dir appears $($hits.Count)x in the user PATH (expected exactly 1 — PR #701 idempotency regressed)"
+          }
+          Write-Host "OK: second install did not duplicate the user-PATH entry (#701 holds)"
+
+      - name: The SERVED script, as users run it, under Windows PowerShell 5.1
+        if: steps.resolve.outputs.pinned != 'true'
+        shell: powershell
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $log = & { irm https://cli.confeature.io/install.ps1 | iex } *>&1 | Out-String
+          Write-Host $log
+          if ($log -notmatch 'checksum verified') { throw "FAIL: irm | iex under Windows PowerShell 5.1 did not verify the checksum" }
+          if ($log -notmatch [Regex]::Escape("($env:VERSION)")) { throw "FAIL: the served script did not install $env:VERSION" }
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          PINNED: ${{ steps.resolve.outputs.pinned }}
+        run: |
+          $lines = @(
+            "### CLI Windows install verify — confeature $env:VERSION",
+            "",
+            "install.ps1 exercised end-to-end on ``windows-latest`` against the real public",
+            "host https://cli.confeature.io (pinned: $env:PINNED).",
+            "",
+            "Checks: checksum verified · binary installed · ``confeature --version`` resolves",
+            "from a fresh shell via the user-PATH entry · a second run does not duplicate it (#701)."
+          )
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

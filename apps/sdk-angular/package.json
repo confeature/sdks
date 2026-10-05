@@ -1,0 +1,60 @@
+{
+  "name": "@confeature/sdk-angular",
+  "version": "0.1.0",
+  "description": "Confeature Angular SDK — ConfeatureService + provideConfeature + ConfeatureModule + *cfFlag directive + cfFlag pipe on top of @confeature/sdk-browser-js. ConfigCat publishes no official Angular SDK; drop-in compatible with the configcat-js runtime surface.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-angular"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "ng-packagr -p ng-package.json",
+    "test": "vp test",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@analogjs/vite-plugin-angular": "^2.5.1",
+    "@analogjs/vitest-angular": "^2.5.1",
+    "@angular-devkit/build-angular": "^18.2.21",
+    "@angular-eslint/eslint-plugin": "^18.4.3",
+    "@angular/build": "^18.2.21",
+    "@angular/common": "^18.2.13",
+    "@angular/compiler": "^18.2.13",
+    "@angular/compiler-cli": "^18.2.13",
+    "@angular/core": "^18.2.13",
+    "@angular/platform-browser": "^18.2.13",
+    "@angular/platform-browser-dynamic": "^18.2.13",
+    "@confeature/sdk-browser-js": "workspace:*",
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@vitest/coverage-v8": "^4.1.5",
+    "configcat-js": "^9.4.0",
+    "jsdom": "^25.0.1",
+    "ng-packagr": "^18.2.1",
+    "rxjs": "^7.8.1",
+    "tslib": "^2.7.0",
+    "typescript": "~5.5.4",
+    "vitest": "catalog:",
+    "zone.js": "~0.14.10"
+  },
+  "peerDependencies": {
+    "@angular/common": ">=17.0.0 <19.0.0",
+    "@angular/core": ">=17.0.0 <19.0.0",
+    "@confeature/sdk-browser-js": "workspace:*",
+    "rxjs": ">=7.0.0"
+  },
+  "confeature": {
+    "owner": "sdk-angular"
+  }
+}

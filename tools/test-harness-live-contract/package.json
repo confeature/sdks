@@ -1,0 +1,51 @@
+{
+  "name": "@confeature/test-harness-live-contract",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Live integration test harness — boots an upstream Worker (the reference origin by default) via Wrangler and serves seeded wire-contract responses for cross-SDK testing.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "tools/test-harness-live-contract"
+  },
+  "bin": {
+    "live-contract-harness": "./dist/cli.js"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node ./dist/cli.js",
+    "test": "vp test",
+    "test:live": "CONFEATURE_LIVE=1 vp test run",
+    "check": "vp check",
+    "prepack": "node tools/emit-seed-schema.mjs",
+    "check:seed-schema": "node tools/check-seed-schema-drift.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "miniflare": "^4",
+    "typescript": "catalog:",
+    "vite-plus": "latest",
+    "vitest": "catalog:",
+    "wrangler": "^4",
+    "zod": "^3",
+    "zod-to-json-schema": "^3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "confeature": {
+    "owner": "developer"
+  }
+}

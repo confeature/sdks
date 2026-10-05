@@ -1,0 +1,64 @@
+{
+  "name": "@confeature/sdk-browser-js",
+  "version": "0.1.0",
+  "description": "Confeature Browser JS SDK — drop-in compatible with configcat-js.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-browser-js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/confeature.iife.js",
+  "jsdelivr": "./dist/confeature.iife.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "test:unit": "vp test --config vitest.unit.config.ts",
+    "test:contract": "vp test --config vitest.contract.config.ts",
+    "test:parity": "vp test --config vitest.parity.config.ts",
+    "check": "vp check",
+    "postbuild": "node ./scripts/check-bundle-size.mjs"
+  },
+  "dependencies": {
+    "@confeature/sdk-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@types/node": "^25.6.2",
+    "@typescript/native-preview": "catalog:",
+    "configcat-js": "^9.4.0",
+    "happy-dom": "^15.11.7",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "confeature": {
+    "owner": "sdk-browser-js"
+  }
+}

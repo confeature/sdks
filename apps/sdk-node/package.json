@@ -1,0 +1,56 @@
+{
+  "name": "@confeature/sdk-node",
+  "version": "0.1.0",
+  "description": "Confeature Node.js SDK — drop-in compatible with configcat-node.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-node"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@confeature/sdk-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@confeature/test-harness-live-contract": "workspace:*",
+    "@types/node": "^25.6.2",
+    "@typescript/native-preview": "catalog:",
+    "configcat-node": "^11",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "confeature": {
+    "owner": "sdk-node"
+  }
+}

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+
+vendor/
+.phpunit.cache/
+.phpunit.result.cache
+.php-cs-fixer.cache
+coverage/
+*.phar

@@ -1,0 +1,56 @@
+{
+  "name": "@confeature/sdk-bun",
+  "version": "0.1.0",
+  "description": "Confeature Bun SDK — drop-in compatible with configcat-js, idiomatic Bun runtime (Bun.file cache + globalThis.fetch).",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-bun"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "postbuild": "node ./scripts/check-bundle-size.mjs"
+  },
+  "dependencies": {
+    "@confeature/sdk-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@types/bun": "^1.1.0",
+    "@typescript/native-preview": "catalog:",
+    "configcat-js": "^9.4.0",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "bun": ">=1.0"
+  },
+  "confeature": {
+    "owner": "sdk-bun"
+  }
+}

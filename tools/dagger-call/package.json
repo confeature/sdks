@@ -1,0 +1,21 @@
+{
+  "name": "@confeature/dagger-call",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The one way a local `pnpm dagger:*` script hands the repository to Dagger (#789): a gitignore-filtered snapshot of the working tree, the ceiling, signal forwarding and cleanup. Also the tests that keep the Dagger engine pinned (#865): every CI dagger-for-github step derives its version from dagger/dagger.json and installs a CLI verified against dagger/cli-checksums.txt, and scripts/dagger-precheck.sh holds the local CLI to that exact version.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "tools/dagger-call"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "vitest": "catalog:",
+    "yaml": "^2.9.0"
+  }
+}

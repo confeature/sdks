@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MIT
+#
+# clang-tidy config for apps/sdk-cpp. Enables the modernize-* and
+# readability-* families plus the bugprone-* + cert-* essentials.
+# Disables a few noisy checks that fight idiomatic C++17.
+
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  -modernize-pass-by-value,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-math-missing-parentheses,
+  -readability-convert-member-functions-to-static,
+  -readability-implicit-bool-conversion,
+  -readability-named-parameter,
+  -performance-enum-size,
+  -performance-avoid-endl,
+  -cert-err58-cpp,
+  -cert-err33-c,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
+  -modernize-return-braced-init-list,
+  -modernize-use-scoped-lock,
+  -modernize-use-default-member-init,
+  -readability-use-concise-preprocessor-directives,
+  -readability-redundant-access-specifiers,
+  -readability-redundant-inline-specifier,
+  -readability-redundant-member-init,
+  -readability-redundant-parentheses,
+  -readability-redundant-typename,
+  -readability-uppercase-literal-suffix,
+  -bugprone-std-namespace-modification
+
+WarningsAsErrors: ""
+HeaderFilterRegex: "include/confeature/.*|src/.*"
+FormatStyle: file

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+name: confeature
+description: >-
+  Confeature SDK for Dart / Flutter — drop-in compatible with ConfigCat's
+  `configcat_client` package. Edge-cached feature flag evaluations from
+  Cloudflare Workers; pure-Dart with optional Flutter integration.
+version: 0.1.0
+homepage: https://confeature.io
+repository: https://github.com/confeature/sdks
+issue_tracker: https://github.com/confeature/sdks/issues
+
+# Pure-Dart package — works under both the Dart VM and Flutter. No
+# Flutter dependency in the package itself; Flutter consumers wire
+# `path_provider` into a custom `ConfigCache` if they want filesystem
+# persistence on mobile (see README §Flutter).
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  http: ^1.0.0
+  crypto: ^3.0.0
+  meta: ^1.0.0
+
+dev_dependencies:
+  test: ^1.24.0
+  coverage: ^1.7.0
+  lints: ^4.0.0
+  # Spec 072 US3 — official ConfigCat Dart SDK; test-scope only,
+  # used by `test/api_surface_conformance_test.dart` to compare
+  # the Confeature public surface against ConfigCat 4.x. NOT a
+  # runtime dependency — `dart pub publish` strips dev_dependencies.
+  configcat_client: ^4.1.0

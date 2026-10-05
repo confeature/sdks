@@ -1,0 +1,21 @@
+{
+  "name": "@confeature/repo-gates",
+  "version": "0.0.0",
+  "private": true,
+  "description": "This repository's own gates: every gate declared and wired, format and lint, no duplicate JSON keys, CODEOWNERS names teams only, and the tests of the manifest author rule.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "tools/repo-gates"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "vp test"
+  },
+  "devDependencies": {
+    "vitest": "catalog:",
+    "yaml": "^2.9.0"
+  }
+}

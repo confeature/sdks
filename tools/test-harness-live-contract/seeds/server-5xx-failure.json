@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#server-5xx-failure — payload exists but the proxy substitutes a 503.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+        "f": {},
+        "s": []
+      },
+      "etag": "\"unused-5xx\"",
+      "fault": "5xx"
+    }
+  ]
+}

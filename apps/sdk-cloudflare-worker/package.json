@@ -1,0 +1,53 @@
+{
+  "name": "@confeature/sdk-cloudflare-worker",
+  "version": "0.1.0",
+  "description": "Confeature Cloudflare Worker SDK — drop-in compatible with @configcat/cloudflare-worker-client, idiomatic Workers runtime (KV cache + globalThis.fetch).",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-cloudflare-worker"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "postbuild": "node ./scripts/check-bundle-size.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260501.0",
+    "@confeature/sdk-browser-js": "workspace:*",
+    "@typescript/native-preview": "catalog:",
+    "configcat-js": "^9.4.0",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@confeature/sdk-browser-js": "workspace:*"
+  },
+  "confeature": {
+    "owner": "sdk-cloudflare-worker"
+  }
+}

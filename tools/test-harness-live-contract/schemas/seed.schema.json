@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://confeature.io/schemas/test-harness-live-contract/seed.schema.json",
+  "title": "Live-contract harness seed",
+  "description": "Describes the KV state and faults the live-contract-harness serves. One seed file per wire-case scenario, OR an inline payload passed via POST /admin/reset. STRUCTURAL ONLY: the zod schema in src/seed-schema.ts is authoritative, and its cross-field rules (no body on status 204/205/304, a body requires a Content-Type, a null payload allows only a whole-response fault) are not expressed here — a seed this schema accepts can still be rejected at load time.",
+  "$ref": "#/$defs/Seed",
+  "$defs": {
+    "Seed": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "description": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sdkKey": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[^/]+|configcat-sdk-1\\/[^/]+\\/[^/]+)$"
+              },
+              "payload": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "p": {},
+                      "f": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "s": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "etag": {
+                "type": "string",
+                "pattern": "^(W\\/)?\"[^\"]*\"$"
+              },
+              "lastModified": {
+                "type": "string",
+                "pattern": "^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \\d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4} \\d{2}:\\d{2}:\\d{2} GMT$"
+              },
+              "fault": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "none"
+                  },
+                  {
+                    "type": "string",
+                    "enum": ["5xx", "404", "malformed-json", "wrong-shape"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "timeout"
+                      },
+                      "ms": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": ["kind", "ms"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "etag-mismatch"
+                      },
+                      "newEtag": {
+                        "type": "string",
+                        "pattern": "^(W\\/)?\"[^\"]*\"$"
+                      }
+                    },
+                    "required": ["kind", "newEtag"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "status"
+                      },
+                      "status": {
+                        "type": "integer",
+                        "minimum": 200,
+                        "maximum": 599
+                      },
+                      "headers": {
+                        "type": "object",
+                        "properties": {
+                          "Content-Type": {
+                            "type": "string",
+                            "enum": ["text/plain", "application/json"]
+                          },
+                          "ETag": {
+                            "type": "string",
+                            "pattern": "^([\\x21-\\x7E]([\\x20\\x09]*[\\x21-\\x7E])*)?$"
+                          },
+                          "Last-Modified": {
+                            "type": "string",
+                            "pattern": "^([\\x21-\\x7E]([\\x20\\x09]*[\\x21-\\x7E])*)?$"
+                          },
+                          "Retry-After": {
+                            "type": "string",
+                            "pattern": "^([\\x21-\\x7E]([\\x20\\x09]*[\\x21-\\x7E])*)?$"
+                          },
+                          "Cache-Control": {
+                            "type": "string",
+                            "pattern": "^([\\x21-\\x7E]([\\x20\\x09]*[\\x21-\\x7E])*)?$"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "body": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["kind", "status"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "string",
+                    "const": "close-mid-response"
+                  }
+                ]
+              }
+            },
+            "required": ["sdkKey", "payload"],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["schemaVersion", "keys"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,218 @@
+# SPDX-License-Identifier: MIT
+
+# Release-gate — the one place the full SDK test matrix runs in CI.
+#
+# Under Constitution Principle VII (local-first quality gating), heavy
+# per-SDK Dagger suites run LOCALLY via the pre-push hook; ci.yml does NOT
+# re-run them per PR (to bound billed CI minutes). That makes CI-side SDK
+# coverage a function of developer discipline. This workflow is the systemic
+# backstop: on every published GitHub release it re-runs every CONTAINERIZED
+# SDK suite (status=covered in dagger/sdk-manifest.json), catching cross-SDK
+# contract drift and per-SDK regressions at release time.
+#
+# Coverage is self-extending: epic #354 drains the 16 `pending` SDKs tier by
+# tier; each flip to `covered` (with a daggerFn) auto-enrolls that SDK here
+# with ZERO workflow edits. The setup job's coverage summary is the live
+# burn-down.
+#
+# Spec 053, the Dagger local runner (Phase 5, #204).
+# Contract: spec 053's release-gate-workflow contract.
+
+name: release-gate
+
+on:
+  release:
+    types: [published]
+
+# A red release-gate does NOT yank the published artifact — the operator
+# decides yank vs fix-forward (spec US4 #3). It annotates + opens a follow-up
+# issue. Do not cancel an in-flight gate run for the same release.
+concurrency:
+  group: release-gate-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Needed so a red matrix leg can auto-open a follow-up tracking issue.
+  issues: write
+
+jobs:
+  # Read the manifest, derive the covered-SDK matrix, and write the coverage
+  # burn-down summary. The matrix is emitted as JSON via $GITHUB_OUTPUT and
+  # consumed by the `test` job below.
+  setup:
+    name: setup (manifest → matrix + coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      covered: ${{ steps.counts.outputs.covered }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      # Build `{ "sdk": [ { name, daggerFn }, ... ] }` from the covered
+      # entries. The `test` job feeds this straight into fromJSON(...).
+      - name: Derive covered-SDK matrix from manifest
+        id: matrix
+        run: |
+          MATRIX=$(jq -c '{ sdk: [ .sdks[] | select(.status == "covered") | { name: .name, daggerFn: .daggerFn } ] }' dagger/sdk-manifest.json)
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Covered-SDK matrix: ${MATRIX}"
+
+      - name: Compute coverage counts
+        id: counts
+        run: |
+          TOTAL=$(jq '.sdks | length' dagger/sdk-manifest.json)
+          COVERED=$(jq '[.sdks[] | select(.status == "covered")] | length' dagger/sdk-manifest.json)
+          PENDING=$(jq '[.sdks[] | select(.status == "pending")] | length' dagger/sdk-manifest.json)
+          EXEMPT=$(jq '[.sdks[] | select(.status == "exempt")] | length' dagger/sdk-manifest.json)
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "covered=${COVERED}" >> "$GITHUB_OUTPUT"
+          echo "pending=${PENDING}" >> "$GITHUB_OUTPUT"
+          echo "exempt=${EXEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Write coverage summary
+        run: |
+          TOTAL='${{ steps.counts.outputs.total }}'
+          COVERED='${{ steps.counts.outputs.covered }}'
+          PENDING='${{ steps.counts.outputs.pending }}'
+          EXEMPT='${{ steps.counts.outputs.exempt }}'
+          {
+            echo "### Release-gate SDK coverage — ${{ github.event.release.tag_name }}"
+            echo ""
+            echo "**${COVERED}/${TOTAL} covered · ${PENDING} pending · ${EXEMPT} exempt**"
+            echo ""
+            echo "Covered SDKs run their containerized Dagger suite below as the"
+            echo "release backstop. Pending SDKs are not yet containerized and BLOCK"
+            echo "their own \`sdk-publish\` until epic [#354](https://github.com/${{ github.repository }}/issues/354) drains them. Exempt SDKs publish without a gate."
+            echo ""
+            echo "Burn-down tracker: SDK test-containerization epic [#354](https://github.com/${{ github.repository }}/issues/354)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # One matrix leg per covered SDK, each invoking its daggerFn against the
+  # workspace root via the pinned dagger-for-github action. Cold cache on
+  # release runs is accepted (spec anti-scope: no CI-side cache warm-up).
+  test:
+    name: test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      # The job runs repository code inside Dagger and never pushes, so the
+      # checkout keeps no GITHUB_TOKEN in .git/config (#865).
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The engine version has one home, dagger/dagger.json `engineVersion`
+      # (#865). This step reads it, so no workflow writes the number out.
+      - name: Read the Dagger engine version (dagger/dagger.json)
+        id: pin
+        run: |
+          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
+          if [ -z "${version}" ]; then
+            echo "::error::dagger/dagger.json has no engineVersion"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
+      # this repository, never from a checksum served by the download host. With
+      # this CLI first on PATH at the pinned version, the action below finds it
+      # and skips its own install.sh.
+      - name: Install the checksum-verified Dagger CLI
+        env:
+          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
+          dir="${RUNNER_TEMP}/dagger-cli"
+          mkdir -p "${dir}/bin"
+          cd "${dir}"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
+            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
+          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
+          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
+            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
+            exit 1
+          fi
+          sha256sum -c --strict expected.sha256
+          tar -xzf "${tarball}" -C bin dagger
+          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
+          if [ "${got}" != "${DAGGER_VERSION}" ]; then
+            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
+            exit 1
+          fi
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+
+      # The action is pinned by commit SHA (v8.4.1, the contract that supports
+      # verb/module/args/enable-github-summary) and the engine by `version:`,
+      # taken from the pin step. The action tag and the engine version are
+      # decoupled by design: never @v8 / @latest, never the action's `latest`
+      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
+      - name: Run ${{ matrix.sdk.daggerFn }} (Dagger)
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: ${{ matrix.sdk.daggerFn }} --source=.
+          enable-github-summary: true
+
+      # On red: annotate the run and open a follow-up tracking issue. The
+      # published artifact is deliberately LEFT IN PLACE (spec US4 #3) — the
+      # operator decides yank vs fix-forward.
+      - name: Annotate + open follow-up issue on failure
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const sdk = ${{ toJSON(matrix.sdk.name) }};
+            const fn = ${{ toJSON(matrix.sdk.daggerFn) }};
+            const release = ${{ toJSON(github.event.release.tag_name) }};
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            core.error(`release-gate: containerized test for sdk-${sdk} (${fn}) FAILED on release ${release}. Artifact left in place — operator decides yank vs fix-forward. See ${runUrl}`);
+            const title = `release-gate red: sdk-${sdk} failed on ${release}`;
+            const body = [
+              `The release-gate containerized test for \`sdk-${sdk}\` (\`${fn}\`) failed`,
+              `on release **${release}**.`,
+              ``,
+              `- Workflow run: ${runUrl}`,
+              `- The published artifact was **NOT yanked** automatically (spec US4 #3).`,
+              `  Decide yank vs fix-forward per the release runbook.`,
+              ``,
+              `Auto-opened by \`.github/workflows/release-gate.yml\`.`,
+            ].join("\n");
+            // Ensure labels exist before applying them — a missing label makes
+            // issues.create 422, which would silence the alert at the exact
+            // moment a release is broken. Create-if-absent, then never let a
+            // labelling problem block the issue itself.
+            const wanted = [
+              { name: "release-gate", color: "b60205",
+                description: "Opened by the release-gate workflow on a red SDK suite" },
+              { name: "bug", color: "d73a4a", description: "Something isn't working" },
+            ];
+            for (const l of wanted) {
+              try {
+                await github.rest.issues.getLabel({ ...context.repo, name: l.name });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+                await github.rest.issues.createLabel({ ...context.repo, ...l });
+              }
+            }
+            try {
+              await github.rest.issues.create({
+                ...context.repo, title, body,
+                labels: wanted.map((l) => l.name),
+              });
+            } catch (e) {
+              core.warning(`Could not apply labels (${e.message}); opening issue unlabelled.`);
+              await github.rest.issues.create({ ...context.repo, title, body });
+            }

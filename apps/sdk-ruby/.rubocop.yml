@@ -1,0 +1,186 @@
+# SPDX-License-Identifier: MIT
+
+plugins:
+  - rubocop-rspec
+
+AllCops:
+  TargetRubyVersion: 3.0
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "vendor/**/*"
+    - "pkg/**/*"
+    - "coverage/**/*"
+    - "tmp/**/*"
+    - "Gemfile.lock"
+
+# We prefer double-quoted strings for consistency with the rest of the
+# monorepo (TS / Python use double quotes; staying in lock-step keeps
+# diffs greppable across SDKs).
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+# Spec 043 spans large 7-branch override-eval ports and the parity test
+# loads a 58-tuple corpus — both legitimately exceed default thresholds.
+Metrics/MethodLength:
+  Max: 50
+
+Metrics/AbcSize:
+  Max: 40
+
+Metrics/CyclomaticComplexity:
+  Max: 15
+
+Metrics/PerceivedComplexity:
+  Max: 15
+
+Metrics/ClassLength:
+  Max: 200
+
+Metrics/ModuleLength:
+  Max: 200
+  # The spec-120 evaluator + comparator modules are faithful field-for-field
+  # ports of the TS reference engine (`packages/sdk-shared/src/`); the module
+  # length is the natural consequence of porting the 36-comparator dispatch.
+  # `spec/parity_upstream_spec.rb`'s `ParityUpstreamCorpus` is the conformance
+  # harness — the curated matrix→SDK-key table, the conversion / trimming driver
+  # tables, and the CSV/eval-log loaders ported from `upstream-corpus.ts`. They
+  # live at module scope (not in-block) precisely to satisfy the constant cops;
+  # the resulting module length is inherent to the corpus surface, mirroring the
+  # `Metrics/BlockLength` `spec/**/*` exemption already in this file.
+  Exclude:
+    - "lib/confeature/internal/comparators.rb"
+    - "lib/confeature/internal/evaluator.rb"
+    - "spec/parity_upstream_spec.rb"
+
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "Rakefile"
+    - "confeature.gemspec"
+
+Layout/LineLength:
+  Max: 120
+  AllowedPatterns:
+    - "^\\s*#"
+
+RSpec/MultipleExpectations:
+  Max: 5
+
+RSpec/NestedGroups:
+  Max: 4
+
+# We intentionally raise concrete classes (ArgumentError, TypeError) from
+# the public constructor — cop's default of `StandardError` is too lax
+# for a public SDK surface.
+Style/RaiseArgs:
+  EnforcedStyle: exploded
+
+# Public API mirrors the configcat gem (snake_case modules + classes)
+# and we deliberately use module-level methods for the polling-mode
+# factory. Allow it explicitly.
+Style/ModuleFunction:
+  Enabled: false
+
+# Documentation comments live in the README + docs site; do not force a
+# YARD header on every internal class.
+Style/Documentation:
+  Enabled: false
+
+# Inline guard clauses keep the 7-branch eval readable.
+Style/GuardClause:
+  Enabled: true
+
+# Public method name `get_overrides_sync` is part of the cross-SDK
+# contract (matches Go's GetOverridesSync, Python's get_overrides_sync,
+# TS's getOverridesSync, .NET's GetOverridesSync). Renaming would
+# break Constitution Principle II (drop-in parity).
+Naming/AccessorMethodName:
+  Enabled: false
+
+# `Confeature::Client.new` mirrors the upstream `configcat` gem's
+# `ConfigCatClient.new` keyword surface — the long parameter list is
+# the documented public API. Carving it up would break Principle II.
+Metrics/ParameterLists:
+  Enabled: false
+
+# `cb` is the idiomatic "callback" abbreviation across the SDK and
+# matches the Python / Go counterparts. Shortening to two chars is
+# intentional.
+Naming/MethodParameterName:
+  AllowedNames:
+    - "cb"
+    - "id"
+    - "io"
+    - "to"
+    - "fo"
+    - "by"
+    # `a` / `b` are the idiomatic operands of a comparison function — used by
+    # the spec-120 semver precedence comparator (`compare_identifiers(a, b)`).
+    # `v` is the lambda operand in the corpus harness' `set_or_none`.
+    - "a"
+    - "b"
+    - "v"
+    - "av"
+    - "bv"
+    - "sv"
+    - "dv"
+
+# The spec-120 evaluation engine ports ConfigCat's `RolloutEvaluator`
+# field-for-field. The comparator functions mirror upstream's `evaluate*`
+# names (cross-SDK Principle II contract) and return a three-valued outcome
+# (true / false / ValidationError), so the `?`-suffix predicate convention
+# does not apply — they are named operations, not Ruby predicates.
+Naming/PredicateMethod:
+  Exclude:
+    - "lib/confeature/internal/comparators.rb"
+    - "lib/confeature/internal/evaluator.rb"
+
+# Our spec/ layout is intentionally flat to match the Python SDK
+# (tests/test_*.py). Forcing the file path to mirror the class
+# namespace would mean nesting under spec/confeature/internal/, which
+# we explicitly do not want — the test discovery story for new SDKs
+# stays "one directory, alphabetical".
+RSpec/SpecFilePathFormat:
+  Enabled: false
+
+# spec/parity_corpus_spec.rb, spec/parity_corpus_typed_spec.rb,
+# spec/parity_upstream_spec.rb, spec/api_surface_conformance_spec.rb,
+# spec/cache_key_fixtures_spec.rb, and spec/wire/wire_cases_spec.rb are
+# cross-language gates that describe a behaviour rather than a single class.
+# Allow string descriptions for those.
+RSpec/DescribeClass:
+  Exclude:
+    - "spec/parity_corpus_spec.rb"
+    - "spec/parity_corpus_rules_spec.rb"
+    - "spec/parity_corpus_typed_spec.rb"
+    - "spec/parity_upstream_spec.rb"
+    - "spec/api_surface_conformance_spec.rb"
+    - "spec/cache_key_fixtures_spec.rb"
+    - "spec/wire/wire_cases_spec.rb"
+
+# The spec 072 conformance + typed-parity specs and the spec 112
+# wire-cases consumer lift named constants to file scope (curated
+# method lists, setting-type discriminators, corpus root paths) —
+# clearer than instance vars / let-blocks for the assertion message
+# context, and harmless because each spec file is loaded once.
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    - "spec/api_surface_conformance_spec.rb"
+    - "spec/parity_corpus_typed_spec.rb"
+    - "spec/wire/wire_cases_spec.rb"
+
+RSpec/LeakyConstantDeclaration:
+  Exclude:
+    - "spec/api_surface_conformance_spec.rb"
+    - "spec/parity_corpus_typed_spec.rb"
+    - "spec/wire/wire_cases_spec.rb"
+
+# The parity-corpus "matches every tuple" example walks 58 tuples
+# inline — the readability gain of staying in a single example with a
+# single failure message far exceeds the ~30-line cap.
+RSpec/ExampleLength:
+  Max: 60

@@ -1,0 +1,61 @@
+{
+  "name": "@confeature/sdk-react",
+  "version": "0.1.0",
+  "description": "Confeature React SDK — Provider + hooks layer on top of @confeature/sdk-browser-js. Drop-in compatible with configcat-react.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-react"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "postbuild": "node ./scripts/check-bundle-size.mjs"
+  },
+  "dependencies": {
+    "@confeature/sdk-browser-js": "workspace:*"
+  },
+  "devDependencies": {
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@typescript/native-preview": "catalog:",
+    "configcat-react": "^4.4.0",
+    "happy-dom": "^15.11.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "confeature": {
+    "owner": "sdk-react"
+  }
+}

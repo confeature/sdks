@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Kotlin/Native
+*.klib
+local.properties
+
+# macOS
+.DS_Store
+
+# Kover output
+coverage/

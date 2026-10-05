@@ -1,0 +1,11 @@
+# Rust build artefacts.
+/target/
+*.rlib
+
+# Cargo lockfile is intentionally NOT versioned for libraries; binaries
+# committing this crate vendor their own resolution.
+Cargo.lock
+
+# Coverage reports.
+lcov.info
+*.profraw

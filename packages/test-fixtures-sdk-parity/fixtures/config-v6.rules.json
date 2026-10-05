@@ -1,0 +1,1382 @@
+{
+  "p": {
+    "u": "https://cdn-global.configcat.com",
+    "r": 0,
+    "s": "YqM/XOUIrdUYmTgGMfYyQI6P2q+WrwipFKnw5vaKQss="
+  },
+  "f": {
+    "stringContainsDogDefaultCat": {
+      "i": "ce564c3a",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "d0cd8f06", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringIsInDogDefaultCat": {
+      "i": "83372510",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 0, "l": ["a@configcat.com", "b@configcat.com"] } }],
+          "s": { "i": "5b64d9b4", "v": { "s": "Dog" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 0, "l": ["admin"] } }],
+          "s": { "i": "5b64d9b4", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringEqualsCleartextDogDefaultCat": {
+      "i": "89785ab3",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 28, "s": "a@configcat.com" } }],
+          "s": { "i": "087e01dd", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringEqualsDogDefaultCat": {
+      "i": "adc0b01c",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 20,
+                "s": "116846847162bf57eace1f3177fa8ccb16a110f63751245a70a95bdf3ecdfe20"
+              }
+            }
+          ],
+          "s": { "i": "703c31ed", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringNotEqualsCleartextDogDefaultCat": {
+      "i": "09c9725f",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 29, "s": "b@configcat.com" } }],
+          "s": { "i": "3ace20fb", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringDoseNotEqualDogDefaultCat": {
+      "i": "1835a09a",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 21,
+                "s": "6b06fc6220fa515e5f79da52e0ba955d4e02162a444eac8c0b738153ff00aa82"
+              }
+            }
+          ],
+          "s": { "i": "8e423808", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringStartsWithAnyOfCleartextDogDefaultCat": {
+      "i": "e170a185",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 30, "l": ["u@", "a@", "b@"] } }],
+          "s": { "i": "9e55f5cf", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringStartsWithAnyOfDogDefaultCat": {
+      "i": "dd5b3211",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 22,
+                "l": [
+                  "2_b157a5e68fad5842b78c2a87814c3a7780c42366b7ab0d1e7099b2982f73f9c5",
+                  "2_fb9feca0899dd5fac33aa8a2ddbd87732fa72e1db2a641751c8688b72104cb66",
+                  "2_2c275bc89ac255cfa5faaafd2bf120dd72eda8a26541c8b8ccf5280f91026d9c"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "1d9b7603", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringEndsWithAnyOfCleartextDogDefaultCat": {
+      "i": "31976ec3",
+      "r": [
+        {
+          "c": [
+            {
+              "u": { "a": "Email", "c": 32, "l": ["@verizon.com", "@verizon.net", "@aol.com"] }
+            }
+          ],
+          "s": { "i": "33d35402", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringEndsWithAnyOfDogDefaultCat": {
+      "i": "de17fd2a",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 24,
+                "l": [
+                  "12_ab0be838e89717ac25b00ccb37533919f0f67cb16a0aa85259af4976409e7838",
+                  "12_5f39c028b5384e8fe1e44dcc6464056e9f630aa9ca8de395d9f4320ad6815505",
+                  "8_ab19b9d79f7f5ae0dc80868f1f8548d61e8dcff0dd686b379fdb310a8908dc84"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "7231ddf8", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringIsNotInCleartextDogDefaultCat": {
+      "i": "ab6c1ng0",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 1, "l": ["a@configcat.com", "b@configcat.com"] } }],
+          "s": { "i": "5b64d9b4", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringIsNotInHashedDogDefaultCat": {
+      "i": "ab6c1ng1",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 17,
+                "l": [
+                  "9beeeab594c567e2ac65f0c39b82ebd3db3993d2d36139768d271a642025e487",
+                  "37ca62093d67896fd091cf5a775292b3dd6d8ae11a5622a6eee61d7561bbb340"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "5b64d9b4", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "number": {
+      "i": "a1b2c3d4",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 11, "d": 5 } }],
+          "s": { "i": "11abcd11", "v": { "s": "<>5" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Default" }
+    },
+    "numberWithPercentage": {
+      "i": "b2c3d4e5",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 12, "d": 2.1 } }],
+          "s": { "i": "12abcd12", "v": { "s": "<2.1" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 13, "d": 2.1 } }],
+          "s": { "i": "13abcd13", "v": { "s": "<=2,1" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 10, "d": 3.5 } }],
+          "s": { "i": "10abcd10", "v": { "s": "=3.5" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 14, "d": 5 } }],
+          "s": { "i": "14abcd14", "v": { "s": ">5" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 15, "d": 5 } }],
+          "s": { "i": "15abcd15", "v": { "s": ">=5" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 11, "d": 4.2 } }],
+          "s": { "i": "11dcba11", "v": { "s": "<>4.2" } }
+        }
+      ],
+      "p": [
+        { "i": "20pct0000", "p": 20, "v": { "s": "20%" } },
+        { "i": "80pct0000", "p": 80, "v": { "s": "80%" } }
+      ],
+      "t": 1,
+      "v": { "s": "Default" }
+    },
+    "isOneOf": {
+      "i": "5e6f7a8b",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 4, "l": ["   ", "2.0.1", "2.0.2", "   "] } }],
+          "s": { "i": "4abcd401", "v": { "s": "InSet" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Default" }
+    },
+    "isNotOneOf": {
+      "i": "6f7a8b9c",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Custom1",
+                "c": 5,
+                "l": ["1.0.0", "1.0.1", "2.0.0   ", "2.0.1", "2.0.2", ""]
+              }
+            }
+          ],
+          "s": { "i": "5abcd501", "v": { "s": "NotInSet" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Default" }
+    },
+    "relations": {
+      "i": "7a8b9c0d",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 6, "s": "1.0.0" } }],
+          "s": { "i": "6abcd601", "v": { "s": "< 1.0.0" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 7, "s": "1.0.0" } }],
+          "s": { "i": "7abcd701", "v": { "s": "<=1.0.0" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 8, "s": "2.0.0" } }],
+          "s": { "i": "8abcd801", "v": { "s": ">2.0.0" } }
+        },
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 9, "s": "2.0.0" } }],
+          "s": { "i": "9abcd901", "v": { "s": ">=2.0.0" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Default" }
+    },
+    "precedenceTests": {
+      "i": "8b9c0d1e",
+      "r": [
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.1-2" } }],
+          "s": { "i": "pt0000001", "v": { "s": "< 1.9.1-2" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.1-10" } }],
+          "s": { "i": "pt0000002", "v": { "s": "< 1.9.1-10" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.1-10a" } }],
+          "s": { "i": "pt0000003", "v": { "s": "< 1.9.1-10a" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.99-rc.1" } }],
+          "s": { "i": "pt0000004", "v": { "s": "< 1.9.99-rc.1" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.99" } }],
+          "s": { "i": "pt0000005", "v": { "s": "< 1.9.99" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.9.100" } }],
+          "s": { "i": "pt0000006", "v": { "s": "< 1.9.100" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 6, "s": "1.10.0-alpha" } }],
+          "s": { "i": "pt0000007", "v": { "s": "< 1.10.0-alpha" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 7, "s": "1.10.0-alpha" } }],
+          "s": { "i": "pt0000008", "v": { "s": "<= 1.10.0-alpha" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 7, "s": "1.10.0" } }],
+          "s": { "i": "pt0000009", "v": { "s": "<= 1.10.0" } }
+        },
+        {
+          "c": [{ "u": { "a": "AppVersion", "c": 4, "l": ["2.0.0"] } }],
+          "s": { "i": "pt0000010", "v": { "s": "= 2.0.0" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "DEFAULT-FROM-CC-APP" }
+    },
+    "sensitiveIsOneOf": {
+      "i": "9aa1c0b1",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 16,
+                "l": ["8ecb3f89e93c5306ba721e85b394ce7d21fc4a25cc3708c792a96868b4ef92c0"]
+              }
+            }
+          ],
+          "s": { "i": "9aa1c0b2", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "sensitiveNotStartsWith": {
+      "i": "9bb2d1c2",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 23,
+                "l": [
+                  "2_1c4289d9389b942883f37c56f1f3aa5285d0575514023ebabad87371409bc296",
+                  "2_bd1f74accf6cbfc2c0bcede89973ef295b91ef9a0a7257990b4f83cb449c1770"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9bb2d1c3", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "sensitiveNotEndsWith": {
+      "i": "9cc3e2d3",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 25,
+                "l": ["14_aa7a29f2301fac8393f1811811a85c4ee14d79d5738eb4538e01a0261d5a63bb"]
+              }
+            }
+          ],
+          "s": { "i": "9cc3e2d4", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "isOneOfSensitive": {
+      "i": "9dd4f3e4",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 16,
+                "l": ["05c03049ef2700ccca5bafe182b7c2b14be86ed3f6af9e5bd88e7eb975f304ee"]
+              }
+            }
+          ],
+          "s": { "i": "9dd4f3e5", "v": { "s": "Macska" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Identifier",
+                "c": 16,
+                "l": [
+                  "5a60548fd34b27cc0210243da0504e70f88ab8f3087ccd71d057e377607a0150",
+                  "f3e8505afe0f70a3218b436fb40ef522fa3eac396a5f01ac45ca037fa06ebe74"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9dd4f3e6", "v": { "s": "Allat" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Country",
+                "c": 16,
+                "l": [
+                  "d157d36445583c7ae98987707e23e46db61d7c787bf3e685e59f0133fb78c28c",
+                  "c2578893fdecf37c44af3bcaa151335bce3260e721b968ead700e52355a650e5",
+                  "f5cb51fb93bcfbd71656b36a2ae2c034af2a3d6a875087faa30d60523492a4a1"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9dd4f3e7", "v": { "s": "Britt" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "ToAll" }
+    },
+    "isNotOneOfSensitive": {
+      "i": "9ee5a4f5",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Identifier",
+                "c": 17,
+                "l": [
+                  "b6ea4d3a0e9c9e9d248d371955066ba70a1b905b539c870c3dcfc435e9381a52",
+                  "f06c959f1205543503c0eede7591c2ef1bd7a013bcd7cda6e7794f99e0d8eb3e"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9ee5a4f6", "v": { "s": "Kigyo" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 17,
+                "l": [
+                  "ef08b0a62428d7c5f086c650d6b3178cd35758dbd76feb3d41cc52fcac568150",
+                  "1ef91f5f0305074923f6bc1f5303208357cfc8ea0a5bba2df0970c74e7384240"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9ee5a4f7", "v": { "s": "Angolna" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Country",
+                "c": 17,
+                "l": [
+                  "5000e56b596f4ab827a8cd13b7235a628ddfb9a255e98caa610992be08b4d41b",
+                  "fa40c60ea0448b3dfa44c13b7a479d6e92ed58af590389724838ed1289da032c",
+                  "cd8545f9324c69a1e7de8038f956d45cd87a8c5025231b7a4b68bdd7d1bae2d5"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "9ee5a4f8", "v": { "s": "Ireland" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "ToAll" }
+    },
+    "stringArrayContainsAnyOfCleartextDogDefaultCat": {
+      "i": "0d45ab4b",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 34, "l": ["read", "write", "execute"] } }],
+          "s": { "i": "9ddb8a37", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringArrayNotContainsAnyOfCleartextDogDefaultCat": {
+      "i": "6df210da",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 35, "l": ["read", "write", "execute"] } }],
+          "s": { "i": "15c865df", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringArrayContainsAnyOfDogDefaultCat": {
+      "i": "203317f5",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Custom1",
+                "c": 26,
+                "l": [
+                  "56173eb0cf36c56bab1051b7d66eebb719ef3679b3cc0d19835c907315557571",
+                  "bbfdfb2535f1a330fa14a192753ed49eca4a517ffb2e4ff99b949a0d31ecc9b0",
+                  "33c9020efdef3efc1f1730a9c0fdd658752bc34471b4db811b6383f46d225cb0"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "aa03b1ff", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "stringArrayNotContainsAnyOfDogDefaultCat": {
+      "i": "60b961b0",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Custom1",
+                "c": 27,
+                "l": [
+                  "448737e8da59dfa031d2ac90f65bb82abb03359cf77f4f1cbe9fd51192a89db9",
+                  "ec312dee2409f8b11f61c980c49c6ef364bb89e072cb6e56190393394b2361ea",
+                  "18323917a89b04d1a4d9bec7533c0f812d4234a57eb04609a989142ed69eb68e"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "259816ba", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "arrayContainsCaseCheckDogDefaultCat": {
+      "i": "ce055a38",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Custom1",
+                "c": 26,
+                "l": ["0887c88123e1dff7d6c1b93c100a6d9fe5775cfa25afa57dc7f4d3e09e3bf68a"]
+              }
+            }
+          ],
+          "s": { "i": "5d80eff1", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "arrayDoesNotContainCaseCheckDogDefaultCat": {
+      "i": "df4915fd",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Custom1",
+                "c": 27,
+                "l": ["aff00275d6727645d92fb9f419155ee1adfcf26a05d3234f6fa0ab3daddd486d"]
+              }
+            }
+          ],
+          "s": { "i": "d4ad5730", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeTextEqualsCleartextDogDefaultCat": {
+      "i": "57c07a48",
+      "r": [
+        {
+          "c": [{ "u": { "a": "🆃🅴🆇🆃", "c": 28, "s": "ʄǟռƈʏ ȶɛӼȶ" } }],
+          "s": { "i": "e0d2c774", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeTextEqualsHashedDogDefaultCat": {
+      "i": "ff528c9e",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "🆃🅴🆇🆃",
+                "c": 20,
+                "s": "077c2cfd43c9ce6d7f30366dd09da2b35a91fe1f5ef94be8b7f10b5ca7603aaa"
+              }
+            }
+          ],
+          "s": { "i": "663932d6", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeIsOneOfCleartextDogDefaultCat": {
+      "i": "e8938376",
+      "r": [
+        {
+          "c": [{ "u": { "a": "🆃🅴🆇🆃", "c": 0, "l": ["ÁRVÍZTŰRŐ tükörfúrógép", "u𝖓𝖎𝖈𝖔𝖉e"] } }],
+          "s": { "i": "ac625a8e", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeIsOneOfHashedDogDefaultCat": {
+      "i": "bcc3724f",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "🆃🅴🆇🆃",
+                "c": 16,
+                "l": [
+                  "d73d67c24a2205a925f653ab84bc37305338e05622134e32488dd5d550ed8b5d",
+                  "9165bbe7d9c183459e89a6f2ab3b08db76ae58bfac5580049c266c9620d97faa"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "3a918a4c", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeArrayContainsCleartextDogDefaultCat": {
+      "i": "e993932b",
+      "r": [
+        {
+          "c": [{ "u": { "a": "🆃🅴🆇🆃", "c": 34, "l": ["ÁRVÍZTŰRŐ tükörfúrógép", "u𝖓𝖎𝖈𝖔𝖉e"] } }],
+          "s": { "i": "ec2a0f35", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "unicodeArrayContainsHashedDogDefaultCat": {
+      "i": "a87b5bbe",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "🆃🅴🆇🆃",
+                "c": 26,
+                "l": [
+                  "f2b4057e3ab3cbfd8b0d52130ef98da2302274fc8128f2898076e2daddffe5fc",
+                  "fbd577d5b85b033d1b30bfa4e1480a9ffd57f1572b13acf229dc149992ef4cda"
+                ]
+              }
+            }
+          ],
+          "s": { "i": "528f80a6", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "emailAnd": {
+      "i": "bdabd589",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 22,
+                "l": ["4_794fe38dbd0acc0a9a72f93c457fed8c9bb10a7bdb389e909c14a2bdced8b91d"]
+              }
+            },
+            { "u": { "a": "Email", "c": 2, "l": ["@"] } },
+            {
+              "u": {
+                "a": "Email",
+                "c": 24,
+                "l": ["20_fa7ef568f6eb2b9590f30a975ae34d6d31695dc048d40f67eabc51a4be84cf98"]
+              }
+            }
+          ],
+          "s": { "i": "a1393561", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "emailOr": {
+      "i": "ab0b46ad",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 22,
+                "l": ["5_6995549f54b62347cd55b41dd82e20ee4e32bb1d208c2dbab6f1299ee58a9391"]
+              }
+            }
+          ],
+          "s": { "i": "01383bbf", "v": { "s": "Jane" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 22,
+                "l": ["5_0c7907c98adf1bb8eb712e27ee4f16607122cac0713d50fba796d11dd1447b21"]
+              }
+            }
+          ],
+          "s": { "i": "a069dc24", "v": { "s": "John" } }
+        },
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 22,
+                "l": ["5_717115fe9754ee59cdf3f75932a8ff910d0cdc24f1833ef108613bf20e134a16"]
+              }
+            }
+          ],
+          "s": { "i": "d7b02cc0", "v": { "s": "Mark" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "datetimeBeforeDogDefaultCat": {
+      "i": "d1a7be01",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Date", "c": 18, "d": 1693497600 } }],
+          "s": { "i": "d1a7be02", "v": { "s": "12" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "default" }
+    },
+    "datetimeAfterDogDefaultCat": {
+      "i": "d1a7af01",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Date", "c": 19, "d": 1693497600 } }],
+          "s": { "i": "d1a7af02", "v": { "s": "12" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "default" }
+    },
+    "semverGreaterAttrTrimDogDefaultCat": {
+      "i": "c0144431",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 8, "s": "0.1.1" } }],
+          "s": { "i": "c0144432", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "semverGreaterValueTrimDogDefaultCat": {
+      "i": "c0144441",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 8, "s": " 0.1.1 " } }],
+          "s": { "i": "c0144442", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "segDeveloperIsInDogDefaultCat": {
+      "i": "5e9a0001",
+      "r": [
+        {
+          "c": [{ "s": { "s": 0, "c": 0 } }],
+          "s": { "i": "5e9a0002", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "segBetaCleartextIsInDogDefaultCat": {
+      "i": "5e9a0011",
+      "r": [
+        {
+          "c": [{ "s": { "s": 1, "c": 0 } }],
+          "s": { "i": "5e9a0012", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "segDeveloperIsNotInDogDefaultCat": {
+      "i": "5e9a0021",
+      "r": [
+        {
+          "c": [{ "s": { "s": 0, "c": 1 } }],
+          "s": { "i": "5e9a0022", "v": { "s": "Dog" } }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "string75Cat0Dog25Falcon0Horse": {
+      "i": "aa65b5ce",
+      "p": [
+        { "i": "93f5a1c0", "p": 75, "v": { "s": "Cat" } },
+        { "i": "b8f49554", "p": 0, "v": { "s": "Dog" } },
+        { "i": "7beaf504", "p": 25, "v": { "s": "Falcon" } },
+        { "i": "30ee31af", "p": 0, "v": { "s": "Horse" } }
+      ],
+      "t": 1,
+      "v": { "s": "Chicken" }
+    },
+    "integer25One25Two25Three25FourAdvancedRules": {
+      "i": "ce3c4f5a",
+      "p": [
+        { "i": "11634414", "p": 25, "v": { "i": 1 } },
+        { "i": "5530655d", "p": 25, "v": { "i": 2 } },
+        { "i": "2ad19a52", "p": 25, "v": { "i": 3 } },
+        { "i": "41b30851", "p": 25, "v": { "i": 4 } }
+      ],
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "58136ba2", "v": { "i": 5 } }
+        }
+      ],
+      "t": 2,
+      "v": { "i": -1 }
+    },
+    "stringContainsString75Cat0Dog25Falcon0HorseDefaultCat": {
+      "a": "Country",
+      "i": "05a1d8f3",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "p": [
+            { "i": "05a1d8f3", "p": 75, "v": { "s": "Cat" } },
+            { "i": "52a42c84", "p": 0, "v": { "s": "Dog" } },
+            { "i": "06c2db91", "p": 25, "v": { "s": "Falcon" } },
+            { "i": "fe226091", "p": 0, "v": { "s": "Horse" } }
+          ]
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "string75Cat0Dog25Falcon0HorseCustomAttr": {
+      "a": "Country",
+      "i": "13ad5bbc",
+      "p": [
+        { "i": "8285ed60", "p": 75, "v": { "s": "Cat" } },
+        { "i": "597e1dd1", "p": 0, "v": { "s": "Dog" } },
+        { "i": "8896564a", "p": 25, "v": { "s": "Falcon" } },
+        { "i": "d1944e2c", "p": 0, "v": { "s": "Horse" } }
+      ],
+      "t": 1,
+      "v": { "s": "Chicken" }
+    },
+    "mainStringFlag": {
+      "i": "24c96275",
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Email",
+                "c": 28,
+                "s": "kate@configcat.com"
+              }
+            }
+          ],
+          "s": {
+            "i": "51b57fb0",
+            "v": { "s": "private" }
+          }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "public" }
+    },
+    "stringDependsOnString": {
+      "i": "d36000e1",
+      "r": [
+        {
+          "c": [
+            {
+              "p": {
+                "c": 0,
+                "f": "mainStringFlag",
+                "v": { "s": "private" }
+              }
+            }
+          ],
+          "s": {
+            "i": "426b6d4d",
+            "v": { "s": "Dog" }
+          }
+        }
+      ],
+      "t": 1,
+      "v": { "s": "Cat" }
+    },
+    "key2": {
+      "i": "key2id00",
+      "t": 1,
+      "v": { "s": "key2-value" },
+      "r": [
+        {
+          "c": [
+            {
+              "p": {
+                "f": "key3",
+                "c": 0,
+                "v": { "s": "key3-prereq" }
+              }
+            }
+          ],
+          "s": { "i": "key2srv0", "v": { "s": "key2-prereq" } }
+        }
+      ]
+    },
+    "key3": {
+      "i": "key3id00",
+      "t": 1,
+      "v": { "s": "key3-value" },
+      "r": [
+        {
+          "c": [
+            {
+              "p": {
+                "f": "key2",
+                "c": 0,
+                "v": { "s": "key2-prereq" }
+              }
+            }
+          ],
+          "s": { "i": "key3srv0", "v": { "s": "key3-prereq" } }
+        }
+      ]
+    },
+    "booleanKey1": {
+      "i": "boolkey10",
+      "t": 0,
+      "v": { "b": false },
+      "r": [
+        {
+          "c": [
+            {
+              "u": {
+                "a": "Identifier",
+                "c": 2,
+                "l": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+              }
+            },
+            {
+              "u": {
+                "a": "Identifier",
+                "c": 2,
+                "l": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+              }
+            },
+            {
+              "u": {
+                "a": "Identifier",
+                "c": 2,
+                "l": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+              }
+            }
+          ],
+          "s": { "i": "boolkey1s", "v": { "b": true } }
+        }
+      ]
+    },
+    "boolean": {
+      "i": "a0e56eda",
+      "t": 0,
+      "v": { "b": false },
+      "p": [
+        { "i": "67787ae4", "p": 50, "v": { "b": true } },
+        { "i": "a0e56eda", "p": 50, "v": { "b": false } }
+      ],
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "67787ae4", "v": { "b": true } }
+        }
+      ]
+    },
+    "decimal": {
+      "i": "63612d39",
+      "t": 3,
+      "v": { "d": 0 },
+      "p": [
+        { "i": "d0dbc27f", "p": 50, "v": { "d": 1 } },
+        { "i": "8155ad7b", "p": 50, "v": { "d": 2 } }
+      ],
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "8f9559cf", "v": { "d": -2147483647.2147484 } }
+        },
+        {
+          "c": [{ "u": { "a": "Email", "c": 0, "l": ["a@test.com"] } }],
+          "s": { "i": "d66c5781", "v": { "d": 0.12345678912345678 } }
+        },
+        {
+          "c": [{ "u": { "a": "Email", "c": 0, "l": ["b@test.com"] } }],
+          "s": { "i": "d66c5781", "v": { "d": 0.12345678912 } }
+        }
+      ]
+    },
+    "text": {
+      "i": "3f05be89",
+      "t": 1,
+      "v": { "s": "c" },
+      "p": [
+        { "i": "30ba32b9", "p": 50, "v": { "s": "a" } },
+        { "i": "cf19e913", "p": 50, "v": { "s": "b" } }
+      ],
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "9bdc6a1f", "v": { "s": "true" } }
+        },
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@test.com"] } }],
+          "s": { "i": "65310deb", "v": { "s": "false" } }
+        }
+      ]
+    },
+    "whole": {
+      "i": "cf2e9162",
+      "t": 2,
+      "v": { "i": 999999 },
+      "p": [
+        { "i": "ec14f6a9", "p": 50, "v": { "i": 0 } },
+        { "i": "61a5a033", "p": 50, "v": { "i": -1 } }
+      ],
+      "r": [
+        {
+          "c": [{ "u": { "a": "Email", "c": 2, "l": ["@configcat.com"] } }],
+          "s": { "i": "ab30533b", "v": { "i": 1 } }
+        }
+      ]
+    },
+    "numberToStringConversion": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "0.12345" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionNaN": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "NaN" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionPositiveInf": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "Infinity" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionNegativeInf": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "-Infinity" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "dateToStringConversionNaN": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "NaN" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "dateToStringConversionPositiveInf": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "Infinity" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "dateToStringConversionNegativeInf": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "-Infinity" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionInt": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "125" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionPositiveExp": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "-1.23456789e+96" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "numberToStringConversionNegativeExp": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "-1.23456789e-96" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "dateToStringConversion": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "1680307199.999" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "stringArrayToStringConversion": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "[\"read\",\"Write\",\" eXecute \"]" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "stringArrayToStringConversionEmpty": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "[]" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "stringArrayToStringConversionSpecialChars": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "[\"+<>%\\\"'\\\\/\\t\\r\\n\"]" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    },
+    "stringArrayToStringConversionUnicode": {
+      "t": 1,
+      "a": "Custom1",
+      "r": [
+        {
+          "c": [{ "u": { "a": "Custom1", "c": 28, "s": "[\"äöüÄÖÜçéèñışğâ¢™✓😀\"]" } }],
+          "p": [
+            { "p": 20, "v": { "s": "1" } },
+            { "p": 20, "v": { "s": "2" } },
+            { "p": 20, "v": { "s": "3" } },
+            { "p": 20, "v": { "s": "4" } },
+            { "p": 20, "v": { "s": "5" } }
+          ]
+        }
+      ],
+      "v": { "s": "0" }
+    }
+  },
+  "s": [
+    {
+      "n": "Developers",
+      "r": [
+        {
+          "a": "Email",
+          "c": 16,
+          "l": [
+            "726569ed0e42ccaf72edb4b70da9cf77aff71d10d4c813eefe1d7690ba56f317",
+            "06317928dea81c85d770b1014cb33398bf7307a7fc5d043913971be8191a24a1"
+          ]
+        }
+      ]
+    },
+    {
+      "n": "Beta Users (cleartext)",
+      "r": [
+        {
+          "a": "Email",
+          "c": 0,
+          "l": ["jane@example.com", "john@example.com"]
+        }
+      ]
+    }
+  ]
+}

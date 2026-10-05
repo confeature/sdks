@@ -1,0 +1,43 @@
+<Project>
+
+  <!--
+    Shared MSBuild properties for every project under apps/sdk-dotnet/.
+    Spec 039's research (§R15) records the rationale
+    on the analyzer-severity profile and the StyleCop deferral.
+  -->
+
+  <PropertyGroup Label="Language + analyzers">
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-Recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!--
+      CA1510 (ArgumentNullException.ThrowIfNull) is suppressed because
+      the helper is not available on netstandard2.0; multi-TFM code must
+      use the explicit throw form so it compiles on every target.
+      CA1716 (interface member name conflicts with VB reserved word
+      `Error`) is suppressed because ConfigCat's parity surface uses the
+      same name (constitution Principle II).
+      CA1845 (use Span-based concat) is suppressed because the AsSpan()
+      / string.Concat(span, span) overloads are net5+/net8+ only;
+      multi-TFM code falls back to plain `+` concatenation which is
+      already non-hot-path in this SDK (log output, init, dispose).
+    -->
+    <NoWarn>$(NoWarn);CA1510;CA1716;CA1845</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Determinism + reproducibility">
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <PropertyGroup Label="License + branding">
+    <Company>MakerLabs</Company>
+    <Product>Confeature</Product>
+    <Copyright>Copyright (c) MakerLabs. Licensed under MIT.</Copyright>
+  </PropertyGroup>
+
+</Project>

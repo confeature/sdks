@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://confeature.io/schemas/wire-cases.schema.json",
+  "title": "Confeature SDK wire-protocol fixture",
+  "description": "Shared cross-SDK HTTP wire-protocol test cases (epic #146 sub-task B / issue #148 / spec 112). Each case describes one HTTP round-trip a SDK MUST conform to. The 58-tuple parity corpus tests evaluation semantics; this suite tests the wire layer (304/ETag/error classes/malformed body). Consumers live at apps/sdk-*/tests/wire/ and ingest this file at runtime — do not duplicate cases per language.",
+  "type": "object",
+  "required": ["schemaVersion", "description", "errorClasses", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "minLength": 1 },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.3",
+      "description": "Forced-touch gate for fixture format changes. Bump alongside every consumer. 1.1 (#336) adds optional given.baseUrl + expected.requestUrlPrefix for the custom-baseUrl case. 1.2 (#490) adds optional server.behavior (respond|timeout|close-mid-response) for transport-failure cases. 1.3 (#803) adds optional given.sdkKey + expected.requestPath — the exact parsed request path for a given key — and the rule that a consumer FAILS on an expected field it does not read."
+    },
+    "description": { "type": "string", "minLength": 1 },
+    "errorClasses": {
+      "type": "object",
+      "description": "Normalised error-class vocabulary that every SDK consumer maps its native error enum onto.",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "required": ["fetchFailed", "timeout", "parseFailed", "invalidSdkKey"],
+      "properties": {
+        "fetchFailed": { "type": "string", "minLength": 1 },
+        "timeout": { "type": "string", "minLength": 1 },
+        "parseFailed": { "type": "string", "minLength": 1 },
+        "invalidSdkKey": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 16,
+      "items": { "$ref": "#/$defs/WireCase" }
+    }
+  },
+  "$defs": {
+    "Outcome": {
+      "type": "string",
+      "enum": ["fetched", "notModified", "failed"]
+    },
+    "ErrorClass": {
+      "type": "string",
+      "enum": ["fetchFailed", "timeout", "parseFailed", "invalidSdkKey"]
+    },
+    "WireCase": {
+      "type": "object",
+      "required": ["id", "description", "given", "server", "expected"],
+      "additionalProperties": false,
+      "if": { "properties": { "expected": { "required": ["requestPath"] } } },
+      "then": { "properties": { "given": { "required": ["sdkKey"] } } },
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "kebab-case. Stable across releases."
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "given": {
+          "type": "object",
+          "required": ["previousEtag"],
+          "additionalProperties": false,
+          "properties": {
+            "previousEtag": { "type": ["string", "null"] },
+            "baseUrl": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional non-default base URL the SDK is configured with for this case (custom-baseUrl case, #336). When absent the consumer uses its default test base URL. Pair with expected.requestUrlPrefix to assert the outgoing request honoured it."
+            },
+            "sdkKey": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional SDK key the SDK MUST be configured with for this case (1.3, #803). A `valid` key from sdk-key-shapes.json (enforced by scripts/validate-wire-cases.ts) — the one key list, never a per-SDK literal — except the one case the validator names (request-path-malformed-key), whose inline malformed key pins FR-001's one-segment url.PathEscape. When absent the consumer uses its own default test key. A consumer that ignores it while the case is present is a defect: the TS reader fails when the key it is handed differs."
+            }
+          }
+        },
+        "server": {
+          "type": "object",
+          "required": ["status", "headers"],
+          "additionalProperties": false,
+          "properties": {
+            "behavior": {
+              "type": "string",
+              "enum": ["respond", "timeout", "close-mid-response"],
+              "default": "respond",
+              "description": "How the mock transport acts (1.2, #490). 'respond' (default) delivers status+headers+body normally. 'timeout' never completes within the SDK's configured request budget — the SDK aborts and reports the timeout error class. 'close-mid-response' drops the connection partway through the body — the SDK reports fetchFailed (a transport failure, not parseFailed). When the field is ABSENT, consumers MUST treat it as 'respond' (JSON Schema `default` is advisory; the runtime default is the contract)."
+            },
+            "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+            "headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "bodyRef": {
+              "type": ["string", "null"],
+              "description": "Reference to a sibling fixture file (e.g. config-v6.boolean.json) resolved by the consumer. Mutually exclusive with `body`."
+            },
+            "body": {
+              "type": "string",
+              "description": "Inline body bytes for cases that need malformed/non-JSON payloads. Mutually exclusive with `bodyRef`."
+            }
+          },
+          "not": { "required": ["bodyRef", "body"] }
+        },
+        "expected": {
+          "type": "object",
+          "required": ["outcome", "hasConfig"],
+          "additionalProperties": false,
+          "properties": {
+            "requestHeaderIfNoneMatch": { "type": ["string", "null"] },
+            "outcome": { "$ref": "#/$defs/Outcome" },
+            "resultingEtag": { "type": ["string", "null"] },
+            "errorClass": { "$ref": "#/$defs/ErrorClass" },
+            "hasConfig": { "type": "boolean" },
+            "requestUrlPrefix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional assertion that the SDK's outgoing request URL starts with this string (custom-baseUrl case, #336). Verifies the SDK honoured given.baseUrl."
+            },
+            "requestPath": {
+              "type": "string",
+              "pattern": "^/[^?#]*$",
+              "description": "Optional exact request path (1.3, #803). The consumer parses the recorded request URL, takes its path — still percent-encoded as sent, query string and fragment EXCLUDED — and compares it to this value with string equality (not a prefix, not a substring, not decoded). Requires given.sdkKey: the path is that key's path. FR-001: a well-shaped key travels raw, so for every valid corpus key this is /configuration-files/<sdkKey>/config_v6.json with the key's exact bytes — a ConfigCat-shaped key keeps its '/' as three segments, exactly a stock ConfigCat SDK's request; a malformed key is ONE segment escaped with Go's url.PathEscape. The query is excluded so the version carrier (#807) can add one without re-pinning."
+            }
+          },
+          "allOf": [
+            {
+              "comment": "outcome=failed MUST set errorClass; outcome=fetched/notModified MUST NOT set errorClass.",
+              "if": { "properties": { "outcome": { "const": "failed" } }, "required": ["outcome"] },
+              "then": { "required": ["errorClass"] },
+              "else": { "not": { "required": ["errorClass"] } }
+            },
+            {
+              "comment": "outcome=failed implies hasConfig=false (no good config to surface).",
+              "if": { "properties": { "outcome": { "const": "failed" } }, "required": ["outcome"] },
+              "then": { "properties": { "hasConfig": { "const": false } } }
+            },
+            {
+              "comment": "outcome=notModified implies hasConfig=false (the 304 path does not re-emit the cached config — the caller keeps its own).",
+              "if": {
+                "properties": { "outcome": { "const": "notModified" } },
+                "required": ["outcome"]
+              },
+              "then": { "properties": { "hasConfig": { "const": false } } }
+            },
+            {
+              "comment": "outcome=fetched implies hasConfig=true.",
+              "if": {
+                "properties": { "outcome": { "const": "fetched" } },
+                "required": ["outcome"]
+              },
+              "then": { "properties": { "hasConfig": { "const": true } } }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

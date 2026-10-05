@@ -1,0 +1,45 @@
+[
+  {
+    "id": "boolean-basic",
+    "description": "Three boolean settings, no targeting rules, no segments. Covers happy-path evaluation + missing-key fallback.",
+    "config": {
+      "p": {
+        "u": "https://cdn.confeature.io",
+        "r": 0,
+        "s": "v1"
+      },
+      "f": {
+        "feature.dark-mode": {
+          "t": 0,
+          "v": {
+            "b": true
+          },
+          "i": "v-dark-mode",
+          "r": []
+        },
+        "feature.beta-toggle": {
+          "t": 0,
+          "v": {
+            "b": false
+          },
+          "i": "v-beta-toggle",
+          "r": []
+        },
+        "feature.unused-key": {
+          "t": 0,
+          "v": {
+            "b": true
+          },
+          "i": "v-unused-key",
+          "r": []
+        }
+      },
+      "s": []
+    },
+    "overridesMap": {
+      "feature.dark-mode": true,
+      "feature.beta-toggle": false,
+      "feature.unused-key": true
+    }
+  }
+]

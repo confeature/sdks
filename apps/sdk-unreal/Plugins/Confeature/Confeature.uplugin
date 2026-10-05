@@ -1,0 +1,46 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.2.0",
+	"FriendlyName": "Confeature",
+	"Description": "Confeature feature-flag SDK for Unreal Engine — drop-in compatible with ConfigCat's C++ SDK. Edge-cached evaluations from Cloudflare Workers.",
+	"Category": "Online Platform",
+	"CreatedBy": "MakerLabs",
+	"CreatedByURL": "https://confeature.io",
+	"DocsURL": "https://confeature.io/sdks/unreal/",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/confeature/sdks/issues",
+	"EngineVersion": "5.3.0",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "Confeature",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"WhitelistPlatforms": [
+				"Win64",
+				"Mac",
+				"Linux",
+				"IOS",
+				"Android"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "HTTP",
+			"Enabled": true
+		},
+		{
+			"Name": "Json",
+			"Enabled": true
+		},
+		{
+			"Name": "JsonUtilities",
+			"Enabled": true
+		}
+	]
+}

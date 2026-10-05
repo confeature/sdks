@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#http-304-with-last-modified — a forced 304 carrying Last-Modified and NO ETag. The case sends no If-None-Match, so the real cdn Worker would answer 200 — only a replaced response can serve it. The SDK must not manufacture a validator from Last-Modified.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": null,
+      "fault": {
+        "kind": "status",
+        "status": 304,
+        "headers": {
+          "Last-Modified": "Wed, 21 Oct 2026 07:28:00 GMT"
+        }
+      }
+    }
+  ]
+}

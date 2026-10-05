@@ -1,0 +1,8 @@
+# Cargo.lock is not committed (library crate), so every fresh checkout — the
+# Dagger gate included — resolves dependencies anew. Make that resolution
+# MSRV-aware (cargo >= 1.84): pick the newest versions compatible with
+# Cargo.toml's `rust-version`, so a transitive release that raises its own
+# rust-version (e.g. icu_* 2.3 -> 1.88, via reqwest -> url -> idna) cannot
+# break the `cargo +1.86 build --lib` MSRV guard.
+[resolver]
+incompatible-rust-versions = "fallback"

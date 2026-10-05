@@ -1,0 +1,20 @@
+# Dart toolchain artefacts
+.dart_tool/
+.packages
+build/
+
+# Test + coverage outputs
+coverage/
+.test_coverage.dart
+
+# IDE
+.idea/
+*.iml
+
+# pub.dev metadata
+.pub/
+doc/api/
+
+# pubspec.lock is intentionally kept in version control for the SDK
+# package: lock files give us deterministic CI runs and a single source
+# of truth for the transitive graph that ships to pub.dev.

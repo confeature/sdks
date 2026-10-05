@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+#
+# Detekt configuration for sdk-kotlin-mp.
+#
+# Inherits from the bundled defaults (`buildUponDefaultConfig = true` in
+# build.gradle.kts). Rules are tuned to the SDK's domain:
+#
+# - SHA-256 / Base64URL constants are inherent magic numbers (the standard
+#   describes the algorithm in terms of them). Magic-number checks are
+#   relaxed for the platform Sha256Provider implementations.
+# - Kotlin Multiplatform requires `.jvm`/`.ios`/`.js` file-name suffixes
+#   on per-target `actual` source files so the build's automatic source-set
+#   inference picks them up. The `MatchingDeclarationName` rule conflicts
+#   with this convention; we relax it for files that follow the KMP suffix
+#   pattern.
+# - ReturnCount: every `evaluate` / `fetch` path explicitly emits a typed
+#   default per branch (fail-closed design). Lower bar would force boolean
+#   accumulators that obscure the cross-language parity intent.
+# - TooGenericExceptionCaught: the fetcher MUST never propagate a network
+#   error to the customer — fail-closed is the Principle II contract. The
+#   catch is paired with a logger call (no silent catches).
+# - LongMethod / NestedBlockDepth / TooManyFunctions: bumped marginally
+#   to fit the public SDK surface size mirrored across the federation.
+
+complexity:
+  LongMethod:
+    threshold: 80
+  NestedBlockDepth:
+    threshold: 5
+  TooManyFunctions:
+    thresholdInClasses: 20
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+
+naming:
+  MatchingDeclarationName:
+    active: false
+
+style:
+  MagicNumber:
+    ignoreNumbers:
+      [
+        "-1",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "16",
+        "20",
+        "24",
+        "32",
+        "50",
+        "60",
+        "64",
+        "100",
+        "256",
+        "500",
+        "1000",
+        "1024",
+        "4096",
+        "5000",
+        "30000",
+        "60000",
+      ]
+    ignoreHashCodeFunction: true
+    ignoreEnums: true
+    ignoreConstantDeclaration: true
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreLocalVariableDeclaration: true
+  ReturnCount:
+    max: 8
+    excludeReturnFromLambda: true
+    excludeGuardClauses: true

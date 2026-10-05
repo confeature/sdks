@@ -1,0 +1,148 @@
+# @confeature/test-harness-live-contract
+
+A workspace-internal test utility that boots an upstream config Worker against a seeded local Cloudflare Workers runtime (in-process Miniflare) and exposes a stable HTTP endpoint any SDK test can target. Used to assert wire-protocol parity end-to-end without per-SDK HTTP mocks.
+
+## The upstream: the reference origin (#861)
+
+The default upstream is the **reference origin** (`reference-origin/`, ADR 0006 Q1): a small local-only
+Worker that serves exactly the config read path — the `config_v6.json` routes (legacy and
+ConfigCat-shaped keys), the 403 XML AccessDenied on a miss or a KV key over 512 bytes, and
+`ETag` / `Last-Modified` / `Cache-Control` with a 304 on an exact `If-None-Match`. Its
+`wrangler.toml` names no account, no route and no KV id, and nothing deploys it.
+
+It is bound to the real CDN Worker by data: `packages/contract/read-path-transcript.json` is recorded
+from that Worker (a private test re-records it and fails when the Worker drifts from it), and `tests/reference-origin-transcript.test.ts` replays it against the
+reference origin byte for byte. `src/upstream.ts` holds the default. The CLI boots the private
+CDN Worker instead only on an explicit opt-in, `CDN_ENTRY` and `CDN_CONFIG` together, until #795.
+
+## TL;DR — in-workspace TypeScript consumers
+
+```ts
+import { referenceOrigin, startHarness } from "@confeature/test-harness-live-contract";
+
+const handle = await startHarness({
+  ...referenceOrigin(), // or any { cdnEntry, cdnConfigPath }
+  initialSeed: {
+    schemaVersion: "1.0",
+    keys: [{ sdkKey: "demo-key", payload: { p: { s: "salt" }, f: {}, s: [] } }],
+  },
+});
+
+const res = await fetch(`${handle.url}/configuration-files/demo-key/config_v6.json`);
+// → 200, seeded body
+
+await handle.stop();
+```
+
+See spec 113's `quickstart.md` (not published) for the full worked TS + non-TS examples.
+
+## CLI — for non-TS test runners
+
+```bash
+pnpm --filter @confeature/test-harness-live-contract start \
+  --seed tools/test-harness-live-contract/seeds/fresh-fetch-200.json
+# → stdout: LIVE_HARNESS_URL=http://127.0.0.1:<port>
+```
+
+To run a live suite, prefer `--exec`, the one agreed boot (#783). It serves every seeded wire-case
+at once (`--corpus-seed`: each case's seed, keyed by its case id, so a runner uses the case id as its
+SDK key), runs the command with `CONFEATURE_LIVE=1` and `LIVE_HARNESS_URL` set, exits with the
+command's code (1 on a signal or a spawn error), then stops the harness:
+
+```bash
+node tools/test-harness-live-contract/dist/cli.js --corpus-seed \
+  --exec -- bash -c 'cd apps/sdk-python && uv run pytest tests/wire/test_wire_cases_live.py'
+```
+
+`--corpus-seed` and `--seed` are mutually exclusive (exit 2). In `--exec` mode the URL goes to stderr.
+
+stdout protocol (without `--exec`): exactly one line `LIVE_HARNESS_URL=http://127.0.0.1:<port>` once ready. All logs go to stderr. SIGTERM / SIGINT / SIGHUP trigger graceful shutdown within `--shutdown-grace` ms (default 5000). Full CLI contract: spec 113's `cli.md` (not published).
+
+## Admin REST surface
+
+Loopback-only (`127.0.0.1` / `::1` — non-loopback returns 403):
+
+- `POST /admin/reset` — drop KV state, replay a seed.
+- `POST /admin/seed` — additive merge of seed keys into KV.
+- `POST /admin/inject-fault` — attach a fault marker (`5xx`, `404`, `malformed-json`, `wrong-shape`, `{kind: "timeout", ms}`, `{kind: "etag-mismatch", newEtag}`) to one key, or `"none"` to clear.
+- `GET /admin/state` — read-only debug introspection; `keys` lists the seeded SDK keys. A non-TS live runner takes its case set from here, never recomputes it.
+- `GET /admin/requests?sdkKey=<key>` — read-only: the config requests the harness served for that key (`url`, `ifNoneMatch`), oldest first, capped at 100 per key; 400 without `sdkKey`. Cleared by a reset or a re-seed.
+
+Full contract: spec 113's `admin-api.md` (not published).
+
+## Seed format
+
+The **zod schema in `src/seed-schema.ts` is authoritative**. `schemas/seed.schema.json` is generated from it and is **structural only**: zod's cross-field rules (no body on 204/205/304, a body requires a Content-Type, a null payload allows only a whole-response fault) are not expressed in JSON Schema, so a seed it accepts can still be rejected at load time. A seed's `fault` is applied on boot, `/admin/reset` (which replaces the whole fault state) and `/admin/seed` (plan 680). The original contract (spec 113) is archived at spec 113's `seed.schema.json` (not published).
+
+Reference seeds for every `wire-cases.json` case live under `seeds/`:
+
+| Wire-case ID                  | Seed file                                |
+| ----------------------------- | ---------------------------------------- |
+| `fresh-fetch-200`             | `seeds/fresh-fetch-200.json`             |
+| `conditional-304-no-body`     | `seeds/conditional-304-no-body.json`     |
+| `etag-rotation`               | `seeds/etag-rotation.json`               |
+| `server-5xx-failure`          | `seeds/server-5xx-failure.json`          |
+| `invalid-sdk-key-404`         | `seeds/invalid-sdk-key-404.json`         |
+| `malformed-json-200`          | `seeds/malformed-json-200.json`          |
+| `wrong-shape-200`             | `seeds/wrong-shape-200.json`             |
+| `timeout`                     | `seeds/timeout.json`                     |
+| `http-401`                    | `seeds/http-401.json`                    |
+| `http-403`                    | `seeds/http-403.json`                    |
+| `http-429`                    | `seeds/http-429.json`                    |
+| `http-304-with-last-modified` | `seeds/http-304-with-last-modified.json` |
+| `network-reset`               | `seeds/network-reset.json`               |
+
+`custom-base-url` has no seed by design: in live mode the harness _is_ the custom base URL.
+
+Each seed is self-contained (no `bodyRef` indirection — seeds inline the canonical payload).
+`tests/corpus-mapping.test.ts` enforces that the mapping **exists** (and that no seed is an orphan);
+`tests/seed-fidelity.test.ts` enforces what each seed **serves** — status, declared headers, no
+undeclared validators, body, and behaviour — against its case's `server` block, over real HTTP.
+
+## Pre-push gate (Dagger)
+
+The harness suite runs as part of the local-first pre-push gate (Principle VII)
+via the Dagger `liveContract` function (#343), composed into `prepushAll`
+alongside the JS-family gates:
+
+```bash
+pnpm dagger:live-contract   # this gate in isolation (via tools/dagger-call/dagger-call.sh)
+pnpm dagger:all             # full pre-push gate, including liveContract
+```
+
+`liveContract` reuses the shared `node:22-bookworm-slim` install layer and, in
+order: (1) builds this harness (so its `dist/` resolves for runtime importers),
+(2) runs the harness self-test
+`pnpm --filter @confeature/test-harness-live-contract test:live`
+(`CONFEATURE_LIVE=1 vp test run`), then (3) runs sdk-node's live wire-cases
+through the manifest's node `liveSuite.runner` — the `--corpus-seed --exec`
+wrapper, the same command contract-live runs (#783). The suite replays every
+seeded wire-case against the running harness and never boots one of its own;
+it is skipped in the normal hermetic run, and fails if `CONFEATURE_LIVE=1`
+comes without a `LIVE_HARNESS_URL`. `livePythonContract` does the same for
+sdk-python. Because the harness boots its upstream via **in-process Miniflare**
+(#341 — no `wrangler dev` subprocess, no network egress, no service bindings)
+it is safe inside the Dagger sandbox. The staging/prod canary
+`CONFEATURE_BASE_URL` mode stays CI-only.
+
+## Architecture notes
+
+- **Worker host**: wrangler `unstable_dev` (in-process Miniflare / workerd — no standalone `wrangler dev` CLI subprocess and no network egress; see `src/wrangler-host.ts`). This is what makes the harness safe to run inside the Dagger sandbox at pre-push.
+- **KV seeding**: one `wrangler kv bulk put --local --persist-to=<dir>` subprocess per seed (via an absolute-resolved `npx`, #340), writing to the namespace `unstable_dev --local` reads from: `--binding=CONFIG_KV --preview` for a config with a `preview_id`, `--namespace-id=CONFIG_KV` for one with no id (the reference origin). Stays loopback-local — no remote API calls.
+- **Fault injection**: proxy layer in front of the Worker (`node:http` server). The upstream's source is UNCHANGED.
+- **Concurrency**: one harness per test process. Multiple processes get distinct ephemeral ports — no shared state.
+
+## Cross-SDK live matrix (release gate)
+
+The `contract-live.yml` workflow (spec 115 / #150) runs each live-capable SDK's wire-cases against
+the live harness (reference origin upstream) at **release time** (never per-PR — Principle VII) and publishes a
+`N/21 live-covered` conformance report. **To add an SDK to the matrix**, add a `liveSuite` entry to
+that SDK in `dagger/sdk-manifest.json` (`runner` + `path`, plus `toolchain` when the SDK needs one
+the workflow must install, e.g. `uv`) — no workflow edit. Every `runner` goes through the harness
+wrapper (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1`
+and a live suite never passes by skipping (#783). See
+spec 115's `quickstart.md` (not published).
+
+## License
+
+MIT. Workspace-internal, never published.

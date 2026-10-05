@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>Confeature.Client</RootNamespace>
+    <AssemblyName>Confeature.Client</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <PropertyGroup Label="NuGet package metadata">
+    <PackageId>Confeature.Client</PackageId>
+    <Version>0.1.0-alpha</Version>
+    <Authors>MakerLabs</Authors>
+    <Company>MakerLabs</Company>
+    <Description>Confeature .NET SDK — drop-in compatible with ConfigCat.Client at the wire and API-surface levels. MIT.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/confeature/sdks</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://confeature.io</PackageProjectUrl>
+    <PackageTags>confeature;feature-flags;configuration;configcat</PackageTags>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!--
+    System.Text.Json is in the BCL on net8.0+ but ships as a separate
+    NuGet on netstandard. Conditional reference keeps the package
+    closure minimal on modern targets.
+  -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>

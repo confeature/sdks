@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#http-429 — a forced 429 carrying Retry-After: 30. Pins that 429 is a transient fetchFailed, not an invalid-key signal, and that the SDK does not choke on Retry-After (honouring it is out of scope).",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": null,
+      "fault": {
+        "kind": "status",
+        "status": 429,
+        "headers": {
+          "Content-Type": "text/plain",
+          "Retry-After": "30"
+        }
+      }
+    }
+  ]
+}

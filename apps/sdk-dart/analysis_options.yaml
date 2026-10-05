@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+#
+# Baseline lint set from `package:lints/recommended.yaml` (the Dart team's
+# blessed defaults) + a couple of strict overrides that we treat as
+# errors instead of infos. `dart analyze --fatal-infos` is the CI gate;
+# see spec 049 FR-017.
+
+include: package:lints/recommended.yaml
+
+analyzer:
+  errors:
+    # Mandatory `required` params must be passed at every call site. We
+    # bump this from `warning` to `error` because the SDK relies on
+    # `@required` to catch accidental partial constructions in customer
+    # code at compile time (matches `configcat_client`'s contract).
+    missing_required_param: error
+    # Force resolution of unused imports so the analyser surfaces stale
+    # imports left behind by refactors.
+    unused_import: warning

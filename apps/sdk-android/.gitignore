@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+# Standard Android / Gradle artefacts — never committed.
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/

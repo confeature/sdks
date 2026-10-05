@@ -1,0 +1,32 @@
+{
+  "_provenance": "RECONSTRUCTED — NOT upstream-verbatim. These two settings are reconstructed faithfully from the eval-log textual trace at evaluationlog/prerequisite_flag/prerequisite_flag_multilevel.txt because ConfigCat never published this config blob under any sdkKey (the prerequisite_flag.json suite descriptor lists the dependentFeatureMultipleLevels case under the same sdkKey as the other cases, but content-by-key.json — vendored verbatim — does not contain these settings). The trace fully determines the chain: dependentFeatureMultipleLevels --(EQUALS true)--> intermediateFeature --(EQUALS true AND EQUALS true)--> mainFeatureWithoutUserCondition (the base flag serving true, which IS present verbatim in content-by-key.json and is therefore NOT redefined here). The loader (src/upstream-corpus.ts) shallow-merges these into the verbatim config's `f` map for the prerequisite_flag scenario only; the verbatim content-by-key.json bytes are never edited. See fixtures/upstream/PROVENANCE.md and the matching reconstructed-chain unit test in packages/sdk-shared/tests/parity-upstream.test.ts.",
+  "f": {
+    "intermediateFeature": {
+      "i": "inter0001",
+      "t": 0,
+      "v": { "b": false },
+      "r": [
+        {
+          "c": [
+            { "p": { "f": "mainFeatureWithoutUserCondition", "c": 0, "v": { "b": true } } },
+            { "p": { "f": "mainFeatureWithoutUserCondition", "c": 0, "v": { "b": true } } }
+          ],
+          "s": { "v": { "b": true }, "i": "interT001" }
+        }
+      ]
+    },
+    "dependentFeatureMultipleLevels": {
+      "i": "dep0001",
+      "t": 1,
+      "v": { "s": "Cat" },
+      "r": [
+        {
+          "c": [
+            { "p": { "f": "intermediateFeature", "c": 0, "v": { "b": true } } }
+          ],
+          "s": { "v": { "s": "Dog" }, "i": "depDog001" }
+        }
+      ]
+    }
+  }
+}

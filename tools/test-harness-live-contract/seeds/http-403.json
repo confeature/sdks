@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#http-403 — a forced 403 with no body. The case exists to prove 403 is classed invalidSdkKey ALONGSIDE 404, so it must be a real 403 on the wire — seed-fidelity.test.ts asserts the observed status, which is the only thing that tells it from a 404.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": null,
+      "fault": {
+        "kind": "status",
+        "status": 403,
+        "headers": {
+          "Content-Type": "text/plain"
+        }
+      }
+    }
+  ]
+}

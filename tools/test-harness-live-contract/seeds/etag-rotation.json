@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#etag-rotation — the rotated state. The SDK presents its previous ETag \"v1-fresh\"; the stored config now carries \"v2-rotated\", so the CDN Worker answers 200 with the new ETag and body. A seed is the state that makes its case's server block true (plan 680, US1); the previous initial-state seed relied on a mid-test /admin/seed that no seed consumer performs. Payload = packages/test-fixtures-sdk-parity/fixtures/config-v6.boolean.json, the case's bodyRef (seed-fidelity compares them as JSON).",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": {
+          "u": "https://cdn.confeature.io",
+          "r": 0,
+          "s": "v1"
+        },
+        "f": {
+          "feature.dark-mode": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-dark-mode",
+            "r": []
+          },
+          "feature.beta-toggle": {
+            "t": 0,
+            "v": {
+              "b": false
+            },
+            "i": "v-beta-toggle",
+            "r": []
+          },
+          "feature.unused-key": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-unused-key",
+            "r": []
+          }
+        },
+        "s": []
+      },
+      "etag": "\"v2-rotated\""
+    }
+  ]
+}

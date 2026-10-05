@@ -1,0 +1,9 @@
+{
+  "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+  "f": {
+    "feature.dark-mode": { "t": 0, "v": { "b": true }, "i": "v-dark-mode", "r": [] },
+    "feature.beta-toggle": { "t": 0, "v": { "b": false }, "i": "v-beta-toggle", "r": [] },
+    "feature.unused-key": { "t": 0, "v": { "b": true }, "i": "v-unused-key", "r": [] }
+  },
+  "s": []
+}

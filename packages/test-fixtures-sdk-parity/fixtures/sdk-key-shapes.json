@@ -1,0 +1,63 @@
+{
+  "$comment": "#802 \u2014 the SDK key shapes every Confeature SDK validator accepts or rejects, and the ONE list their tests read (never a per-SDK list). New keys are ConfigCat-shaped (`configcat-sdk-1/<22>/<22>`, so a stock ConfigCat SDK accepts them); legacy keys (`confeature-sdk-1-<32>-<32>`) stay valid. Fixture values are obvious fakes (FAKE…, or a patterned run such as aB3_-dE5…) and belong to no environment (#858).",
+  "valid": [
+    {
+      "name": "configcat-shaped (new)",
+      "key": "configcat-sdk-1/FAKEfixtureKeyNotRea01/FAKEfixtureKeyNotRea02"
+    },
+    {
+      "name": "configcat-shaped with - and _",
+      "key": "configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3nO/pQ5rS7tU9vW1xY3zA5bC7d"
+    },
+    {
+      "name": "legacy confeature",
+      "key": "confeature-sdk-1-FAKE_fixtureKeyN-otRealFAKEfi-03-FAKEfixtureKeyNotRealFAKEfixtu04"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "empty",
+      "key": ""
+    },
+    {
+      "name": "new shape, first segment too short",
+      "key": "configcat-sdk-1/FAKEfixtureKeyNotRe05/FAKEfixtureKeyNotRea06"
+    },
+    {
+      "name": "new shape, second segment too long",
+      "key": "configcat-sdk-1/FAKEfixtureKeyNotRea13/FAKEfixt_ureKeyNotRea14"
+    },
+    {
+      "name": "new shape, extra segment",
+      "key": "configcat-sdk-1/_FAKEfixtureKeyNotRe09/FAKEfixtureKeyNotRea10/FAKEfixtureKeyNotRea15"
+    },
+    {
+      "name": "new shape, bad character",
+      "key": "configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3n!/pQ5rS7tU9vW1xY3zA5bC7d"
+    },
+    {
+      "name": "wrong prefix",
+      "key": "configcat-sdk-2/FAKEfixtureKe-yNotRe11/FAKEfixtureKeyNotRea12"
+    },
+    {
+      "name": "legacy, segment too short",
+      "key": "confeature-sdk-1-FAKEfix_tureKeyNotRealFAKEfix16-FAKEfixt_ureKeyNotRealFAKEfixt17"
+    },
+    {
+      "name": "proxy form (not a Confeature key)",
+      "key": "configcat-proxy/my-proxy-key"
+    },
+    {
+      "name": "whitespace",
+      "key": " configcat-sdk-1/FAKEfi--xtureKeyNotR07/FAKEfixtureKeyNotRea08"
+    },
+    {
+      "name": "trailing newline (a regex `$` that matches before a final newline would accept it)",
+      "key": "configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3nO/pQ5rS7tU9vW1xY3zA5bC7d\n"
+    },
+    {
+      "name": "legacy shape with a trailing newline",
+      "key": "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+    }
+  ]
+}

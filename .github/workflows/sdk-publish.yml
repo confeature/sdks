@@ -1,0 +1,273 @@
+# SPDX-License-Identifier: MIT
+
+# Tag-triggered SDK publish, gated by a containerized test.
+#
+# Tag format: `sdk-<name>-v<X.Y.Z>` — e.g. `sdk-node-v0.1.0`,
+# `sdk-go-v1.2.3`. The workflow extracts the SDK name from the tag and
+# publishes the matching workspace package.
+#
+# Phase 5 (#204) introduces a manifest-driven test gate. `dagger/sdk-manifest.json`
+# is the single source of truth for per-SDK test coverage:
+#   - covered → run the SDK's containerized Dagger suite, then publish.
+#   - exempt  → publish without a test gate (documented reason).
+#   - pending → REFUSE to publish (hard fail). Nothing ships without a gate
+#               (operator decision 2026-05-30: build solid > ship fast).
+#
+# Today only `@confeature/sdk-node` exists (npm registry). The other 20
+# SDKs from the constitution's Principle IV roster land progressively;
+# this workflow is the single tag-driven publish path for all of them.
+# Future SDKs in non-npm runtimes (Go, Rust, PHP, Python, Swift, etc.)
+# will branch from the "publish" step on `sdk_name` — out of scope for
+# the initial sdk-node-only rollout.
+#
+# Required repo secret:
+#   NPM_TOKEN  npm "Automation" token scoped to the @confeature org with
+#              "Read and write" permission. Mint at https://www.npmjs.com/
+#              after enrolling the org.
+#
+# Spec 053, the Dagger local runner (Phase 5, #204).
+# Contract: spec 053's release-gate-workflow contract.
+
+name: sdk-publish
+
+on:
+  push:
+    tags:
+      - "sdk-*-v*"
+
+# Never cancel an in-flight publish. Tag pushes are rare; concurrency
+# protects against accidental double-tag pushes.
+concurrency:
+  group: sdk-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # id-token: write is reserved for npm provenance when we enable it
+  # (https://docs.npmjs.com/generating-provenance-statements). Off
+  # initially to keep the secret surface minimal.
+
+jobs:
+  # Resolve the SDK name from the tag, then consult the manifest to decide
+  # the gate: covered → run test then publish; exempt → publish directly;
+  # pending → fail the whole workflow (no test gate exists yet).
+  setup:
+    name: setup ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      name: ${{ steps.resolve.outputs.sdk_name }}
+      package: ${{ steps.resolve.outputs.package }}
+      daggerFn: ${{ steps.gate.outputs.dagger_fn }}
+      gate: ${{ steps.gate.outputs.gate }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      # Extract the SDK name from the tag. `sdk-node-v0.1.0` → `node`.
+      # The intermediate `sdk-` prefix and trailing `-v<version>` are
+      # both required; the name is whatever sits between.
+      - name: Resolve SDK package from tag
+        id: resolve
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Strip leading `sdk-` and trailing `-v.*`
+          SDK_NAME="${TAG#sdk-}"
+          SDK_NAME="${SDK_NAME%-v*}"
+          PACKAGE="@confeature/sdk-${SDK_NAME}"
+          echo "sdk_name=${SDK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "package=${PACKAGE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag '${TAG}' → package '${PACKAGE}'"
+
+      # Consult dagger/sdk-manifest.json. Branch on the SDK's status:
+      #   covered → gate=test (+ resolved daggerFn)
+      #   exempt  → gate=skip (annotate)
+      #   pending → FAIL with the refusal message (no false-green publishes)
+      #   unknown → FAIL (the SDK is not in the Principle IV roster)
+      - name: Consult manifest for test gate
+        id: gate
+        run: |
+          SDK_NAME='${{ steps.resolve.outputs.sdk_name }}'
+          ENTRY=$(jq -c --arg n "$SDK_NAME" '.sdks[] | select(.name == $n)' dagger/sdk-manifest.json)
+          if [ -z "$ENTRY" ]; then
+            echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: not found in dagger/sdk-manifest.json. Add it to the Principle IV roster (covered/pending/exempt) first."
+            exit 1
+          fi
+          STATUS=$(printf '%s' "$ENTRY" | jq -r '.status')
+          DAGGER_FN=$(printf '%s' "$ENTRY" | jq -r '.daggerFn // empty')
+          echo "Manifest entry for '${SDK_NAME}': status=${STATUS} daggerFn=${DAGGER_FN:-<none>}"
+          case "$STATUS" in
+            covered)
+              echo "gate=test" >> "$GITHUB_OUTPUT"
+              echo "dagger_fn=${DAGGER_FN}" >> "$GITHUB_OUTPUT"
+              echo "::notice::sdk-${SDK_NAME} is covered — gating publish on \`${DAGGER_FN}\`."
+              ;;
+            exempt)
+              echo "gate=skip" >> "$GITHUB_OUTPUT"
+              echo "dagger_fn=" >> "$GITHUB_OUTPUT"
+              echo "::notice::sdk-${SDK_NAME} is exempt — no test gate."
+              ;;
+            pending)
+              echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: no containerized test gate (status=pending). Containerize it (flip the manifest to covered) or mark it exempt first."
+              exit 1
+              ;;
+            *)
+              echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: unknown manifest status '${STATUS}'."
+              exit 1
+              ;;
+          esac
+
+  # Containerized test gate — only reached for covered SDKs. A red test here
+  # propagates via `needs` to publish, which is then skipped ⇒ workflow fails.
+  test:
+    name: test ${{ needs.setup.outputs.name }} (${{ needs.setup.outputs.daggerFn }})
+    needs: setup
+    if: needs.setup.outputs.gate == 'test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The job runs repository code inside Dagger and never pushes, so the
+      # checkout keeps no GITHUB_TOKEN in .git/config (#865).
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The engine version has one home, dagger/dagger.json `engineVersion`
+      # (#865). This step reads it, so no workflow writes the number out.
+      - name: Read the Dagger engine version (dagger/dagger.json)
+        id: pin
+        run: |
+          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
+          if [ -z "${version}" ]; then
+            echo "::error::dagger/dagger.json has no engineVersion"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
+      # this repository, never from a checksum served by the download host. With
+      # this CLI first on PATH at the pinned version, the action below finds it
+      # and skips its own install.sh.
+      - name: Install the checksum-verified Dagger CLI
+        env:
+          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
+          dir="${RUNNER_TEMP}/dagger-cli"
+          mkdir -p "${dir}/bin"
+          cd "${dir}"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
+            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
+          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
+          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
+            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
+            exit 1
+          fi
+          sha256sum -c --strict expected.sha256
+          tar -xzf "${tarball}" -C bin dagger
+          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
+          if [ "${got}" != "${DAGGER_VERSION}" ]; then
+            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
+            exit 1
+          fi
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+
+      # The action is pinned by commit SHA (v8.4.1, the contract that supports
+      # verb/module/args/enable-github-summary) and the engine by `version:`,
+      # taken from the pin step. The action tag and the engine version are
+      # decoupled by design: never @v8 / @latest, never the action's `latest`
+      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
+      - name: Run ${{ needs.setup.outputs.daggerFn }} (Dagger)
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: ${{ needs.setup.outputs.daggerFn }} --source=.
+          enable-github-summary: true
+
+  # Publish. Reachable two ways:
+  #   - covered: needs [setup, test] — a red/skipped test blocks publish.
+  #   - exempt:  test is skipped, so we gate on the setup output instead.
+  # The `always() && ...` guard lets the job evaluate even when `test` was
+  # skipped (exempt path), while still failing closed if test failed.
+  publish:
+    name: publish ${{ needs.setup.outputs.name }}
+    needs: [setup, test]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      (needs.setup.outputs.gate == 'skip' ||
+       (needs.setup.outputs.gate == 'test' && needs.test.result == 'success'))
+    runs-on: ubuntu-latest
+    # The publish token is reachable only through a named environment (#858).
+    # #794 creates it with a required reviewer and an sdk-* tag policy; until
+    # then it has no protection rule and the repository secret resolves as before.
+    environment: sdk-publish
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+          scope: "@confeature"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The author rule: every manifest names MakerLabs as its author, with no
+      # email address in any author or contact field. Here because the publish
+      # below is the one step that cannot be undone: a registry keeps what it
+      # is given. Same job as the publish, so the job's `if:` gates both alike
+      # and a red rule stops the publish.
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      # Sanity: assert the workspace package actually exists. Fails fast
+      # if someone pushes `sdk-typo-v0.1.0` against a non-existent package.
+      - name: Verify package exists in workspace
+        run: |
+          pnpm --filter "${{ needs.setup.outputs.package }}" exec node -e "console.log('OK:', require('./package.json').name)"
+
+      - name: Build SDK
+        run: pnpm --filter "${{ needs.setup.outputs.package }}" run build
+
+      # Verify the tag version matches package.json — prevents publishing
+      # `sdk-node-v0.1.0` with an unrelated version in package.json.
+      - name: Verify tag version matches package version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#*-v}"
+          PKG_VERSION=$(pnpm --filter "${{ needs.setup.outputs.package }}" exec node -e "console.log(require('./package.json').version)")
+          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "Tag version (${TAG_VERSION}) does not match package.json version (${PKG_VERSION})"
+            exit 1
+          fi
+          echo "Versions match: ${TAG_VERSION}"
+
+      - name: Publish to npm
+        run: pnpm --filter "${{ needs.setup.outputs.package }}" publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish summary
+        if: always()
+        run: |
+          echo "### SDK publish — ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Package: \`${{ needs.setup.outputs.package }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Gate: \`${{ needs.setup.outputs.gate }}\` (test=run, skip=exempt)" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Yank procedure: see the release runbook." >> $GITHUB_STEP_SUMMARY

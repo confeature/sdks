@@ -1,0 +1,4 @@
+# Every path is owned by the SDK maintainers team. Owners are always a team of
+# the confeature organisation, never a person: tools/repo-gates/verify-codeowners.mjs
+# enforces it.
+* @confeature/sdk-maintainers

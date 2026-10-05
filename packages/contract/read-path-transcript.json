@@ -1,0 +1,898 @@
+{
+  "entries": [
+    {
+      "name": "a hit with a stored ETag and Last-Modified",
+      "kv": {
+        "key": "sdk:transcript-validators:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-validators/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a hit with no stored validator",
+      "kv": {
+        "key": "sdk:transcript-bare:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-bare/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a hit with a stored ETag only",
+      "kv": {
+        "key": "sdk:transcript-etag-only:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\""
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-etag-only/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\""
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-None-Match equal to the stored ETag is a 304",
+      "kv": {
+        "key": "sdk:transcript-match:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-match/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "a stale If-None-Match is a full 200",
+      "kv": {
+        "key": "sdk:transcript-stale:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-stale/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v0\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-None-Match with no stored ETag cannot 304",
+      "kv": {
+        "key": "sdk:transcript-no-etag:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-no-etag/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "ETags compare verbatim: the stored ETag without its quotes is stale",
+      "kv": {
+        "key": "sdk:transcript-unquoted:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-unquoted/config_v6.json",
+        "headers": {
+          "If-None-Match": "transcript-v1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "ETags compare verbatim: the weak form of the stored ETag is stale",
+      "kv": {
+        "key": "sdk:transcript-weak:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-weak/config_v6.json",
+        "headers": {
+          "If-None-Match": "W/\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a miss is ConfigCat's 403 XML AccessDenied",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-miss/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+      }
+    },
+    {
+      "name": "?sdk= on a hit leaves the response byte-identical",
+      "kv": {
+        "key": "sdk:transcript-sdk-query:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-sdk-query/config_v6.json?sdk=0.1.0",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "?sdk= on a 304 leaves the response byte-identical",
+      "kv": {
+        "key": "sdk:transcript-sdk-query-304:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-sdk-query-304/config_v6.json?sdk=0.1.0",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "a ConfigCat-shaped key, sent raw across three segments",
+      "kv": {
+        "key": "sdk:configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a ConfigCat-shaped key, sent %2F-encoded in one segment",
+      "kv": {
+        "key": "sdk:configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/configcat-sdk-1%2FFAKE-transcript-keyA00%2FFAKE-transcript-keyB00/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a percent-encoded key segment is decoded once",
+      "kv": {
+        "key": "sdk:transcript:colon:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript%3Acolon/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a %2F in a key that is not ConfigCat-shaped stays inside its one segment",
+      "kv": {
+        "key": "sdk:transcript/slash:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript%2Fslash/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a %25 in a key is decoded exactly once",
+      "kv": {
+        "key": "sdk:transcript%41:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript%2541/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a key whose KV key is exactly 512 bytes is read",
+      "kv": {
+        "key": "sdk:transcript-max-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-max-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a key whose KV key is 513 bytes is a 403, not a KV error",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-max-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+      }
+    },
+    {
+      "name": "the 512-byte limit counts UTF-8 bytes, not characters",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+      }
+    },
+    {
+      "name": "HEAD on a hit has the 200's headers and no body",
+      "kv": {
+        "key": "sdk:transcript-head:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "HEAD",
+        "path": "/configuration-files/transcript-head/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "POST to a config path is unmatched",
+      "kv": {
+        "key": "sdk:transcript-post:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "/configuration-files/transcript-post/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "text/plain; charset=UTF-8"
+        },
+        "body": "404 Not Found"
+      }
+    },
+    {
+      "name": "an empty key segment is unmatched",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files//config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "text/plain; charset=UTF-8"
+        },
+        "body": "404 Not Found"
+      }
+    },
+    {
+      "name": "a trailing slash is unmatched",
+      "kv": {
+        "key": "sdk:transcript-trailing:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-trailing/config_v6.json/",
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "text/plain; charset=UTF-8"
+        },
+        "body": "404 Not Found"
+      }
+    },
+    {
+      "name": "a path outside the config route is unmatched",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "text/plain; charset=UTF-8"
+        },
+        "body": "404 Not Found"
+      }
+    },
+    {
+      "name": "a malformed % escape in a key is kept as it is",
+      "kv": {
+        "key": "sdk:transcript%ZZbad:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript%ZZbad/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "an escape run that is not UTF-8 is kept undecoded",
+      "kv": {
+        "key": "sdk:transcript%41%E9:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": null
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript%41%E9/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-None-Match: * is not a match: ETags compare verbatim",
+      "kv": {
+        "key": "sdk:transcript-star:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-star/config_v6.json",
+        "headers": {
+          "If-None-Match": "*"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "an If-None-Match list holding the stored ETag is not a match",
+      "kv": {
+        "key": "sdk:transcript-list:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-list/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v0\", \"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-Modified-Since is ignored: only If-None-Match can 304",
+      "kv": {
+        "key": "sdk:transcript-ims:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-ims/config_v6.json",
+        "headers": {
+          "If-Modified-Since": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a hit with a stored Last-Modified only",
+      "kv": {
+        "key": "sdk:transcript-lm-only:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-lm-only/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-None-Match on a hit with a stored Last-Modified only cannot 304",
+      "kv": {
+        "key": "sdk:transcript-lm-only-inm:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-lm-only-inm/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "If-None-Match on a miss is still the 403",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-miss-inm/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+      }
+    },
+    {
+      "name": "HEAD on a 304 has the 304's headers",
+      "kv": {
+        "key": "sdk:transcript-head-304:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "HEAD",
+        "path": "/configuration-files/transcript-head-304/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "HEAD on a miss has the 403's headers and no body",
+      "kv": null,
+      "request": {
+        "method": "HEAD",
+        "path": "/configuration-files/transcript-head-miss/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "HEAD on an unmatched path has the 404's headers and no body",
+      "kv": null,
+      "request": {
+        "method": "HEAD",
+        "path": "/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "content-type": "text/plain; charset=UTF-8"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "a malformed ?sdk= leaves the response byte-identical",
+      "kv": {
+        "key": "sdk:transcript-sdk-malformed:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/transcript-sdk-malformed/config_v6.json?sdk=%ZZnot-a-version&sdk=",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    },
+    {
+      "name": "a ConfigCat-shaped key sent raw answers the 304",
+      "kv": {
+        "key": "sdk:configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00/config_v6.json",
+        "headers": {
+          "If-None-Match": "\"transcript-v1\""
+        }
+      },
+      "response": {
+        "status": 304,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": ""
+      }
+    },
+    {
+      "name": "a ConfigCat-shaped key sent raw with no config is the 403",
+      "kv": null,
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-miss0/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/xml"
+        },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+      }
+    },
+    {
+      "name": "a ConfigCat-shaped key sent raw with an encoded segment",
+      "kv": {
+        "key": "sdk:configcat-sdk-1/FAKE-transcript-keyA00/FAKE-transcript-keyB00:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/configcat-sdk-1/FAKE%2Dtranscript-keyA00/FAKE-transcript-keyB00/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#fresh-fetch-200 — initial fetch returns 200 + body + ETag. Payload = packages/test-fixtures-sdk-parity/fixtures/config-v6.boolean.json, the case's bodyRef (seed-fidelity compares them as JSON).",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": {
+          "u": "https://cdn.confeature.io",
+          "r": 0,
+          "s": "v1"
+        },
+        "f": {
+          "feature.dark-mode": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-dark-mode",
+            "r": []
+          },
+          "feature.beta-toggle": {
+            "t": 0,
+            "v": {
+              "b": false
+            },
+            "i": "v-beta-toggle",
+            "r": []
+          },
+          "feature.unused-key": {
+            "t": 0,
+            "v": {
+              "b": true
+            },
+            "i": "v-unused-key",
+            "r": []
+          }
+        },
+        "s": []
+      },
+      "etag": "\"v1-fresh\""
+    }
+  ]
+}

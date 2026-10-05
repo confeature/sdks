@@ -1,0 +1,56 @@
+{
+  "name": "@confeature/sdk-deno",
+  "version": "0.1.0",
+  "description": "Confeature Deno SDK — drop-in compatible with configcat-js, idiomatic Deno runtime (Deno.writeTextFile cache + globalThis.fetch + permission-aware fallback).",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-deno"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "postbuild": "node ./scripts/check-bundle-size.mjs"
+  },
+  "dependencies": {
+    "@confeature/sdk-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@types/deno": "^2.7.0",
+    "@typescript/native-preview": "catalog:",
+    "configcat-js": "^9.4.0",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "deno": ">=1.40"
+  },
+  "confeature": {
+    "owner": "sdk-deno"
+  }
+}

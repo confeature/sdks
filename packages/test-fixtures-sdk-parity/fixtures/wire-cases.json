@@ -1,0 +1,333 @@
+{
+  "$schema": "./wire-cases.schema.json",
+  "schemaVersion": "1.3",
+  "description": "Wire-protocol fixture suite. Each case describes one HTTP round-trip the SDK MUST conform to. The 58-tuple parity-corpus tests *evaluation* semantics; this suite tests the *wire layer* (304/ETag/error classes/malformed body) which is otherwise implicitly per-SDK. Consumers live at apps/sdk-*/tests/wire/wire-cases.{ext} and ingest this file at runtime — DO NOT duplicate cases per language. Error classes are normalised: each SDK maps its own SdkErrorCode-style enum onto {fetchFailed, timeout, parseFailed, invalidSdkKey}. Request side (1.3, #803): a case may pin the SDK key (given.sdkKey, a valid key from sdk-key-shapes.json — except request-path-malformed-key, whose inline malformed key pins FR-001's one-segment url.PathEscape) and the exact parsed request path (expected.requestPath, query excluded); a consumer MUST configure the SDK with given.sdkKey when present and MUST FAIL on any expected field it does not read, so a new expectation can never be skipped silently. Schema validated at load-time via wire-cases.schema.json (Draft 2020-12). See epic #146 + #148 + spec 112 for the contract-testing framework.",
+  "errorClasses": {
+    "fetchFailed": "Non-2xx HTTP (except 304/403/404), or network error, or unreadable body.",
+    "timeout": "Request aborted by SDK timeout (not dispose).",
+    "parseFailed": "Body was 200 but JSON.parse threw OR shape did not match {p, f, s}.",
+    "invalidSdkKey": "CDN responded 404 — the SDK key was rejected upstream."
+  },
+  "cases": [
+    {
+      "id": "fresh-fetch-200",
+      "description": "Initial fetch — server returns 200 + body + ETag. SDK ingests the body and remembers the ETag.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-fresh\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-fresh\"",
+        "hasConfig": true
+      }
+    },
+    {
+      "id": "conditional-304-no-body",
+      "description": "Conditional GET — SDK supplies the previous ETag; server returns 304 with no body. SDK retains its cached config and does not re-parse.",
+      "given": { "previousEtag": "\"v1-fresh\"" },
+      "server": {
+        "status": 304,
+        "headers": { "ETag": "\"v1-fresh\"" },
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": "\"v1-fresh\"",
+        "outcome": "notModified",
+        "resultingEtag": "\"v1-fresh\"",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "etag-rotation",
+      "description": "Cache rotation — SDK supplies the previous ETag; server returns 200 with a new ETag and refreshed body. SDK swaps cached body and updates stored ETag.",
+      "given": { "previousEtag": "\"v1-fresh\"" },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v2-rotated\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": "\"v1-fresh\"",
+        "outcome": "fetched",
+        "resultingEtag": "\"v2-rotated\"",
+        "hasConfig": true
+      }
+    },
+    {
+      "id": "server-5xx-failure",
+      "description": "Transient backend failure — server returns 503. SDK reports a typed fetch-failed error; cached config (if any) is preserved by the caller.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 503,
+        "headers": { "Content-Type": "text/plain" },
+        "body": "service unavailable"
+      },
+      "expected": {
+        "outcome": "failed",
+        "errorClass": "fetchFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "invalid-sdk-key-404",
+      "description": "Invalid SDK key path — CDN returns 404. SDK reports the typed invalid-sdk-key error class (distinct from generic fetch-failed so callers can surface a different message).",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 404,
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"error\": \"unknown sdk key\"}"
+      },
+      "expected": {
+        "outcome": "failed",
+        "errorClass": "invalidSdkKey",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "malformed-json-200",
+      "description": "Server returns 200 with garbage body. SDK reports a typed parse-failed error; cached config (if any) is preserved by the caller.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"garbage\""
+        },
+        "body": "{not valid json"
+      },
+      "expected": {
+        "outcome": "failed",
+        "errorClass": "parseFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "wrong-shape-200",
+      "description": "Server returns 200 with valid JSON of the wrong top-level shape ({foo: 'bar'} instead of {p, f, s}). SDK reports parse-failed — same error class as malformed-json since both are 'body cannot become a config'.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"wrong-shape\""
+        },
+        "body": "{\"foo\": \"bar\"}"
+      },
+      "expected": {
+        "outcome": "failed",
+        "errorClass": "parseFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "http-401",
+      "description": "Server returns 401 Unauthorized with no body. 401 is NOT a ConfigCat invalid-SDK-key status (only 403/404 are) — it is a generic, retryable fetch failure. The SDK reports fetchFailed (matching configcat-js, which classes everything outside {200, 304, 403, 404} as a transient fetch error).",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 401,
+        "headers": { "Content-Type": "text/plain" },
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "fetchFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "http-403",
+      "description": "Server returns 403 Forbidden with no body. ConfigCat parity: 403 — like 404 — means 'your SDK Key seems to be wrong' (a non-retryable invalid-key signal, NOT a transient fetch failure). configcat-js classes 403 and 404 together; the SDK reports invalidSdkKey for both.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 403,
+        "headers": { "Content-Type": "text/plain" },
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "invalidSdkKey",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "http-429",
+      "description": "Server returns 429 Too Many Requests with a Retry-After header. The SDK reports a generic fetchFailed — smart-retry / Retry-After honouring is deliberately out of scope (epic #146 sub-task E). This case only pins that 429 is a transient fetch failure (not an invalid-key signal) and that the SDK does not choke on the Retry-After header.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "text/plain",
+          "Retry-After": "30"
+        },
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "fetchFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "http-304-with-last-modified",
+      "description": "Server returns 304 Not Modified carrying a Last-Modified header but NO ETag. With no prior ETag and no ETag on the 304, the SDK must NOT manufacture a cache validator from Last-Modified — it surfaces notModified with a null resulting ETag. Confirms ETag is the SOLE cache validator (no Last-Modified fallback), matching configcat-js.",
+      "given": { "previousEtag": null },
+      "server": {
+        "status": 304,
+        "headers": { "Last-Modified": "Wed, 21 Oct 2026 07:28:00 GMT" },
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "notModified",
+        "resultingEtag": null,
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "custom-base-url",
+      "description": "SDK configured with a non-default base URL; server responds 200 with a body + ETag. Verifies the SDK honours its configured baseUrl (options.baseUrl / DataGovernance custom equivalent) — the outgoing request URL must begin with the custom base, and the fetch still succeeds. Consumers read given.baseUrl and assert expected.requestUrlPrefix.",
+      "given": {
+        "previousEtag": null,
+        "baseUrl": "https://custom-edge.example.test"
+      },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-custom-base\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-custom-base\"",
+        "hasConfig": true,
+        "requestUrlPrefix": "https://custom-edge.example.test/configuration-files/"
+      }
+    },
+    {
+      "id": "timeout",
+      "description": "Server never responds within the SDK's configured request timeout. The SDK aborts the in-flight request and reports the timeout error class — distinct from a generic network failure (fetchFailed). No config is ingested. behavior=timeout: the nominal status/headers are never delivered.",
+      "given": {
+        "previousEtag": null
+      },
+      "server": {
+        "behavior": "timeout",
+        "status": 200,
+        "headers": {},
+        "bodyRef": null
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "timeout",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "network-reset",
+      "description": "Connection closed mid-response: the server begins delivering a 200 body, then the socket drops before the body completes. The SDK surfaces fetchFailed (a network/transport failure) — NOT parseFailed, because a truncated body is not a JSON-shape error. No config is ingested. behavior=close-mid-response: the partial body is config-v6.boolean.json, cut off mid-stream.",
+      "given": {
+        "previousEtag": null
+      },
+      "server": {
+        "behavior": "close-mid-response",
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-reset\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "fetchFailed",
+        "hasConfig": false
+      }
+    },
+    {
+      "id": "request-path-legacy-key",
+      "description": "The exact request path for a legacy key (#803, FR-001). The SDK is configured with given.sdkKey — taken from sdk-key-shapes.json, never a per-SDK literal — and MUST request <baseUrl>/configuration-files/<sdkKey>/config_v6.json with the key's exact bytes: no /v2/ prefix, no hash or cache-key tail of the key. A legacy key has no '/', so it is one segment as-is. Consumers compare the PARSED PATH of the recorded request to expected.requestPath exactly; the query string is excluded (the version carrier, #807, may add one).",
+      "given": {
+        "previousEtag": null,
+        "sdkKey": "confeature-sdk-1-FAKE_fixtureKeyN-otRealFAKEfi-03-FAKEfixtureKeyNotRealFAKEfixtu04"
+      },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-legacy-key\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-legacy-key\"",
+        "hasConfig": true,
+        "requestPath": "/configuration-files/confeature-sdk-1-FAKE_fixtureKeyN-otRealFAKEfi-03-FAKEfixtureKeyNotRealFAKEfixtu04/config_v6.json"
+      }
+    },
+    {
+      "id": "request-path-configcat-key",
+      "description": "The exact request path for a ConfigCat-shaped key, configcat-sdk-1/<22>/<22> (#803, FR-001). A well-shaped key travels RAW, as every ConfigCat SDK sends it: its three '/'-separated parts stay three path segments — exactly a stock ConfigCat SDK's bytes, not '%2F'-escaped into one segment, not hashed, no /v2/ prefix. given.sdkKey comes from sdk-key-shapes.json. Consumers compare the PARSED PATH of the recorded request to expected.requestPath exactly; the query string is excluded (#807 may add one).",
+      "given": {
+        "previousEtag": null,
+        "sdkKey": "configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3nO/pQ5rS7tU9vW1xY3zA5bC7d"
+      },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-configcat-key\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-configcat-key\"",
+        "hasConfig": true,
+        "requestPath": "/configuration-files/configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3nO/pQ5rS7tU9vW1xY3zA5bC7d/config_v6.json"
+      }
+    },
+    {
+      "id": "request-path-malformed-key",
+      "description": "The exact request path for a MALFORMED key (#803, FR-001). A key that fails the shape check of sdk-key-shapes.json is escaped into ONE path segment with Go's url.PathEscape: it keeps only A-Z a-z 0-9, the four unreserved marks - _ . ~ and the six sub-delims $ & + : = @; every other byte (/ ; , ? # % space ! ' ( ) * included, and all non-ASCII UTF-8 bytes) becomes %XX with uppercase hex. That is NOT encodeURIComponent (which keeps ! ' ( ) * and escapes $ & + : = @), nor a URL library's lenient path quoting. The key carries a space, every reserved character, '/', '?', '#', '%', one non-ASCII character of each UTF-8 length (U+00E9 'é' = 2 bytes C3 A9, U+20AC '€' = 3 bytes E2 82 AC, U+1F600 '😀' = 4 bytes F0 9F 98 80, outside the BMP so a UTF-16 surrogate pair in JS/Java/C#/Dart/Kotlin/Swift strings) and a trailing '..', so any other escaper — one that escapes UTF-16 code units, Latin-1 bytes or lowercase hex, or drops/replaces a non-ASCII character — or one that lets the key leave its segment, produces a different path. Unlike the other request-path cases, given.sdkKey is NOT from sdk-key-shapes.json: it is malformed by design, and scripts/validate-wire-cases.ts names this case as the only exception and checks requestPath against FR-001. expected.requestPath is real `go run` output of url.PathEscape. The SDK still fetches (only the empty key, '.' and '..' are refused) and the server answers a plain 200. Consumers compare the PARSED PATH of the recorded request, still percent-encoded as sent, to expected.requestPath exactly; the query string is excluded (#807 may add one).",
+      "given": {
+        "previousEtag": null,
+        "sdkKey": "bad key$&+:=@,;!'()*~/x?y#z%é€😀.."
+      },
+      "server": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-malformed-key\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-malformed-key\"",
+        "hasConfig": true,
+        "requestPath": "/configuration-files/bad%20key$&+:=@%2C%3B%21%27%28%29%2A~%2Fx%3Fy%23z%25%C3%A9%E2%82%AC%F0%9F%98%80../config_v6.json"
+      }
+    }
+  ]
+}

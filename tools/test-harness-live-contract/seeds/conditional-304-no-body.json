@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#conditional-304-no-body — SDK has prior ETag, server returns 304 with no body. The seed payload is what the SDK already cached; the CDN Worker returns 304 when If-None-Match matches the KV-stored ETag, so the seed only needs the ETag to match what the SDK supplies.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+        "f": {
+          "feature.dark-mode": { "t": 0, "v": { "b": true }, "i": "v-dark-mode", "r": [] }
+        },
+        "s": []
+      },
+      "etag": "\"v1-fresh\""
+    }
+  ]
+}

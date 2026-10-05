@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MIT
+#
+# Cargo manifest for the Confeature Rust SDK. Crate name `confeature`
+# mirrors the upstream `configcat` crate so a customer migrating from
+# ConfigCat changes a single line in their own Cargo.toml plus their
+# `use` paths (constitution Principle II — NON-NEGOTIABLE).
+#
+# MSRV is 1.86 (edition 2021). The default runtime is `tokio`; an
+# `async-std-runtime` feature flag swaps in async-std. The two features
+# are mutually exclusive at compile time — opting in to one MUST
+# disable the other via `default-features = false`.
+
+[package]
+name = "confeature"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "MIT"
+authors = ["MakerLabs"]
+description = "Confeature Rust SDK — drop-in compatible with the configcat crate"
+repository = "https://github.com/confeature/sdks"
+readme = "README.md"
+keywords = ["feature-flags", "configuration", "configcat", "rollout"]
+categories = ["config", "development-tools"]
+
+[features]
+default = ["tokio-runtime"]
+tokio-runtime = ["dep:tokio"]
+async-std-runtime = ["dep:async-std"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+log = "0.4"
+thiserror = "2"
+directories = "5"
+tempfile = "3"
+async-trait = "0.1"
+tokio = { version = "1", features = [
+  "sync",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "time",
+  "fs",
+], optional = true }
+async-std = { version = "1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+wiremock = "0.6"
+serde_json = "1"
+# Spec 071 US3 — API-surface conformance reference. The official ConfigCat
+# Rust SDK is pinned to 0.1.5 and consumed by `tests/api_surface_conformance.rs`
+# only. The dev-dependency scope keeps it out of the production crate graph.
+configcat = "0.1.5"
+
+[lib]
+name = "confeature"
+path = "src/lib.rs"

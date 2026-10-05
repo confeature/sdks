@@ -1,0 +1,30 @@
+{
+  "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+  "f": {
+    "feature.welcome-text": {
+      "t": 1,
+      "v": { "s": "Welcome to Confeature" },
+      "i": "v-welcome-text",
+      "r": []
+    },
+    "feature.empty-label": { "t": 1, "v": { "s": "" }, "i": "v-empty-label", "r": [] },
+    "feature.max-retries": { "t": 2, "v": { "i": 5 }, "i": "v-max-retries", "r": [] },
+    "feature.zero-quota": { "t": 2, "v": { "i": 0 }, "i": "v-zero-quota", "r": [] },
+    "feature.offset-days": { "t": 2, "v": { "i": -3 }, "i": "v-offset-days", "r": [] },
+    "feature.sample-rate": { "t": 3, "v": { "d": 0.25 }, "i": "v-sample-rate", "r": [] },
+    "feature.zero-threshold": { "t": 3, "v": { "d": 0.0 }, "i": "v-zero-threshold", "r": [] },
+    "feature.temperature-floor": {
+      "t": 3,
+      "v": { "d": -273.15 },
+      "i": "v-temperature-floor",
+      "r": []
+    },
+    "feature.precision-sum": {
+      "t": 3,
+      "v": { "d": 0.30000000000000004 },
+      "i": "v-precision-sum",
+      "r": []
+    }
+  },
+  "s": []
+}

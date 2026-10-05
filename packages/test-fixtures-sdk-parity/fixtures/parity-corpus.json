@@ -1,0 +1,618 @@
+[
+  {
+    "description": "feature.dark-mode returns cached true (default=false, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": false,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=false, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": false,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=false, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": false,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=false, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": false,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=false, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": false,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=true, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=true, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": true,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=true, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=true, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": true,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode returns cached true (default=true, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=false, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=false, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": false,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=false, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": false,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=false, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": false,
+    "user": {
+      "identifier": ""
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=false, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=true, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": true,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=true, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": true,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=true, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=true, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": true,
+    "user": {
+      "identifier": ""
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.beta-toggle returns cached false (default=true, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": true,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=false, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": false,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=false, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": false,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=false, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": false,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=false, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": false,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=false, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": false,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=true, user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=true, user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": true,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=true, user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=true, user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": true,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.unused-key returns cached true (default=true, user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.unused-key",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=false (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=false (user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": false,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=false (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": false,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=false (user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": false,
+    "user": {
+      "identifier": ""
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=false (user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=true (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=true (user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": true,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=true (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=true (user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": true,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.does-not-exist (absent) returns default=true (user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.does-not-exist",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.absent (absent) returns default=false (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.absent (absent) returns default=false (user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": false,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.absent (absent) returns default=false (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": false,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.absent (absent) returns default=false (user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": false,
+    "user": {
+      "identifier": ""
+    },
+    "expected": false
+  },
+  {
+    "description": "feature.absent (absent) returns default=false (user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": false,
+    "user": null,
+    "expected": false
+  },
+  {
+    "description": "feature.absent (absent) returns default=true (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.absent (absent) returns default=true (user=identifier-only)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": true,
+    "user": {
+      "identifier": "alice@example.com"
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.absent (absent) returns default=true (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.absent (absent) returns default=true (user=empty-id)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": true,
+    "user": {
+      "identifier": ""
+    },
+    "expected": true
+  },
+  {
+    "description": "feature.absent (absent) returns default=true (user=no-user-again)",
+    "configId": "boolean-basic",
+    "key": "feature.absent",
+    "defaultValue": true,
+    "user": null,
+    "expected": true
+  },
+  {
+    "description": "feature.dark-mode with non-boolean default (string) returns default (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": "string-default",
+    "user": null,
+    "expected": "string-default"
+  },
+  {
+    "description": "feature.dark-mode with non-boolean default (string) returns default (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": "string-default",
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": "string-default"
+  },
+  {
+    "description": "feature.dark-mode with non-boolean default (number) returns default (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": 42,
+    "user": null,
+    "expected": 42
+  },
+  {
+    "description": "feature.dark-mode with non-boolean default (number) returns default (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.dark-mode",
+    "defaultValue": 42,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": 42
+  },
+  {
+    "description": "feature.beta-toggle with non-boolean default (string) returns default (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": "string-default",
+    "user": null,
+    "expected": "string-default"
+  },
+  {
+    "description": "feature.beta-toggle with non-boolean default (string) returns default (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": "string-default",
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": "string-default"
+  },
+  {
+    "description": "feature.beta-toggle with non-boolean default (number) returns default (user=no-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": 42,
+    "user": null,
+    "expected": 42
+  },
+  {
+    "description": "feature.beta-toggle with non-boolean default (number) returns default (user=rich-user)",
+    "configId": "boolean-basic",
+    "key": "feature.beta-toggle",
+    "defaultValue": 42,
+    "user": {
+      "identifier": "bob@example.com",
+      "email": "bob@example.com",
+      "country": "FR",
+      "custom": {
+        "plan": "pro",
+        "betaTester": "true"
+      }
+    },
+    "expected": 42
+  }
+]

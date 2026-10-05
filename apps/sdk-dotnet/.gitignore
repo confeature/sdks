@@ -1,0 +1,18 @@
+# Build artefacts
+bin/
+obj/
+
+# Visual Studio / Rider user state
+*.user
+*.suo
+.vs/
+.idea/
+
+# Test coverage + results
+coverage.cobertura.xml
+TestResults/
+
+# NuGet local artefacts
+*.nupkg
+*.snupkg
+// CI nudge

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+#
+# The reference origin (ADR 0006 Q1): the live-contract harness's default
+# upstream. It runs LOCALLY ONLY, under the harness's in-process Miniflare, and
+# is never deployed (#861, plan §12 Q2). So this file carries no account, no
+# route, no KV namespace id and no preview id, and there is no deploy script.
+# With no id, local dev names the KV namespace after its binding (CONFIG_KV);
+# the harness seeds that namespace (src/wrangler-host.ts, kvNamespaceArgs).
+name = "confeature-reference-origin"
+main = "src/index.ts"
+compatibility_date = "2026-05-14"
+workers_dev = false
+
+# Nothing is persisted per request: SDK keys travel in the path.
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+
+[[kv_namespaces]]
+binding = "CONFIG_KV"

@@ -1,0 +1,7 @@
+# The trusted bytes of the Dagger CLI that CI installs (#865). Its anchor is
+# this repository, never a checksum served by the download host at run time.
+# One line per engine version, for the tarball the ubuntu runners use. On an
+# engine bump, add the line for the new dagger/dagger.json engineVersion: take
+# it from the release's checksums.txt on dl.dagger.io, cross-check it against
+# the GitHub release asset and your own sha256 of the downloaded tarball.
+f9ee083767dd12cdac583f9db3fedbebbbb3064f69152998be1f121d1a6cc103  dagger_v0.21.10_linux_amd64.tar.gz

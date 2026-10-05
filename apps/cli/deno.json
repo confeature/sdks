@@ -1,0 +1,28 @@
+{
+  "tasks": {
+    "run": "deno run -A src/main.ts",
+    "test": "deno test -A",
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "check": "deno check src/main.ts",
+    "compile": "deno run -A scripts/compile.ts"
+  },
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "@std/fmt": "jsr:@std/fmt@^1.0.0",
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "@confeature/contract/api": "../../packages/contract/src/generated/api.ts"
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "exclude": ["dist/"]
+  },
+  "lint": {
+    "exclude": ["dist/"],
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "exclude": ["dist/"]
+}

@@ -1,0 +1,106 @@
+[
+  {
+    "description": "feature.welcome-text (string) resolves to its cached string value",
+    "configId": "typed-basic",
+    "key": "feature.welcome-text",
+    "defaultValue": "fallback-text",
+    "user": null,
+    "expected": "Welcome to Confeature"
+  },
+  {
+    "description": "feature.empty-label (string) resolves to the empty string — a real value",
+    "configId": "typed-basic",
+    "key": "feature.empty-label",
+    "defaultValue": "fallback-text",
+    "user": null,
+    "expected": ""
+  },
+  {
+    "description": "feature.missing-string (absent) returns string default",
+    "configId": "typed-basic",
+    "key": "feature.missing-string",
+    "defaultValue": "fallback-text",
+    "user": null,
+    "expected": "fallback-text"
+  },
+  {
+    "description": "feature.max-retries (int) resolves to its cached integer value",
+    "configId": "typed-basic",
+    "key": "feature.max-retries",
+    "defaultValue": -1,
+    "user": null,
+    "expected": 5
+  },
+  {
+    "description": "feature.zero-quota (int) resolves to zero — a real value, not missing",
+    "configId": "typed-basic",
+    "key": "feature.zero-quota",
+    "defaultValue": -1,
+    "user": null,
+    "expected": 0
+  },
+  {
+    "description": "feature.offset-days (int) resolves to a negative integer",
+    "configId": "typed-basic",
+    "key": "feature.offset-days",
+    "defaultValue": 0,
+    "user": null,
+    "expected": -3
+  },
+  {
+    "description": "feature.sample-rate (double) resolves to its cached fractional value",
+    "configId": "typed-basic",
+    "key": "feature.sample-rate",
+    "defaultValue": 1,
+    "user": null,
+    "expected": 0.25
+  },
+  {
+    "description": "feature.zero-threshold (double) resolves to zero — a real value, not missing",
+    "configId": "typed-basic",
+    "key": "feature.zero-threshold",
+    "defaultValue": 1,
+    "user": null,
+    "expected": 0
+  },
+  {
+    "description": "feature.temperature-floor (double) resolves to a negative double",
+    "configId": "typed-basic",
+    "key": "feature.temperature-floor",
+    "defaultValue": 0,
+    "user": null,
+    "expected": -273.15
+  },
+  {
+    "description": "feature.precision-sum (double) resolves to a precision-sensitive double",
+    "configId": "typed-basic",
+    "key": "feature.precision-sum",
+    "defaultValue": 0,
+    "user": null,
+    "expected": 0.30000000000000004
+  },
+  {
+    "description": "feature.welcome-text (string) with a number default returns default (TYPE_MISMATCH)",
+    "configId": "typed-basic",
+    "key": "feature.welcome-text",
+    "defaultValue": 0,
+    "user": null,
+    "expected": 0
+  },
+  {
+    "description": "feature.max-retries (int) with a string default returns default (TYPE_MISMATCH)",
+    "configId": "typed-basic",
+    "key": "feature.max-retries",
+    "defaultValue": "not-a-number",
+    "user": null,
+    "expected": "not-a-number"
+  },
+  {
+    "description": "feature.sample-rate (double) with a string default returns default (TYPE_MISMATCH)",
+    "configId": "typed-basic",
+    "key": "feature.sample-rate",
+    "defaultValue": "not-a-number",
+    "user": null,
+    "expected": "not-a-number"
+  }
+]

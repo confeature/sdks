@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "description": "wire-cases.json#wrong-shape-200 — 200 + valid JSON whose top-level shape does not match the expected {p, f, s} contract.",
+  "keys": [
+    {
+      "sdkKey": "test-sdk-key",
+      "payload": {
+        "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "v1" },
+        "f": {},
+        "s": []
+      },
+      "etag": "\"unused-wrong-shape\"",
+      "fault": "wrong-shape"
+    }
+  ]
+}

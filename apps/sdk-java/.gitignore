@@ -1,0 +1,23 @@
+# Gradle build outputs
+build/
+.gradle/
+
+# Java build artefacts
+*.class
+*.jar
+*.war
+*.ear
+
+# Re-allow the in-repo LICENSE file (this glob excludes *.jar above).
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE noise
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.vscode/
+
+# OS noise
+.DS_Store

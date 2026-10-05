@@ -1,0 +1,60 @@
+{
+  "name": "confeature-sdks",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Confeature's client SDKs and CLI, drop-in compatible with ConfigCat's.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "vp run -r build",
+    "test": "vp run -r test",
+    "verify": "pnpm run verify:fmt-lint && pnpm run verify:json-keys && pnpm run verify:gate-declarations && pnpm run verify:codeowners && pnpm run verify:manifest-author && pnpm run verify:sdk-extraction && pnpm run verify:seed-schema && pnpm run verify:wire-cases && pnpm vp run -F @confeature/repo-gates -F @confeature/dagger-call test",
+    "ready": "pnpm run verify && pnpm dagger:all && pnpm swift:check",
+    "verify:fmt-lint": "node tools/repo-gates/verify-fmt-lint.mjs",
+    "verify:json-keys": "node tools/repo-gates/verify-no-dup-json-keys.mjs package.json",
+    "verify:gate-declarations": "node tools/repo-gates/verify-declarations.mjs",
+    "verify:codeowners": "node tools/repo-gates/verify-codeowners.mjs",
+    "verify:manifest-author": "node tools/manifest-author.mjs",
+    "verify:sdk-extraction": "node tools/verify-sdk-extraction-manifest.mjs",
+    "verify:seed-schema": "pnpm --filter @confeature/test-harness-live-contract run check:seed-schema",
+    "verify:wire-cases": "pnpm --filter @confeature/test-fixtures-sdk-parity run validate:wire-cases && pnpm vp run -F @confeature/test-fixtures-sdk-parity test",
+    "dagger:js": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh js-test",
+    "dagger:browser": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh browser-test",
+    "dagger:python": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh python-test",
+    "dagger:go": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh go-test",
+    "dagger:deno": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh deno-test",
+    "dagger:bun": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh bun-test",
+    "dagger:angular": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh angular-test",
+    "dagger:react": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh react-test",
+    "dagger:cloudflare-worker": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh cloudflare-worker-test",
+    "dagger:java": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh java-test",
+    "dagger:dotnet": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh dotnet-test",
+    "dagger:php": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh php-test",
+    "dagger:ruby": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh ruby-test",
+    "dagger:rust": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh rust-test",
+    "dagger:dart": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh dart-test",
+    "dagger:kotlin-mp": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh kotlin-mp-test",
+    "dagger:android": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh android-test",
+    "dagger:elixir": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh elixir-test",
+    "dagger:cpp": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh cpp-test",
+    "dagger:cli": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh cli-test",
+    "dagger:shared": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh shared-test",
+    "dagger:wire": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh wire-cases",
+    "dagger:live-contract": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh live-contract",
+    "dagger:live-python": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh live-python-contract",
+    "dagger:all": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh --timeout 360 prepush-all",
+    "swift:check": "bash scripts/swift-precheck.sh"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.1.1"
+}

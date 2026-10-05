@@ -1,0 +1,43 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+catalogMode: prefer
+
+# The lockfile was pruned offline from the one these values resolved, never
+# resolved fresh: a catalog value that disagrees with it is refused at
+# export, rather than shipped in a lockfile pnpm would reject.
+catalog:
+  "@types/node": ^24
+  # tsgo, which `vp pack` runs for the .d.ts of every package that sets
+  # `dts.tsgo`: one pin for all of them, declared by each (never hoisted in).
+  "@typescript/native-preview": 7.0.0-dev.20260509.2
+  typescript: ^5
+  vite: npm:@voidzero-dev/vite-plus-core@latest
+  # Pinned with vite-plus: the `vp` CLI bundles its own test runner, so the
+  # two must move together, never by float.
+  vitest: npm:@voidzero-dev/vite-plus-test@0.1.21
+  vite-plus: 0.1.21
+
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+  vite-plus: "catalog:"
+
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
+
+allowBuilds:
+  "@parcel/watcher": false # via ng-packagr (sdk-angular); only its watch mode needs it
+  esbuild: true # wrangler bundling (the live-contract harness)
+  lmdb: true # ng-packagr's cache (sdk-angular)
+  msgpackr-extract: true # via lmdb (sdk-angular)
+  nice-napi: true # via @angular-devkit/build-angular (sdk-angular)
+  sharp: false # not used
+  workerd: true # the Workers runtime the live-contract harness boots

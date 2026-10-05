@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: MIT -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Library manifest. The SDK exposes networking via OkHttp; the
+        consuming app declares its own android.permission.INTERNET as
+        required. Documenting the manifest as empty keeps the merged
+        AndroidManifest minimal for consumers.
+    -->
+</manifest>

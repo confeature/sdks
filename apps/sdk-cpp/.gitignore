@@ -1,0 +1,15 @@
+build/
+build-*/
+*.o
+*.a
+*.dylib
+*.so
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+coverage/
+coverage.info
+compile_commands.json
+.cache/

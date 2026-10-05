@@ -1,0 +1,6 @@
+# Go test/coverage artefacts.
+coverage.out
+*.out
+cover.*
+confeature.test
+*.test

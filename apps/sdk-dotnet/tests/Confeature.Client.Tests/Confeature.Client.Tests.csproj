@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>Confeature.Client.Tests</RootNamespace>
+    <AssemblyName>Confeature.Client.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      Test files are not customer-facing; relax doc + naming rules.
+      CS1591: missing XML doc comment.
+      CA1707: underscores in member names (xUnit convention is
+              `Method_scenario_expected`).
+    -->
+    <NoWarn>$(NoWarn);CS1591;CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="FluentAssertions" Version="6.12.2" />
+    <PackageReference Include="coverlet.collector" Version="6.0.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="RichardSzalay.MockHttp" Version="7.0.0" />
+    <!--
+      Spec 070 US3 / #257 — official ConfigCat .NET SDK on the test
+      classpath; consumed by ApiSurfaceConformanceTests as the
+      reflective conformance reference. Test-scope only; pinned per
+      spec at 9.5.0 (a version bump is a separate, deliberate change).
+    -->
+    <PackageReference Include="ConfigCat.Client" Version="9.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Confeature.Client\Confeature.Client.csproj" />
+  </ItemGroup>
+
+</Project>

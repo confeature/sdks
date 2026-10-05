@@ -1,0 +1,2772 @@
+[
+  {
+    "description": "stringContainsDogDefaultCat: no user → base value Cat (rule needs a user)",
+    "configId": "rules-basic",
+    "key": "stringContainsDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringContainsDogDefaultCat: identifier only, no Email → no targeted attribute → Cat",
+    "configId": "rules-basic",
+    "key": "stringContainsDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringContainsDogDefaultCat: Email joe@example.com does not CONTAIN @configcat.com → Cat",
+    "configId": "rules-basic",
+    "key": "stringContainsDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringContainsDogDefaultCat: Email joe@configcat.com CONTAINS @configcat.com → rule serves Dog",
+    "configId": "rules-basic",
+    "key": "stringContainsDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringIsInDogDefaultCat: no user → base value Cat",
+    "configId": "rules-basic",
+    "key": "stringIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsInDogDefaultCat: identifier only, no targeted attribute → Cat",
+    "configId": "rules-basic",
+    "key": "stringIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsInDogDefaultCat: Custom1=user matches neither rule (precedence/no-match) → Cat",
+    "configId": "rules-basic",
+    "key": "stringIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "user"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsInDogDefaultCat: Custom1=admin matches the second rule → rule serves Dog",
+    "configId": "rules-basic",
+    "key": "stringIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "admin"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringEqualsCleartextDogDefaultCat (EQUALS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEqualsCleartextDogDefaultCat (EQUALS): Email a@configcat.com equals operand → Dog",
+    "configId": "rules-basic",
+    "key": "stringEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringEqualsCleartextDogDefaultCat (EQUALS): Email b@configcat.com not equal → Cat",
+    "configId": "rules-basic",
+    "key": "stringEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "b@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEqualsDogDefaultCat (sensitive EQUALS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringEqualsDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEqualsDogDefaultCat (sensitive EQUALS): Email a@configcat.com hash equals → Dog",
+    "configId": "rules-basic",
+    "key": "stringEqualsDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringEqualsDogDefaultCat (sensitive EQUALS): Email b@configcat.com hash not equal → Cat",
+    "configId": "rules-basic",
+    "key": "stringEqualsDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "b@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringNotEqualsCleartextDogDefaultCat (NOT EQUALS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringNotEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringNotEqualsCleartextDogDefaultCat (NOT EQUALS): Email a@configcat.com != b@configcat.com → Dog",
+    "configId": "rules-basic",
+    "key": "stringNotEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringNotEqualsCleartextDogDefaultCat (NOT EQUALS): Email b@configcat.com equals operand → Cat",
+    "configId": "rules-basic",
+    "key": "stringNotEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "b@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringDoseNotEqualDogDefaultCat (sensitive NOT EQUALS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringDoseNotEqualDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringDoseNotEqualDogDefaultCat (sensitive NOT EQUALS): Email a@configcat.com hash != → Dog",
+    "configId": "rules-basic",
+    "key": "stringDoseNotEqualDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringDoseNotEqualDogDefaultCat (sensitive NOT EQUALS): Email b@configcat.com hash equals → Cat",
+    "configId": "rules-basic",
+    "key": "stringDoseNotEqualDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "b@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringStartsWithAnyOfCleartextDogDefaultCat (STARTS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringStartsWithAnyOfCleartextDogDefaultCat (STARTS WITH): Email a@configcat.com starts with a@ → Dog",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringStartsWithAnyOfCleartextDogDefaultCat (STARTS WITH): Email c@configcat.com matches no prefix → Cat",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "c@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringStartsWithAnyOfDogDefaultCat (sensitive STARTS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringStartsWithAnyOfDogDefaultCat (sensitive STARTS WITH): Email a@configcat.com hashed prefix a@ → Dog",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringStartsWithAnyOfDogDefaultCat (sensitive STARTS WITH): Email c@configcat.com no hashed prefix → Cat",
+    "configId": "rules-basic",
+    "key": "stringStartsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "c@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEndsWithAnyOfCleartextDogDefaultCat (ENDS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEndsWithAnyOfCleartextDogDefaultCat (ENDS WITH): Email bogjobber@verizon.net ends with @verizon.net → Dog",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "bogjobber@verizon.net"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringEndsWithAnyOfCleartextDogDefaultCat (ENDS WITH): Email a@configcat.com matches no suffix → Cat",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEndsWithAnyOfDogDefaultCat (sensitive ENDS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringEndsWithAnyOfDogDefaultCat (sensitive ENDS WITH): Email cliffordj@aol.com hashed suffix @aol.com → Dog",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "cliffordj@aol.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringEndsWithAnyOfDogDefaultCat (sensitive ENDS WITH): Email a@configcat.com no hashed suffix → Cat",
+    "configId": "rules-basic",
+    "key": "stringEndsWithAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsNotInCleartextDogDefaultCat (IS NOT ONE OF): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringIsNotInCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsNotInCleartextDogDefaultCat (IS NOT ONE OF): Email c@configcat.com not in set → Dog",
+    "configId": "rules-basic",
+    "key": "stringIsNotInCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "c@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringIsNotInCleartextDogDefaultCat (IS NOT ONE OF): Email a@configcat.com in set → Cat",
+    "configId": "rules-basic",
+    "key": "stringIsNotInCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsNotInHashedDogDefaultCat (sensitive IS NOT ONE OF): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringIsNotInHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringIsNotInHashedDogDefaultCat (sensitive IS NOT ONE OF): Email c@configcat.com hash not in set → Dog",
+    "configId": "rules-basic",
+    "key": "stringIsNotInHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "c@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringIsNotInHashedDogDefaultCat (sensitive IS NOT ONE OF): Email a@configcat.com hash in set → Cat",
+    "configId": "rules-basic",
+    "key": "stringIsNotInHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "number (NumberNotEquals 5): no user → base Default (rule needs Custom1)",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Default"
+  },
+  {
+    "description": "number (NumberNotEquals 5): Custom1=6 != 5 → rule serves <>5",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id",
+      "custom": {
+        "Custom1": "6"
+      }
+    },
+    "expected": "<>5"
+  },
+  {
+    "description": "number (NumberNotEquals 5): Custom1=5 equals threshold (boundary) → base Default",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id12",
+      "custom": {
+        "Custom1": "5"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "number (NumberNotEquals 5): Custom1=\"5.0\" equals 5 (int-vs-double, same as \"5\") → base Default",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id13",
+      "custom": {
+        "Custom1": "5.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "number (NumberNotEquals 5): Custom1=\"5,0\" equals 5 (comma-decimal, same as \"5.0\") → base Default",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id14",
+      "custom": {
+        "Custom1": "5,0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "number parse canary: Custom1=\"0\" → 0 != 5 → <>5",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0"
+      }
+    },
+    "expected": "<>5"
+  },
+  {
+    "description": "number parse canary: Custom1=\"0.0\" → 0 != 5 → <>5 (same as \"0\")",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0.0"
+      }
+    },
+    "expected": "<>5"
+  },
+  {
+    "description": "number parse canary: Custom1=\"0,0\" → 0 != 5 → <>5 (comma-decimal, same as \"0\")",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0,0"
+      }
+    },
+    "expected": "<>5"
+  },
+  {
+    "description": "numberWithPercentage (NumberLess 2.1): Custom1=1.5 < 2.1 → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id6",
+      "custom": {
+        "Custom1": "1.5"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage (NumberLess 2.1): Custom1=\"1,5\" < 2.1 (comma-decimal, same as \"1.5\") → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id7",
+      "custom": {
+        "Custom1": "1,5"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage (NumberLess 2.1): Custom1=0.2 < 2.1 → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id_a",
+      "custom": {
+        "Custom1": "0.2"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage (NumberLess 2.1): Custom1=\"0,2\" < 2.1 (comma-decimal, same as \"0.2\") → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id2",
+      "custom": {
+        "Custom1": "0,2"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage int-vs-double: Custom1=\"1\" → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id3",
+      "custom": {
+        "Custom1": "1"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage int-vs-double: Custom1=\"1.0\" → <2.1 (same as \"1\")",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id4",
+      "custom": {
+        "Custom1": "1.0"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage parse canary: Custom1=\"1,0\" → <2.1 (comma-decimal, same as \"1.0\")",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id5",
+      "custom": {
+        "Custom1": "1,0"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage parse canary: Custom1=\"0\" → <2.1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage parse canary: Custom1=\"0.0\" → <2.1 (same as \"0\")",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0.0"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage parse canary: Custom1=\"0,0\" → <2.1 (comma-decimal, same as \"0\")",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0,0"
+      }
+    },
+    "expected": "<2.1"
+  },
+  {
+    "description": "numberWithPercentage (NumberLessOrEquals 2.1): Custom1=2.1 equals threshold (boundary, < excluded → <= holds) → <=2,1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id8",
+      "custom": {
+        "Custom1": "2.1"
+      }
+    },
+    "expected": "<=2,1"
+  },
+  {
+    "description": "numberWithPercentage (NumberLessOrEquals 2.1): Custom1=\"2,1\" boundary (comma-decimal, same as \"2.1\") → <=2,1",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id9",
+      "custom": {
+        "Custom1": "2,1"
+      }
+    },
+    "expected": "<=2,1"
+  },
+  {
+    "description": "numberWithPercentage (NumberEquals 3.5): Custom1=3.50 == 3.5 → =3.5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id10",
+      "custom": {
+        "Custom1": "3.50"
+      }
+    },
+    "expected": "=3.5"
+  },
+  {
+    "description": "numberWithPercentage (NumberEquals 3.5): Custom1=\"3,50\" == 3.5 (comma-decimal, same as \"3.50\") → =3.5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id11",
+      "custom": {
+        "Custom1": "3,50"
+      }
+    },
+    "expected": "=3.5"
+  },
+  {
+    "description": "numberWithPercentage (NumberGreaterOrEquals 5): Custom1=5 equals threshold (boundary, >= holds, > excluded) → >=5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id12",
+      "custom": {
+        "Custom1": "5"
+      }
+    },
+    "expected": ">=5"
+  },
+  {
+    "description": "numberWithPercentage (NumberGreaterOrEquals 5): Custom1=\"5.0\" boundary (int-vs-double, same as \"5\") → >=5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id13",
+      "custom": {
+        "Custom1": "5.0"
+      }
+    },
+    "expected": ">=5"
+  },
+  {
+    "description": "numberWithPercentage (NumberGreaterOrEquals 5): Custom1=\"5,0\" boundary (comma-decimal, same as \"5.0\") → >=5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id14",
+      "custom": {
+        "Custom1": "5,0"
+      }
+    },
+    "expected": ">=5"
+  },
+  {
+    "description": "numberWithPercentage (NumberGreater 5): Custom1=5.76 > 5 → >5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id13",
+      "custom": {
+        "Custom1": "5.76"
+      }
+    },
+    "expected": ">5"
+  },
+  {
+    "description": "numberWithPercentage (NumberGreater 5): Custom1=\"5,76\" > 5 (comma-decimal, same as \"5.76\") → >5",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id14",
+      "custom": {
+        "Custom1": "5,76"
+      }
+    },
+    "expected": ">5"
+  },
+  {
+    "description": "numberWithPercentage (NumberNotEquals 4.2): Custom1=4 != 4.2 (no earlier rule matches) → <>4.2",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id15",
+      "custom": {
+        "Custom1": "4"
+      }
+    },
+    "expected": "<>4.2"
+  },
+  {
+    "description": "numberWithPercentage (NumberNotEquals 4.2): Custom1=\"4.0\" != 4.2 (int-vs-double, same as \"4\") → <>4.2",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id16",
+      "custom": {
+        "Custom1": "4.0"
+      }
+    },
+    "expected": "<>4.2"
+  },
+  {
+    "description": "numberWithPercentage (NumberNotEquals 4.2): Custom1=\"4,0\" != 4.2 (comma-decimal, same as \"4.0\") → <>4.2",
+    "configId": "rules-basic",
+    "key": "numberWithPercentage",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id17",
+      "custom": {
+        "Custom1": "4,0"
+      }
+    },
+    "expected": "<>4.2"
+  },
+  {
+    "description": "isOneOf (SemVerIsOneOf): no user → base Default (rule needs Custom1)",
+    "configId": "rules-basic",
+    "key": "isOneOf",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Default"
+  },
+  {
+    "description": "isOneOf (SemVerIsOneOf): Custom1=2.0.1 in set (trim parity, leading-space entry) → InSet",
+    "configId": "rules-basic",
+    "key": "isOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id22",
+      "custom": {
+        "Custom1": "2.0.1"
+      }
+    },
+    "expected": "InSet"
+  },
+  {
+    "description": "isOneOf (SemVerIsOneOf): Custom1=2.0.2 in set → InSet",
+    "configId": "rules-basic",
+    "key": "isOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id24",
+      "custom": {
+        "Custom1": "2.0.2"
+      }
+    },
+    "expected": "InSet"
+  },
+  {
+    "description": "isOneOf (SemVerIsOneOf): Custom1=1.0.0 not in the whitespace set (blank entries trimmed away) → base Default",
+    "configId": "rules-basic",
+    "key": "isOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id3",
+      "custom": {
+        "Custom1": "1.0.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "isOneOf (SemVerIsOneOf): Custom1=3.0.0 not in set → base Default",
+    "configId": "rules-basic",
+    "key": "isOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id26",
+      "custom": {
+        "Custom1": "3.0.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "isNotOneOf (SemVerIsNotOneOf): no user → base Default (rule needs Custom1)",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Default"
+  },
+  {
+    "description": "isNotOneOf (SemVerIsNotOneOf): Custom1=0.0.0 not in set → rule serves NotInSet",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0.0.0"
+      }
+    },
+    "expected": "NotInSet"
+  },
+  {
+    "description": "isNotOneOf (SemVerIsNotOneOf): Custom1=3.0.0 not in set → NotInSet",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id26",
+      "custom": {
+        "Custom1": "3.0.0"
+      }
+    },
+    "expected": "NotInSet"
+  },
+  {
+    "description": "isNotOneOf (SemVerIsNotOneOf): Custom1=1.0.0 IS in set (trim parity) → rule does not hold → base Default",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id3",
+      "custom": {
+        "Custom1": "1.0.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "isNotOneOf (SemVerIsNotOneOf): Custom1=2.0.0 IS in set (entry had stray trailing space, trimmed) → base Default",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id21",
+      "custom": {
+        "Custom1": "2.0.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "relations (SemVerLess 1.0.0): Custom1=0.0.0 < 1.0.0 → < 1.0.0",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "custom": {
+        "Custom1": "0.0.0"
+      }
+    },
+    "expected": "< 1.0.0"
+  },
+  {
+    "description": "relations (SemVerLessOrEquals 1.0.0): Custom1=1.0.0 equals threshold (boundary, < excluded → <= holds) → <=1.0.0",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id3",
+      "custom": {
+        "Custom1": "1.0.0"
+      }
+    },
+    "expected": "<=1.0.0"
+  },
+  {
+    "description": "relations (SemVerGreater 2.0.0): Custom1=2.0.1 > 2.0.0 → >2.0.0",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id22",
+      "custom": {
+        "Custom1": "2.0.1"
+      }
+    },
+    "expected": ">2.0.0"
+  },
+  {
+    "description": "relations (SemVerGreaterOrEquals 2.0.0): Custom1=2.0.0 equals threshold (boundary, > excluded → >= holds) → >=2.0.0",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id21",
+      "custom": {
+        "Custom1": "2.0.0"
+      }
+    },
+    "expected": ">=2.0.0"
+  },
+  {
+    "description": "relations: Custom1=1.1.0 satisfies no relation (1.0.0 < 1.1.0 < 2.0.0) → base Default",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id13",
+      "custom": {
+        "Custom1": "1.1.0"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.1-1 < 1.9.1-2 (numeric prerelease ordering) → < 1.9.1-2",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.1-1"
+      }
+    },
+    "expected": "< 1.9.1-2"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.1-2 → < 1.9.1-10 (proves -2 < -10 compares NUMERICALLY, not lexically)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.1-2"
+      }
+    },
+    "expected": "< 1.9.1-10"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.1-10 → < 1.9.1-10a (numeric identifier 10 < alphanumeric 10a)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.1-10"
+      }
+    },
+    "expected": "< 1.9.1-10a"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.99-rc → < 1.9.99-rc.1 (fewer identifiers precede)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.99-rc"
+      }
+    },
+    "expected": "< 1.9.99-rc.1"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.99-rc.2a → < 1.9.99 (prerelease orders BELOW release)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.99-rc.2a"
+      }
+    },
+    "expected": "< 1.9.99"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.99 → < 1.9.100 (patch ordering)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.99"
+      }
+    },
+    "expected": "< 1.9.100"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.100 → < 1.10.0-alpha (minor ordering)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.100"
+      }
+    },
+    "expected": "< 1.10.0-alpha"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.10.0-alpha → <= 1.10.0-alpha (SemVerLessOrEquals boundary: equal included)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.10.0-alpha"
+      }
+    },
+    "expected": "<= 1.10.0-alpha"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.10.0 → <= 1.10.0 (release > its prerelease; <= boundary inclusion)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.10.0"
+      }
+    },
+    "expected": "<= 1.10.0"
+  },
+  {
+    "description": "precedenceTests: AppVersion=2.0.0 → = 2.0.0 (SemVerIsOneOf equality tail; no earlier < / <= matches)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "2.0.0"
+      }
+    },
+    "expected": "= 2.0.0"
+  },
+  {
+    "description": "precedenceTests: AppVersion=2.0.0+build3 → = 2.0.0 (build metadata IGNORED for precedence/equality)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "2.0.0+build3"
+      }
+    },
+    "expected": "= 2.0.0"
+  },
+  {
+    "description": "precedenceTests: AppVersion=1.9.99-alpha+build1 → < 1.9.99-rc.1 (build metadata stripped off a PRERELEASE, then alpha < rc.1)",
+    "configId": "rules-basic",
+    "key": "precedenceTests",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "x",
+      "custom": {
+        "AppVersion": "1.9.99-alpha+build1"
+      }
+    },
+    "expected": "< 1.9.99-rc.1"
+  },
+  {
+    "description": "sensitiveIsOneOf (sensitive IS ONE OF): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveIsOneOf",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "sensitiveIsOneOf (sensitive IS ONE OF): Email a@configcat.com hash in set → Dog",
+    "configId": "rules-basic",
+    "key": "sensitiveIsOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "sensitiveIsOneOf (sensitive IS ONE OF): Email b@configcat.com hash not in set → Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveIsOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "b@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "sensitiveNotStartsWith (sensitive NOT STARTS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveNotStartsWith",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "sensitiveNotStartsWith (sensitive NOT STARTS WITH): Email c@configcat.com starts with no listed prefix → Dog",
+    "configId": "rules-basic",
+    "key": "sensitiveNotStartsWith",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "c@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "sensitiveNotStartsWith (sensitive NOT STARTS WITH): Email a@configcat.com starts with a@ → rule fails → Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveNotStartsWith",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "sensitiveNotEndsWith (sensitive NOT ENDS WITH): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveNotEndsWith",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "sensitiveNotEndsWith (sensitive NOT ENDS WITH): Email joe@example.com ends with no listed suffix → Dog",
+    "configId": "rules-basic",
+    "key": "sensitiveNotEndsWith",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@example.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "sensitiveNotEndsWith (sensitive NOT ENDS WITH): Email joe@configcat.com ends with @configcat.com → rule fails → Cat",
+    "configId": "rules-basic",
+    "key": "sensitiveNotEndsWith",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@configcat.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "isOneOfSensitive (CSV ##null##): no user → base ToAll",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "ToAll"
+  },
+  {
+    "description": "isOneOfSensitive (CSV id1+macska@example.com): Email hash in set → Macska",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "email": "macska@example.com"
+    },
+    "expected": "Macska"
+  },
+  {
+    "description": "isOneOfSensitive (CSV Kutya): Identifier hash in set → Allat",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Kutya"
+    },
+    "expected": "Allat"
+  },
+  {
+    "description": "isOneOfSensitive (CSV Sas): Identifier hash not in any set → base ToAll",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Sas"
+    },
+    "expected": "ToAll"
+  },
+  {
+    "description": "isOneOfSensitive (CSV Kutya+macska@example.com): Email rule precedes Identifier → Macska",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Kutya",
+      "email": "macska@example.com"
+    },
+    "expected": "Macska"
+  },
+  {
+    "description": "isOneOfSensitive (CSV id1+Scotland): Country hash in set → Britt",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "country": "Scotland"
+    },
+    "expected": "Britt"
+  },
+  {
+    "description": "isOneOfSensitive (CSV Macska+USA): no rule matches → base ToAll",
+    "configId": "rules-basic",
+    "key": "isOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Macska",
+      "country": "USA"
+    },
+    "expected": "ToAll"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV ##null##): no user → base ToAll",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "ToAll"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV id1+macska@example.com): Identifier id1 not in set → Kigyo",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "email": "macska@example.com"
+    },
+    "expected": "Kigyo"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV Kutya): Identifier in set → rule fails, no other attr → base ToAll",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Kutya"
+    },
+    "expected": "ToAll"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV Sas): Identifier Sas not in set → Kigyo",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Sas"
+    },
+    "expected": "Kigyo"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV Kutya+macska@example.com): Identifier in set + Email in set → base ToAll",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Kutya",
+      "email": "macska@example.com"
+    },
+    "expected": "ToAll"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV id1+Scotland): Identifier rule serves Kigyo (precedes Country) → Kigyo",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id1",
+      "country": "Scotland"
+    },
+    "expected": "Kigyo"
+  },
+  {
+    "description": "isNotOneOfSensitive (CSV Macska+USA): Identifier in set (fails), Country USA not in set → Ireland",
+    "configId": "rules-basic",
+    "key": "isNotOneOfSensitive",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "Macska",
+      "country": "USA"
+    },
+    "expected": "Ireland"
+  },
+  {
+    "description": "stringArrayContainsAnyOfCleartextDogDefaultCat (ARRAY CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayContainsAnyOfCleartextDogDefaultCat (ARRAY CONTAINS): [\"read\",\"execute\"] contains read → Dog",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringArrayContainsAnyOfCleartextDogDefaultCat (ARRAY CONTAINS): [\"Write\"] case mismatch → Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"Write\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfCleartextDogDefaultCat (ARRAY NOT CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfCleartextDogDefaultCat (ARRAY NOT CONTAINS): [\"Write\"] has none listed → Dog",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"Write\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfCleartextDogDefaultCat (ARRAY NOT CONTAINS): [\"read\",\"execute\"] contains read → Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayContainsAnyOfDogDefaultCat (sensitive ARRAY CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayContainsAnyOfDogDefaultCat (sensitive ARRAY CONTAINS): [\"read\",\"execute\"] hash contains read → Dog",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringArrayContainsAnyOfDogDefaultCat (sensitive ARRAY CONTAINS): [\"Write\"] hash not in set → Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"Write\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfDogDefaultCat (sensitive ARRAY NOT CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfDogDefaultCat (sensitive ARRAY NOT CONTAINS): [\"Write\"] hash has none listed → Dog",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"Write\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "stringArrayNotContainsAnyOfDogDefaultCat (sensitive ARRAY NOT CONTAINS): [\"read\",\"execute\"] hash contains read → Cat",
+    "configId": "rules-basic",
+    "key": "stringArrayNotContainsAnyOfDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "arrayContainsCaseCheckDogDefaultCat (case-check CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "arrayContainsCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "arrayContainsCaseCheckDogDefaultCat (case-check CONTAINS): [\"execute\",\"Read\"] contains Read → Dog",
+    "configId": "rules-basic",
+    "key": "arrayContainsCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"execute\", \"Read\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "arrayContainsCaseCheckDogDefaultCat (case-check CONTAINS): [\"read\",\"execute\"] lacks Read → Cat",
+    "configId": "rules-basic",
+    "key": "arrayContainsCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "arrayDoesNotContainCaseCheckDogDefaultCat (case-check NOT CONTAINS): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "arrayDoesNotContainCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "arrayDoesNotContainCaseCheckDogDefaultCat (case-check NOT CONTAINS): [\"read\",\"execute\"] lacks Write → Dog",
+    "configId": "rules-basic",
+    "key": "arrayDoesNotContainCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"read\",\"execute\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "arrayDoesNotContainCaseCheckDogDefaultCat (case-check NOT CONTAINS): [\"Read\",\"Write\",\"execute\"] contains Write → Cat",
+    "configId": "rules-basic",
+    "key": "arrayDoesNotContainCaseCheckDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "[\"Read\", \"Write\",  \"execute\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeTextEqualsCleartext (UNICODE attr-name TextEquals): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "unicodeTextEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeTextEqualsCleartext (UNICODE attr-name TextEquals): ʄǟռƈʏ ȶɛӼȶ equals → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeTextEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ʄǟռƈʏ ȶɛӼȶ"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeTextEqualsCleartext (UNICODE attr-name TextEquals): ʄaռƈʏ ȶɛӼȶ differs → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeTextEqualsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ʄaռƈʏ ȶɛӼȶ"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeTextEqualsHashed (UNICODE attr-name SensitiveTextEquals): ʄǟռƈʏ ȶɛӼȶ hash equals → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeTextEqualsHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ʄǟռƈʏ ȶɛӼȶ"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeTextEqualsHashed (UNICODE attr-name SensitiveTextEquals): ʄaռƈʏ ȶɛӼȶ hash differs → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeTextEqualsHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ʄaռƈʏ ȶɛӼȶ"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeIsOneOfCleartext (UNICODE IsOneOf, ACCENT): ÁRVÍZTŰRŐ tükörfúrógép in set → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ÁRVÍZTŰRŐ tükörfúrógép"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeIsOneOfCleartext (UNICODE IsOneOf, CASE-FOLD): árvíztűrő tükörfúrógép case-mismatch → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "árvíztűrő tükörfúrógép"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeIsOneOfCleartext (UNICODE IsOneOf, SURROGATE): u𝖓𝖎𝖈𝖔𝖉e in set → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "u𝖓𝖎𝖈𝖔𝖉e"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeIsOneOfCleartext (UNICODE IsOneOf, SURROGATE): u𝖓𝖎𝖈𝖔𝖉𝖊 differing pair → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "u𝖓𝖎𝖈𝖔𝖉𝖊"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeIsOneOfHashed (UNICODE SensitiveIsOneOf, ACCENT): ÁRVÍZTŰRŐ tükörfúrógép hash in set → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "ÁRVÍZTŰRŐ tükörfúrógép"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeIsOneOfHashed (UNICODE SensitiveIsOneOf, SURROGATE): u𝖓𝖎𝖈𝖔𝖉e hash in set → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "u𝖓𝖎𝖈𝖔𝖉e"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeIsOneOfHashed (UNICODE SensitiveIsOneOf, CASE-FOLD): árvíztűrő tükörfúrógép hash absent → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeIsOneOfHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "árvíztűrő tükörfúrógép"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeArrayContainsCleartext (UNICODE ARRAY contains, ACCENT): [\"ÁRVÍZTŰRŐ tükörfúrógép\",\"unicode\"] → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ tükörfúrógép\", \"unicode\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeArrayContainsCleartext (UNICODE ARRAY contains, SURROGATE): [\"ÁRVÍZTŰRŐ\",\"tükörfúrógép\",\"u𝖓𝖎𝖈𝖔𝖉e\"] → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ\", \"tükörfúrógép\", \"u𝖓𝖎𝖈𝖔𝖉e\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeArrayContainsCleartext (UNICODE ARRAY contains): [\"ÁRVÍZTŰRŐ\",\"tükörfúrógép\",\"unicode\"] none match → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsCleartextDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ\", \"tükörfúrógép\", \"unicode\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "unicodeArrayContainsHashed (UNICODE SensitiveARRAY contains, ACCENT): [\"ÁRVÍZTŰRŐ tükörfúrógép\",\"unicode\"] hash match → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ tükörfúrógép\", \"unicode\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeArrayContainsHashed (UNICODE SensitiveARRAY contains, SURROGATE): [\"ÁRVÍZTŰRŐ\",\"tükörfúrógép\",\"u𝖓𝖎𝖈𝖔𝖉e\"] hash match → Dog",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ\", \"tükörfúrógép\", \"u𝖓𝖎𝖈𝖔𝖉e\"]"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "unicodeArrayContainsHashed (UNICODE SensitiveARRAY contains): [\"ÁRVÍZTŰRŐ\",\"tükörfúrógép\",\"unicode\"] none → Cat",
+    "configId": "rules-basic",
+    "key": "unicodeArrayContainsHashedDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "1",
+      "custom": {
+        "🆃🅴🆇🆃": "[\"ÁRVÍZTŰRŐ\", \"tükörfúrógép\", \"unicode\"]"
+      }
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "emailAnd (AND-group): no user → base Cat (AND-rule needs Email)",
+    "configId": "rules-basic",
+    "key": "emailAnd",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "emailAnd (AND-group): jane@sensitivecompany.com matches ALL three conditions → Dog",
+    "configId": "rules-basic",
+    "key": "emailAnd",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "jane@sensitivecompany.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "emailAnd (AND-group): anna@sensitivecompany.com fails the STARTS-WITH-jane condition → base Cat",
+    "configId": "rules-basic",
+    "key": "emailAnd",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "anna@sensitivecompany.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "emailAnd (AND-group): jane@example.com fails the ENDS-WITH-sensitivecompany.com condition → base Cat",
+    "configId": "rules-basic",
+    "key": "emailAnd",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "jane@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "emailOr (OR / first-match-wins): no user → base Cat",
+    "configId": "rules-basic",
+    "key": "emailOr",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "emailOr (OR / first-match-wins): jane@example.com starts with jane@ → Jane",
+    "configId": "rules-basic",
+    "key": "emailOr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "jane@example.com"
+    },
+    "expected": "Jane"
+  },
+  {
+    "description": "emailOr (OR / first-match-wins): john@example.com starts with john@ → John",
+    "configId": "rules-basic",
+    "key": "emailOr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "john@example.com"
+    },
+    "expected": "John"
+  },
+  {
+    "description": "emailOr (OR / first-match-wins): mark@example.com starts with mark@ → Mark",
+    "configId": "rules-basic",
+    "key": "emailOr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "mark@example.com"
+    },
+    "expected": "Mark"
+  },
+  {
+    "description": "emailOr (OR / first-match-wins): a@example.com matches no rule → base Cat",
+    "configId": "rules-basic",
+    "key": "emailOr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "a@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat (DateTimeBefore 1693497600): no user → base default (rule needs Date)",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": null,
+    "expected": "default"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat (DateTimeBefore 1693497600): Date=\"1693497500\" < threshold → 12 (comparators.json datapoint)",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Date": "1693497500"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat (DateTimeBefore 1693497600): Date=\"1693497700\" > threshold → base default",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12346",
+      "custom": {
+        "Date": "1693497700"
+      }
+    },
+    "expected": "default"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat (DateTimeBefore 1693497600): Date=\"1693497600\" equals threshold (strict, BEFORE excludes) → base default",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12347",
+      "custom": {
+        "Date": "1693497600"
+      }
+    },
+    "expected": "default"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat (DateTimeBefore 1693497600): Date=\"1693497500.5\" fractional < threshold → 12 (exact double, no truncation)",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12348",
+      "custom": {
+        "Date": "1693497500.5"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "datetimeBeforeDogDefaultCat int-vs-double: Date=\"1693497500.0\" < threshold → 12 (same as \"1693497500\")",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12349",
+      "custom": {
+        "Date": "1693497500.0"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat (DateTimeAfter 1693497600): no user → base default (rule needs Date)",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": null,
+    "expected": "default"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat (DateTimeAfter 1693497600): Date=\"1693497700\" > threshold → 12",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12350",
+      "custom": {
+        "Date": "1693497700"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat (DateTimeAfter 1693497600): Date=\"1693497500\" < threshold → base default (comparators.json datapoint)",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12351",
+      "custom": {
+        "Date": "1693497500"
+      }
+    },
+    "expected": "default"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat (DateTimeAfter 1693497600): Date=\"1693497600\" equals threshold (strict, AFTER excludes) → base default",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12352",
+      "custom": {
+        "Date": "1693497600"
+      }
+    },
+    "expected": "default"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat (DateTimeAfter 1693497600): Date=\"1693497700.5\" fractional > threshold → 12 (exact double, no truncation)",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12353",
+      "custom": {
+        "Date": "1693497700.5"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "datetimeAfterDogDefaultCat int-vs-double: Date=\"1693497700.0\" > threshold → 12 (same as \"1693497700\")",
+    "configId": "rules-basic",
+    "key": "datetimeAfterDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12354",
+      "custom": {
+        "Date": "1693497700.0"
+      }
+    },
+    "expected": "12"
+  },
+  {
+    "description": "semverGreaterAttrTrimDogDefaultCat (SemVerGreater 8): Custom1=\" 0.2.0 \" (whitespace) → attribute TRIMMED, 0.2.0 > 0.1.1 → Dog",
+    "configId": "rules-basic",
+    "key": "semverGreaterAttrTrimDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "attr-trim",
+      "custom": {
+        "Custom1": " 0.2.0 "
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "semverGreaterValueTrimDogDefaultCat (SemVerGreater 8): comparison value \" 0.1.1 \" (whitespace, verbatim) TRIMMED, Custom1=\"0.2.0\" > 0.1.1 → Dog (FR-007)",
+    "configId": "rules-basic",
+    "key": "semverGreaterValueTrimDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "value-trim",
+      "custom": {
+        "Custom1": "0.2.0"
+      }
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "segDeveloperIsInDogDefaultCat (IS-IN Developers, hashed segment): no user → base Cat (segment needs a user)",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "segDeveloperIsInDogDefaultCat (IS-IN Developers, hashed segment): Email kate@example.com in Developers (segment-name salt) → Dog",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "kate",
+      "email": "kate@example.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "segDeveloperIsInDogDefaultCat (IS-IN Developers, hashed segment): Email jane@example.com not in Developers → Cat",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "jane",
+      "email": "jane@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "segBetaCleartextIsInDogDefaultCat (IS-IN Beta Users cleartext): no user → base Cat (segment needs a user)",
+    "configId": "rules-basic",
+    "key": "segBetaCleartextIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "segBetaCleartextIsInDogDefaultCat (IS-IN Beta Users cleartext): Email jane@example.com in Beta Users (cleartext) → Dog",
+    "configId": "rules-basic",
+    "key": "segBetaCleartextIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "jane",
+      "email": "jane@example.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "segBetaCleartextIsInDogDefaultCat (IS-IN Beta Users cleartext): Email kate@example.com not in Beta Users (cleartext) → Cat",
+    "configId": "rules-basic",
+    "key": "segBetaCleartextIsInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "kate",
+      "email": "kate@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "segDeveloperIsNotInDogDefaultCat (IS-NOT-IN Developers, hashed segment): no user → missing-user error un-negated → base Cat",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsNotInDogDefaultCat",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "segDeveloperIsNotInDogDefaultCat (IS-NOT-IN Developers, hashed segment): Email jane@example.com NOT in Developers → Dog",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsNotInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "jane",
+      "email": "jane@example.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "segDeveloperIsNotInDogDefaultCat (IS-NOT-IN Developers, hashed segment): Email kate@example.com in Developers → Cat",
+    "configId": "rules-basic",
+    "key": "segDeveloperIsNotInDogDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "kate",
+      "email": "kate@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "string75Cat0Dog25Falcon0Horse (% rollout): no user → no Identifier to bucket → base served Chicken",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0Horse",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Chicken"
+  },
+  {
+    "description": "string75Cat0Dog25Falcon0Horse (% rollout): Identifier \"12345\" → bucket 21 ∈ [0,75) → Cat",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0Horse",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "string75Cat0Dog25Falcon0Horse (% rollout): Identifier \"0\" → bucket 88 ∈ [75,100) → Falcon (different option)",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0Horse",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "0"
+    },
+    "expected": "Falcon"
+  },
+  {
+    "description": "after-rule: no user → no rule match + no Identifier to bucket → base served -1",
+    "configId": "rules-basic",
+    "key": "integer25One25Two25Three25FourAdvancedRules",
+    "defaultValue": 42,
+    "user": null,
+    "expected": -1
+  },
+  {
+    "description": "after-rule: Identifier \"12345\" + Email \"joe@example.com\" (rule FAILS) → fall through to setting p[]: bucket 25 ∈ [25,50) → Two → 2",
+    "configId": "rules-basic",
+    "key": "integer25One25Two25Three25FourAdvancedRules",
+    "defaultValue": 42,
+    "user": {
+      "identifier": "12345",
+      "email": "joe@example.com"
+    },
+    "expected": 2
+  },
+  {
+    "description": "after-rule: Identifier \"12345\" + Email \"joe@configcat.com\" (rule MATCHES) → rule fixed value 5 wins (no bucketing)",
+    "configId": "rules-basic",
+    "key": "integer25One25Two25Three25FourAdvancedRules",
+    "defaultValue": 42,
+    "user": {
+      "identifier": "12345",
+      "email": "joe@configcat.com"
+    },
+    "expected": 5
+  },
+  {
+    "description": "within-rule: Email \"joe@example.com\" (rule does NOT match) → base served Cat",
+    "configId": "rules-basic",
+    "key": "stringContainsString75Cat0Dog25Falcon0HorseDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "within-rule: Email \"joe@configcat.com\" (rule MATCHES) + Country \"US\" → rule split bucket 70 ∈ [0,75) → Cat (matches upstream)",
+    "configId": "rules-basic",
+    "key": "stringContainsString75Cat0Dog25Falcon0HorseDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@configcat.com",
+      "country": "US"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "within-rule: Email \"joe@configcat.com\" (rule MATCHES) + Country \"JP\" → rule split bucket 80 ∈ [75,100) → Falcon (distinct from base Cat)",
+    "configId": "rules-basic",
+    "key": "stringContainsString75Cat0Dog25Falcon0HorseDefaultCat",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@configcat.com",
+      "country": "JP"
+    },
+    "expected": "Falcon"
+  },
+  {
+    "description": "custom-attr: Identifier \"12345\" but NO Country attr → no bucket → base served Chicken",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0HorseCustomAttr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345"
+    },
+    "expected": "Chicken"
+  },
+  {
+    "description": "custom-attr: Country \"US\" → bucket keyed by Country = 70 ∈ [0,75) → Cat (matches upstream)",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0HorseCustomAttr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "country": "US"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "custom-attr: Country \"DE\" → bucket keyed by Country = 79 ∈ [75,100) → Falcon (different option)",
+    "configId": "rules-basic",
+    "key": "string75Cat0Dog25Falcon0HorseCustomAttr",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "country": "DE"
+    },
+    "expected": "Falcon"
+  },
+  {
+    "description": "prereq-satisfied: Email kate@configcat.com → mainStringFlag=\"private\" → stringDependsOnString prereq EQUALS \"private\" holds → Dog",
+    "configId": "rules-basic",
+    "key": "stringDependsOnString",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "kate@configcat.com"
+    },
+    "expected": "Dog"
+  },
+  {
+    "description": "prereq-not-satisfied: no user → mainStringFlag=\"public\" → stringDependsOnString prereq EQUALS \"private\" fails → fallback Cat",
+    "configId": "rules-basic",
+    "key": "stringDependsOnString",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "Cat"
+  },
+  {
+    "description": "prereq-not-satisfied: Email joe@example.com → mainStringFlag=\"public\" → stringDependsOnString prereq EQUALS \"private\" fails → fallback Cat",
+    "configId": "rules-basic",
+    "key": "stringDependsOnString",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "joe@example.com"
+    },
+    "expected": "Cat"
+  },
+  {
+    "description": "prereq flag: mainStringFlag base value \"public\" (no user)",
+    "configId": "rules-basic",
+    "key": "mainStringFlag",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "public"
+  },
+  {
+    "description": "prereq flag: mainStringFlag Email kate@configcat.com → rule serves \"private\"",
+    "configId": "rules-basic",
+    "key": "mainStringFlag",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "email": "kate@configcat.com"
+    },
+    "expected": "private"
+  },
+  {
+    "description": "circular-detected: key2 → prereq key3 → prereq key2 (cycle) → engine fails closed → SDK default",
+    "configId": "rules-basic",
+    "key": "key2",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "default"
+  },
+  {
+    "description": "circular-detected: key3 → prereq key2 → prereq key3 (cycle) → engine fails closed → SDK default",
+    "configId": "rules-basic",
+    "key": "key3",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "default"
+  },
+  {
+    "description": "validation: number (NumberNotEquals 5) Custom1=\"not_a_number\" → conversion error → rule no-match → base Default",
+    "configId": "rules-basic",
+    "key": "number",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "not_a_number"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "validation: isNotOneOf (SemVerIsNotOneOf) Custom1=\"wrong_semver\" → unparseable semver → rule no-match → base Default",
+    "configId": "rules-basic",
+    "key": "isNotOneOf",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "wrong_semver"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "validation: relations (SemVer relations 6-9) Custom1=\"wrong_semver\" → unparseable semver → rule no-match → base Default",
+    "configId": "rules-basic",
+    "key": "relations",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": "wrong_semver"
+      }
+    },
+    "expected": "Default"
+  },
+  {
+    "description": "validation: datetimeBeforeDogDefaultCat (DateTimeBefore) Date=\"2023.04.10\" → invalid Unix timestamp → rule no-match → base default",
+    "configId": "rules-basic",
+    "key": "datetimeBeforeDogDefaultCat",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Date": "2023.04.10"
+      }
+    },
+    "expected": "default"
+  },
+  {
+    "description": "validation: booleanKey1 long IS-CONTAINS lists, Identifier=\"12\" matches every list → rule serves true (truncation is log-only)",
+    "configId": "rules-basic",
+    "key": "booleanKey1",
+    "defaultValue": false,
+    "user": {
+      "identifier": "12"
+    },
+    "expected": true
+  },
+  {
+    "description": "variationId: boolean no user → base false, variationId a0e56eda (setting `i`)",
+    "configId": "rules-basic",
+    "key": "boolean",
+    "defaultValue": true,
+    "user": null,
+    "expected": false,
+    "expectedVariationId": "a0e56eda"
+  },
+  {
+    "description": "variationId: decimal no user → base 0, variationId 63612d39 (setting `i`)",
+    "configId": "rules-basic",
+    "key": "decimal",
+    "defaultValue": -1,
+    "user": null,
+    "expected": 0,
+    "expectedVariationId": "63612d39"
+  },
+  {
+    "description": "variationId: text no user → base \"c\", variationId 3f05be89 (setting `i`)",
+    "configId": "rules-basic",
+    "key": "text",
+    "defaultValue": "default",
+    "user": null,
+    "expected": "c",
+    "expectedVariationId": "3f05be89"
+  },
+  {
+    "description": "variationId: whole no user → base 999999, variationId cf2e9162 (setting `i`)",
+    "configId": "rules-basic",
+    "key": "whole",
+    "defaultValue": -1,
+    "user": null,
+    "expected": 999999,
+    "expectedVariationId": "cf2e9162"
+  },
+  {
+    "description": "variationId: boolean Email a@configcat.com → rule true, variationId 67787ae4 (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "boolean",
+    "defaultValue": false,
+    "user": {
+      "identifier": "id",
+      "email": "a@configcat.com"
+    },
+    "expected": true,
+    "expectedVariationId": "67787ae4"
+  },
+  {
+    "description": "variationId: decimal Email a@configcat.com → rule -2147483647.2147484, variationId 8f9559cf (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "decimal",
+    "defaultValue": -1,
+    "user": {
+      "identifier": "id",
+      "email": "a@configcat.com"
+    },
+    "expected": -2147483647.2147484,
+    "expectedVariationId": "8f9559cf"
+  },
+  {
+    "description": "variationId: text Email a@configcat.com → rule \"true\", variationId 9bdc6a1f (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "text",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id",
+      "email": "a@configcat.com"
+    },
+    "expected": "true",
+    "expectedVariationId": "9bdc6a1f"
+  },
+  {
+    "description": "variationId: whole Email a@configcat.com → rule 1, variationId ab30533b (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "whole",
+    "defaultValue": -1,
+    "user": {
+      "identifier": "id",
+      "email": "a@configcat.com"
+    },
+    "expected": 1,
+    "expectedVariationId": "ab30533b"
+  },
+  {
+    "description": "variationId: decimal Email a@test.com → rule 0.12345678912345678, variationId d66c5781 (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "decimal",
+    "defaultValue": -1,
+    "user": {
+      "identifier": "id",
+      "email": "a@test.com"
+    },
+    "expected": 0.12345678912345678,
+    "expectedVariationId": "d66c5781"
+  },
+  {
+    "description": "variationId: text Email a@test.com → rule \"false\", variationId 65310deb (rule `s.i`)",
+    "configId": "rules-basic",
+    "key": "text",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "id",
+      "email": "a@test.com"
+    },
+    "expected": "false",
+    "expectedVariationId": "65310deb"
+  },
+  {
+    "description": "variationId: boolean Identifier bryanw@verizon.net → percentage option false, variationId a0e56eda (option `i`)",
+    "configId": "rules-basic",
+    "key": "boolean",
+    "defaultValue": true,
+    "user": {
+      "identifier": "bryanw@verizon.net",
+      "email": "bryanw@verizon.net"
+    },
+    "expected": false,
+    "expectedVariationId": "a0e56eda"
+  },
+  {
+    "description": "variationId: decimal Identifier bryanw@verizon.net → percentage option 1, variationId d0dbc27f (option `i`)",
+    "configId": "rules-basic",
+    "key": "decimal",
+    "defaultValue": -1,
+    "user": {
+      "identifier": "bryanw@verizon.net",
+      "email": "bryanw@verizon.net"
+    },
+    "expected": 1,
+    "expectedVariationId": "d0dbc27f"
+  },
+  {
+    "description": "variationId: text Identifier bryanw@verizon.net → percentage option \"a\", variationId 30ba32b9 (option `i`)",
+    "configId": "rules-basic",
+    "key": "text",
+    "defaultValue": "default",
+    "user": {
+      "identifier": "bryanw@verizon.net",
+      "email": "bryanw@verizon.net"
+    },
+    "expected": "a",
+    "expectedVariationId": "30ba32b9"
+  },
+  {
+    "description": "variationId: whole Identifier bryanw@verizon.net → percentage option -1, variationId 61a5a033 (option `i`)",
+    "configId": "rules-basic",
+    "key": "whole",
+    "defaultValue": -999,
+    "user": {
+      "identifier": "bryanw@verizon.net",
+      "email": "bryanw@verizon.net"
+    },
+    "expected": -1,
+    "expectedVariationId": "61a5a033"
+  },
+  {
+    "description": "numberToStringConversion (TextEquals 28): Custom1=0.12345 (number) → '0.12345' matches → option 1",
+    "configId": "rules-basic",
+    "key": "numberToStringConversion",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": 0.12345
+      }
+    },
+    "expected": "1"
+  },
+  {
+    "description": "numberToStringConversionInt (TextEquals 28): Custom1=125 (number) → '125' matches → option 4",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionInt",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": 125
+      }
+    },
+    "expected": "4"
+  },
+  {
+    "description": "numberToStringConversionPositiveExp (TextEquals 28): Custom1=-1.23456789e96 → '-1.23456789e+96' matches → option 2",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionPositiveExp",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": -1.23456789e+96
+      }
+    },
+    "expected": "2"
+  },
+  {
+    "description": "numberToStringConversionNegativeExp (TextEquals 28): Custom1=-12345.6789e-100 → '-1.23456789e-96' matches → option 4",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionNegativeExp",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": -1.23456789e-96
+      }
+    },
+    "expected": "4"
+  },
+  {
+    "description": "dateToStringConversion (TextEquals 28): Custom1=Date(1680307199999) → '1680307199.999' (epoch seconds) matches → option 3",
+    "configId": "rules-basic",
+    "key": "dateToStringConversion",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$date": 1680307199.999
+        }
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "dateToStringConversion (TextEquals 28): Custom1=1680307199.999 (numeric epoch) → same as the Date object → option 3",
+    "configId": "rules-basic",
+    "key": "dateToStringConversion",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": 1680307199.999
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "stringArrayToStringConversion (TextEquals 28): Custom1=[\"read\",\"Write\",\" eXecute \"] → JSON matches → option 4",
+    "configId": "rules-basic",
+    "key": "stringArrayToStringConversion",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": [
+          "read",
+          "Write",
+          " eXecute "
+        ]
+      }
+    },
+    "expected": "4"
+  },
+  {
+    "description": "stringArrayToStringConversionEmpty (TextEquals 28): Custom1=[] (empty array) → '[]' matches → option 5",
+    "configId": "rules-basic",
+    "key": "stringArrayToStringConversionEmpty",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": []
+      }
+    },
+    "expected": "5"
+  },
+  {
+    "description": "stringArrayToStringConversionSpecialChars (TextEquals 28): Custom1 array with escapes → JSON matches → option 3",
+    "configId": "rules-basic",
+    "key": "stringArrayToStringConversionSpecialChars",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": [
+          "+<>%\"'\\/\t\r\n"
+        ]
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "stringArrayToStringConversionUnicode (TextEquals 28): Custom1 Unicode array → JSON matches → option 2",
+    "configId": "rules-basic",
+    "key": "stringArrayToStringConversionUnicode",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": [
+          "äöüÄÖÜçéèñışğâ¢™✓😀"
+        ]
+      }
+    },
+    "expected": "2"
+  },
+  {
+    "description": "numberToStringConversionNaN (TextEquals 28): Custom1=NaN (number) → \"NaN\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionNaN",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "NaN"
+        }
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "numberToStringConversionPositiveInf (TextEquals 28): Custom1=Infinity → \"Infinity\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionPositiveInf",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "Infinity"
+        }
+      }
+    },
+    "expected": "4"
+  },
+  {
+    "description": "numberToStringConversionNegativeInf (TextEquals 28): Custom1=-Infinity → \"-Infinity\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "numberToStringConversionNegativeInf",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "-Infinity"
+        }
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "dateToStringConversionNaN (TextEquals 28): Custom1=NaN (number) → \"NaN\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "dateToStringConversionNaN",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "NaN"
+        }
+      }
+    },
+    "expected": "3"
+  },
+  {
+    "description": "dateToStringConversionPositiveInf (TextEquals 28): Custom1=Infinity → \"Infinity\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "dateToStringConversionPositiveInf",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "Infinity"
+        }
+      }
+    },
+    "expected": "1"
+  },
+  {
+    "description": "dateToStringConversionNegativeInf (TextEquals 28): Custom1=-Infinity → \"-Infinity\" matches → percentage option",
+    "configId": "rules-basic",
+    "key": "dateToStringConversionNegativeInf",
+    "defaultValue": "fallback",
+    "user": {
+      "identifier": "12345",
+      "custom": {
+        "Custom1": {
+          "$num": "-Infinity"
+        }
+      }
+    },
+    "expected": "5"
+  }
+]

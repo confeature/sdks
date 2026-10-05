@@ -1,0 +1,26 @@
+[
+  {
+    "sdkKey": "configcat-sdk-1/aB3_-dE5fG7hI9jK1lM3nO/pQ5rS7tU9vW1xY3zA5bC7d",
+    "expectedCacheKey": "confeature:cache:v1:SqU9woq8Xp72crnJnqAuccVvuDENt176"
+  },
+  {
+    "sdkKey": "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "expectedCacheKey": "confeature:cache:v1:bIg57I9_4ya_LRRpZZ8qZdn_gXPqQ1aY"
+  },
+  {
+    "sdkKey": "configcat-sdk-1-test-key-deadbeef-cafebabe",
+    "expectedCacheKey": "confeature:cache:v1:Kl9eLpPCYGmrSMxqh7R_EYqS9NlsBx4Q"
+  },
+  {
+    "sdkKey": "x",
+    "expectedCacheKey": "confeature:cache:v1:LXEWQrcmsEQBYnyp-6wy9chTD7GQPMTb"
+  },
+  {
+    "sdkKey": "",
+    "expectedCacheKey": "confeature:cache:v1:47DEQpj8HBSa-_TImW-5JCeuQeRkm5NM"
+  },
+  {
+    "sdkKey": "🦀-emoji-key",
+    "expectedCacheKey": "confeature:cache:v1:XvDGv1H4o4JUSlXWKHI0gA5l1B89H0nj"
+  }
+]

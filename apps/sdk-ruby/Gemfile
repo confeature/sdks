@@ -1,0 +1,23 @@
+# frozen_string_literal: true
+
+# SPDX-License-Identifier: MIT
+
+source "https://rubygems.org"
+
+# Pull runtime metadata + required_ruby_version from the gemspec so the
+# Gemfile stays the single source of dev-dep truth and the gemspec stays
+# the single source of runtime/version truth.
+gemspec
+
+group :development, :test do
+  gem "rake", "~> 13.2"
+  gem "rspec", "~> 3.13"
+  gem "rubocop", "~> 1.66"
+  gem "rubocop-rspec", "~> 3.0"
+  gem "simplecov", "~> 0.22"
+  gem "webmock", "~> 3.23"
+  # Spec 072 US3 — API-surface conformance reference (#259). Used by
+  # `spec/api_surface_conformance_spec.rb` only; not a runtime
+  # dependency of the gem (gemspec is untouched).
+  gem "configcat", "~> 8.0"
+end
