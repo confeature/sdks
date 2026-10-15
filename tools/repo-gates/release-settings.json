@@ -65,7 +65,20 @@
     {
       "name": "cli-release",
       "tagPatterns": ["cli-v*"],
-      "secrets": []
+      "secrets": [
+        {
+          "name": "CLI_R2_API_TOKEN",
+          "kind": "token",
+          "issuer": "Cloudflare R2 (MakerLabs account): Object Read & Write on confeature-cli-releases only",
+          "rotateBy": "2027-10-16"
+        },
+        {
+          "name": "CLOUDFLARE_ACCOUNT_ID",
+          "kind": "identifier",
+          "issuer": "Cloudflare (MakerLabs account id, not a credential)",
+          "rotateBy": "2099-12-31"
+        }
+      ]
     }
   ],
   "trustBindings": [

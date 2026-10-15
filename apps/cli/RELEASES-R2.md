@@ -3,7 +3,7 @@
 Users install the CLI from **https://cli.confeature.io**, a Cloudflare R2 bucket behind a custom
 domain. The hostname and the object layout are a **permanent contract**: every root install script
 ever served installs pinned versions from `v<version>/<asset>` (ADR 0006, amendment of 2026-09-28).
-This file lives under `apps/cli/` so it moves with the CLI to the public repository (#794).
+This file lives under `apps/cli/`, in the public repository the CLI releases from (#794).
 
 | Object                                                | Written by                                       | Cache                                 | Mutable                              |
 | :---------------------------------------------------- | :----------------------------------------------- | :------------------------------------ | :----------------------------------- |
@@ -51,8 +51,14 @@ name the host itself.
 API token_. Choose _Object Read & Write_, applied to **`confeature-cli-releases` only**. Then run:
 
 ```bash
-gh secret set CLI_R2_API_TOKEN      # paste the token value when prompted
+gh secret set CLI_R2_API_TOKEN --env cli-release --repo confeature/sdks   # paste the token value when prompted
 ```
+
+It is an **environment** secret of `cli-release`, never a repository secret: only the upload and
+promote jobs bind that environment, each waits for a sdk-maintainers approval, and the environment
+accepts `cli-v*` tags only. The secret is declared, with its rotation date, in
+`tools/repo-gates/release-settings.json`; a secret that is not declared there fails the operator's
+read-back, and so does one past its rotation date.
 
 The token must not reach any other bucket. Check with
 `pnpm exec wrangler r2 object get <another-bucket>/<any-key> --remote` using that token: it must be
