@@ -15,6 +15,11 @@
 # with ZERO workflow edits. The setup job's coverage summary is the live
 # burn-down.
 #
+# Kept until the per-push SDK gates (#793) are required status checks on main:
+# they run the same matrix earlier, on every push, and this backstop is then
+# deleted with them (#794 decision). It runs for SDK releases only: a CLI
+# release (`cli-v*`) is gated by its own chain in cli-release.yml.
+#
 # Spec 053, the Dagger local runner (Phase 5, #204).
 # Contract: spec 053's release-gate-workflow contract.
 
@@ -42,6 +47,7 @@ jobs:
   # consumed by the `test` job below.
   setup:
     name: setup (manifest → matrix + coverage)
+    if: startsWith(github.event.release.tag_name, 'sdk-')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -75,21 +81,21 @@ jobs:
           echo "exempt=${EXEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Write coverage summary
+        env:
+          TOTAL: ${{ steps.counts.outputs.total }}
+          COVERED: ${{ steps.counts.outputs.covered }}
+          PENDING: ${{ steps.counts.outputs.pending }}
+          EXEMPT: ${{ steps.counts.outputs.exempt }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          TOTAL='${{ steps.counts.outputs.total }}'
-          COVERED='${{ steps.counts.outputs.covered }}'
-          PENDING='${{ steps.counts.outputs.pending }}'
-          EXEMPT='${{ steps.counts.outputs.exempt }}'
           {
-            echo "### Release-gate SDK coverage — ${{ github.event.release.tag_name }}"
+            echo "### Release-gate SDK coverage — ${RELEASE_TAG}"
             echo ""
             echo "**${COVERED}/${TOTAL} covered · ${PENDING} pending · ${EXEMPT} exempt**"
             echo ""
             echo "Covered SDKs run their containerized Dagger suite below as the"
             echo "release backstop. Pending SDKs are not yet containerized and BLOCK"
-            echo "their own \`sdk-publish\` until epic [#354](https://github.com/${{ github.repository }}/issues/354) drains them. Exempt SDKs publish without a gate."
-            echo ""
-            echo "Burn-down tracker: SDK test-containerization epic [#354](https://github.com/${{ github.repository }}/issues/354)."
+            echo "their own \`sdk-publish\`. Exempt SDKs publish without a gate."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # One matrix leg per covered SDK, each invoking its daggerFn against the

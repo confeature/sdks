@@ -1,5 +1,5 @@
 {
-  "$comment": "liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. contract-live.yml runs it; dagger livePythonContract reads python's from here. Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate.",
+  "$comment": "publish[] (#794) is the publish table: one unit per releasable package (the 21 SDKs of .sdks[] plus sdk-shared), each naming its gate, registry (or none, with a reason), coordinates, versionSource and the units it must follow (after). tagFormat is the one release-tag shape; tools/sdk-pack/resolve-publish.mjs is the only reader that decides whether a tag may publish. liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. contract-live.yml runs it; dagger livePythonContract reads python's from here. Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate.",
   "sdks": [
     {
       "name": "node",
@@ -52,6 +52,267 @@
       "daggerFn": null,
       "status": "exempt",
       "reason": "UE CI impractical in a standard Dagger container (size/license/GPU)"
+    }
+  ],
+  "tagFormat": "sdk-{name}-v{version}",
+  "publish": [
+    {
+      "name": "shared",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-shared",
+      "path": "packages/sdk-shared",
+      "versionSource": {
+        "file": "packages/sdk-shared/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": [],
+      "gateFn": "shared-test"
+    },
+    {
+      "name": "node",
+      "gate": "node",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-node",
+      "path": "apps/sdk-node",
+      "versionSource": {
+        "file": "apps/sdk-node/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["shared"]
+    },
+    {
+      "name": "browser-js",
+      "gate": "browser-js",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-browser-js",
+      "path": "apps/sdk-browser-js",
+      "versionSource": {
+        "file": "apps/sdk-browser-js/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["shared"]
+    },
+    {
+      "name": "bun",
+      "gate": "bun",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-bun",
+      "path": "apps/sdk-bun",
+      "versionSource": {
+        "file": "apps/sdk-bun/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["shared"]
+    },
+    {
+      "name": "deno",
+      "gate": "deno",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-deno",
+      "path": "apps/sdk-deno",
+      "versionSource": {
+        "file": "apps/sdk-deno/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["shared"]
+    },
+    {
+      "name": "react",
+      "gate": "react",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-react",
+      "path": "apps/sdk-react",
+      "versionSource": {
+        "file": "apps/sdk-react/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["browser-js"]
+    },
+    {
+      "name": "angular",
+      "gate": "angular",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-angular",
+      "path": "apps/sdk-angular",
+      "versionSource": {
+        "file": "apps/sdk-angular/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["browser-js"]
+    },
+    {
+      "name": "cloudflare-worker",
+      "gate": "cloudflare-worker",
+      "registry": "npm",
+      "coordinates": "@confeature/sdk-cloudflare-worker",
+      "path": "apps/sdk-cloudflare-worker",
+      "versionSource": {
+        "file": "apps/sdk-cloudflare-worker/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["browser-js"]
+    },
+    {
+      "name": "python",
+      "gate": "python",
+      "registry": "pypi",
+      "coordinates": "confeature-client",
+      "path": "apps/sdk-python",
+      "versionSource": {
+        "file": "apps/sdk-python/pyproject.toml",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "rust",
+      "gate": "rust",
+      "registry": "crates",
+      "coordinates": "confeature",
+      "path": "apps/sdk-rust",
+      "versionSource": {
+        "file": "apps/sdk-rust/Cargo.toml",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "ruby",
+      "gate": "ruby",
+      "registry": "rubygems",
+      "coordinates": "confeature",
+      "path": "apps/sdk-ruby",
+      "versionSource": {
+        "file": "apps/sdk-ruby/lib/confeature/version.rb",
+        "pattern": "^  VERSION = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "dotnet",
+      "gate": "dotnet",
+      "registry": "nuget",
+      "coordinates": "Confeature.Client",
+      "path": "apps/sdk-dotnet",
+      "versionSource": {
+        "file": "apps/sdk-dotnet/src/Confeature.Client/Confeature.Client.csproj",
+        "pattern": "^    <Version>([^<]+)</Version>$"
+      },
+      "after": []
+    },
+    {
+      "name": "dart",
+      "gate": "dart",
+      "registry": "pubdev",
+      "coordinates": "confeature",
+      "path": "apps/sdk-dart",
+      "versionSource": {
+        "file": "apps/sdk-dart/pubspec.yaml",
+        "pattern": "^version: (\\S+)$"
+      },
+      "after": []
+    },
+    {
+      "name": "elixir",
+      "gate": "elixir",
+      "registry": "hex",
+      "coordinates": "confeature_client",
+      "path": "apps/sdk-elixir",
+      "versionSource": {
+        "file": "apps/sdk-elixir/mix.exs",
+        "pattern": "^  @version \"([^\"]+)\"$"
+      },
+      "after": [],
+      "blockedBy": "#805 — mix compile fails outside MIX_ENV=test"
+    },
+    {
+      "name": "go",
+      "gate": "go",
+      "registry": "go",
+      "coordinates": "github.com/confeature/sdks/apps/sdk-go",
+      "path": "apps/sdk-go",
+      "versionSource": {
+        "file": "apps/sdk-go/version.go",
+        "pattern": "^const Version = \"([^\"]+)\"$"
+      },
+      "after": [],
+      "releaseTag": "apps/sdk-go/v{version}"
+    },
+    {
+      "name": "php",
+      "gate": "php",
+      "registry": "packagist",
+      "coordinates": "confeature/confeature-php-sdk",
+      "path": "apps/sdk-php",
+      "versionSource": "tag",
+      "after": [],
+      "mirror": {
+        "repository": "confeature/confeature-php-sdk",
+        "releaseTag": "v{version}"
+      }
+    },
+    {
+      "name": "swift",
+      "gate": "swift",
+      "registry": "swiftpm",
+      "coordinates": "https://github.com/confeature/confeature-swift",
+      "path": "apps/sdk-swift",
+      "versionSource": "tag",
+      "after": [],
+      "mirror": {
+        "repository": "confeature/confeature-swift",
+        "releaseTag": "{version}"
+      }
+    },
+    {
+      "name": "java",
+      "gate": "java",
+      "registry": "maven",
+      "coordinates": "io.confeature:confeature-java-client",
+      "path": "apps/sdk-java",
+      "versionSource": {
+        "file": "apps/sdk-java/build.gradle.kts",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "android",
+      "gate": "android",
+      "registry": "maven",
+      "coordinates": "io.confeature:confeature-android-client",
+      "path": "apps/sdk-android",
+      "versionSource": {
+        "file": "apps/sdk-android/build.gradle.kts",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "kotlin-mp",
+      "gate": "kotlin-mp",
+      "registry": "maven",
+      "coordinates": "io.confeature:confeature-kotlin-client",
+      "path": "apps/sdk-kotlin-mp",
+      "versionSource": {
+        "file": "apps/sdk-kotlin-mp/build.gradle.kts",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": []
+    },
+    {
+      "name": "cpp",
+      "gate": "cpp",
+      "registry": "none",
+      "reason": "no package registry: consumed by CMake FetchContent from this repository (vcpkg and Conan are out of scope)",
+      "path": "apps/sdk-cpp"
+    },
+    {
+      "name": "unreal",
+      "gate": "unreal",
+      "registry": "none",
+      "reason": "no package registry: the Unreal plugin is installed from source (Fab submission is out of scope)",
+      "path": "apps/sdk-unreal"
     }
   ]
 }

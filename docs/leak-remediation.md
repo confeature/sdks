@@ -112,8 +112,8 @@ Finally, publish the security advisory, naming the affected versions and the fix
 ## Prevention
 
 - `verify:manifest-author` refuses a manifest with an address in it, or a published manifest that
-  does not name `MakerLabs` as its author. It runs in `pnpm run verify`, and in `sdk-publish.yml`
-  right before "Publish to npm" — the npm publish only. The other registries get the same gate in
-  front of their own publish step when their publishing is set up (#794).
+  does not name `MakerLabs` as its author. It runs in `pnpm run verify`, and in every pack job of
+  `sdk-publish.yml` (one per registry), before the artifact a publish job uploads even exists.
+  `verify:gate-declarations` refuses a pack job that skips it.
 - Commits use a GitHub noreply address.
 - Secret scanning and push protection stay on for this repository.

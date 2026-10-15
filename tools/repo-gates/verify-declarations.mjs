@@ -134,6 +134,15 @@ export const DECLARED_GATES = {
     script: "tools/repo-gates/verify-declarations.mjs",
     homes: [{ file: "package.json", script: "verify" }],
   },
+  "verify:workflows": {
+    // The release-pipeline rules over every workflow: declared environments,
+    // no credential outside one, no install or cache in a credentialed job,
+    // no untrusted trigger, no expression in a shell, pinned actions and
+    // tools, and tag patterns that agree across trigger, ruleset and policy
+    // (#794). Its data is tools/repo-gates/release-settings.json.
+    script: "tools/repo-gates/verify-workflows.mjs",
+    homes: [{ file: "package.json", script: "verify" }],
+  },
   "verify:codeowners": {
     // CODEOWNERS names org teams only, never a person (verify-codeowners.mjs).
     script: "tools/repo-gates/verify-codeowners.mjs",
@@ -141,12 +150,18 @@ export const DECLARED_GATES = {
   },
   "verify:manifest-author": {
     // Every manifest names MakerLabs as its author, with no address. Two
-    // homes, the second being the one that matters: "Publish to npm" cannot
-    // be undone — a registry keeps what it is given.
+    // homes, the second being the one that matters: a publish cannot be
+    // undone — a registry keeps what it is given. Every pack job of
+    // sdk-publish.yml (one per registry) runs it before it packs what its
+    // publish job uploads, so it is declared per job (#794).
     script: "tools/manifest-author.mjs",
     homes: [
       { file: "package.json", script: "verify" },
-      { file: ".github/workflows/sdk-publish.yml", before: "Publish to npm" },
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Pack the release artifact",
+        perJob: true,
+      },
     ],
   },
   "verify:sdk-extraction": {
@@ -650,9 +665,11 @@ export function commandRunsTaskOn(command, name, task, workspace) {
  * are on and `<task>` runs on the package; any other script, when that script
  * itself runs on it. It runs when a root pipeline (`PIPELINES`) runs it,
  * or when a workflow job runs `pnpm --filter <f> run <task>` before a step
- * that publishes with the same filter — `<f>` selecting this package, or the
- * tag-resolved `${{ … }}` expression, which counts for a package in
- * `dagger/sdk-manifest.json` (the SDKs that workflow publishes).
+ * that publishes or packs with the same filter — `<f>` selecting this package,
+ * or a tag-resolved value (a `${{ … }}` expression, or a `$VAR` the job sets
+ * from one), which counts for an npm unit in `publish[]` of
+ * `dagger/sdk-manifest.json` (the packages that workflow publishes). Packing
+ * counts because the pack job's tarball is exactly what the publish job uploads.
  */
 export function lifecycleHomeUnreached(root, rootPkg, name, script) {
   const lifecycle = script.startsWith("post");
@@ -667,7 +684,7 @@ export function lifecycleHomeUnreached(root, rootPkg, name, script) {
   let listed = false;
   try {
     const manifest = JSON.parse(readFileSync(join(root, "dagger", "sdk-manifest.json"), "utf8"));
-    listed = (manifest.sdks ?? []).some((sdk) => `@confeature/sdk-${sdk.name}` === name);
+    listed = (manifest.publish ?? []).some((u) => u?.registry === "npm" && u.coordinates === name);
   } catch (err) {
     if (err?.code !== "ENOENT") {
       return `dagger/sdk-manifest.json could not be read (${err?.message ?? err})`;
@@ -682,13 +699,14 @@ export function lifecycleHomeUnreached(root, rootPkg, name, script) {
   // The filter may be a quoted expression (`"${{ needs.setup.outputs.package }}"`).
   const FILTER = `("[^"]*"|'[^']*'|\\S+)`;
   const BUILD = new RegExp(`^pnpm\\s+--filter\\s+${FILTER}\\s+run\\s+${escapeRe(task)}$`);
-  const PUBLISH = new RegExp(`^pnpm\\s+--filter\\s+${FILTER}\\s+publish(\\s|$)`);
+  const PUBLISH = new RegExp(`^pnpm\\s+--filter\\s+${FILTER}\\s+(?:publish|pack)(\\s|$)`);
   // Does this build's filter select the package? A literal filter must resolve
   // to it; a `${{ … }}` expression is resolved by the workflow from its tag, so
   // it counts only for the SDKs that workflow publishes — the manifest.
   const selects = (filter) => {
     const unquoted = filter.replace(/^["']|["']$/g, "");
-    if (/\$\{\{[^}]*\}\}/.test(unquoted)) return listed;
+    if (/\$\{\{[^}]*\}\}/.test(unquoted) || /^\$\{?[A-Z_][A-Z0-9_]*\}?$/.test(unquoted))
+      return listed;
     return filterSelects(unquoted, workspace)?.has(name) === true;
   };
   for (const file of workflows) {
@@ -894,6 +912,52 @@ export function verifyGateDeclarations(
           `${gate}: declared home ${home.file} could not be read`,
           `restore ${home.file}, or correct this gate's homes`,
         );
+        continue;
+      }
+      if (home.perJob === true) {
+        // EVERY job holding a step named `before` runs the gate earlier in that
+        // SAME job. The release tier has one pack job per registry (a pack
+        // job builds what its publish job uploads), and a single invocation
+        // in one of them orders nothing in the others. Within one job only the
+        // steps' own `if:` counts, as above: the job's condition gates both.
+        const named = steps.filter((s) => s.name === home.before);
+        if (named.length === 0) {
+          fail(
+            `${gate}: ${home.file} has no step named "${home.before}" for it to precede`,
+            `restore that step, or correct \`before\` — the ordering is what makes this home enforcing`,
+          );
+          continue;
+        }
+        for (const target of named) {
+          const guard = steps.find(
+            (s) =>
+              s.job === target.job &&
+              steps.indexOf(s) < steps.indexOf(target) &&
+              s.run !== null &&
+              invokesGate(s.run, gate),
+          );
+          if (guard === undefined) {
+            fail(
+              `${gate}: job "${target.job}" reaches "${home.before}" without running it first`,
+              `run \`pnpm run ${gate}\` earlier in job "${target.job}" — every job that packs a release runs it`,
+            );
+            continue;
+          }
+          if (guard.shell !== null && !/(?:^|\s)-[a-zA-Z]*e|^(?:bash|sh)$/.test(guard.shell)) {
+            fail(
+              `${gate}: its step in job "${guard.job}" overrides the shell (\`${guard.shell}\`), which need not stop on failure`,
+              "drop the `shell:` key — the default `bash -e {0}` is what makes a multi-line block fail at all",
+            );
+          }
+          for (const s of [guard, target]) {
+            if (s.stepIf || s.continueOnError) {
+              fail(
+                `${gate}: "${s.name ?? "a step"}" in job "${s.job}" can run past a failed gate (${s.stepIf ? "if:" : "continue-on-error:"})`,
+                "remove that key — a gate, or the step it guards, that runs regardless enforces nothing",
+              );
+            }
+          }
+        }
         continue;
       }
       const at = steps.findIndex((s) => s.run !== null && invokesGate(s.run, gate));

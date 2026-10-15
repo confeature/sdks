@@ -1200,13 +1200,52 @@ describe("per-package homes must be reached by a pipeline", () => {
           scripts: { postbuild: "node ./s/check-b.mjs" },
         }),
       );
-      write("dagger/sdk-manifest.json", JSON.stringify({ sdks: [{ name: "x" }] }));
+      write(
+        "dagger/sdk-manifest.json",
+        JSON.stringify({
+          publish: [{ name: "x", registry: "npm", coordinates: "@confeature/sdk-x" }],
+        }),
+      );
     };
 
     it("accepts a build that precedes the publish in the same job (a job-level if: gates both)", () => {
       sdk();
       write(".github/workflows/sdk-publish.yml", PUBLISH());
       expect(unreached()).toBe(false);
+    });
+
+    it("accepts a build that precedes the PACK of the same filter (the pack job's tarball is what is published)", () => {
+      sdk();
+      const yml = PUBLISH().replace(
+        " publish --access public",
+        ' pack --pack-destination "$RUNNER_TEMP/release"',
+      );
+      write(".github/workflows/sdk-publish.yml", yml);
+      expect(unreached()).toBe(false);
+    });
+
+    it("accepts a $VAR filter set from the resolver, for an npm unit of publish[]", () => {
+      sdk();
+      write(
+        ".github/workflows/sdk-publish.yml",
+        PUBLISH({ buildFilter: '"$UNIT_COORDINATES"', publishFilter: '"$UNIT_COORDINATES"' }),
+      );
+      expect(unreached()).toBe(false);
+    });
+
+    it("does not count a resolver-set filter for a package that is not an npm unit", () => {
+      sdk();
+      write(
+        "dagger/sdk-manifest.json",
+        JSON.stringify({
+          publish: [{ name: "x", registry: "pypi", coordinates: "@confeature/sdk-x" }],
+        }),
+      );
+      write(
+        ".github/workflows/sdk-publish.yml",
+        PUBLISH({ buildFilter: '"$UNIT_COORDINATES"', publishFilter: '"$UNIT_COORDINATES"' }),
+      );
+      expect(unreached()).toBe(true);
     });
 
     it("rejects a build with its own if:", () => {
@@ -1242,7 +1281,12 @@ describe("per-package homes must be reached by a pipeline", () => {
 
     it("accepts a literal filter that selects the package, manifest or not", () => {
       sdk();
-      write("dagger/sdk-manifest.json", JSON.stringify({ sdks: [{ name: "z" }] }));
+      write(
+        "dagger/sdk-manifest.json",
+        JSON.stringify({
+          publish: [{ name: "z", registry: "npm", coordinates: "@confeature/sdk-z" }],
+        }),
+      );
       write(
         ".github/workflows/sdk-publish.yml",
         PUBLISH({ buildFilter: "@confeature/sdk-x", publishFilter: "@confeature/sdk-x" }),
@@ -1373,5 +1417,71 @@ describe("the entry-point check never decides in silence", () => {
 
   it("no argv[1] (an importer) is not the entry point", () => {
     expect(isEntry(undefined, HERE_FOR_ENTRY, { real: throwing })).toBe(false);
+  });
+});
+
+describe("perJob: every job that reaches the guarded step runs the gate first, in that job (#794)", () => {
+  // The release tier packs in one job per registry. A single gate invocation
+  // in one pack job orders nothing in the others, so `perJob` asks each job.
+  const PER_JOB = {
+    ...GATES,
+    "verify:thing": {
+      script: "tools/verify-thing.mjs",
+      homes: [
+        { file: "package.json", script: "verify" },
+        { file: ".github/workflows/ship.yml", before: "Pack the release artifact", perJob: true },
+      ],
+    },
+  };
+  const job = (name, { gate = true, gateIf = "", packIf = "", jobIf = "" } = {}) =>
+    [
+      `  ${name}:`,
+      ...(jobIf ? [`    if: ${jobIf}`] : []),
+      "    steps:",
+      ...(gate
+        ? [
+            "      - name: Gate",
+            ...(gateIf ? [`        if: ${gateIf}`] : []),
+            "        run: pnpm run verify:thing",
+          ]
+        : []),
+      "      - name: Pack the release artifact",
+      ...(packIf ? [`        if: ${packIf}`] : []),
+      "        run: pnpm pack",
+    ].join("\n");
+  const flow = (...jobs) => `name: ship\njobs:\n${jobs.join("\n")}\n`;
+  const what = (workflow) => {
+    seed({ workflow });
+    return verifyGateDeclarations(root, PER_JOB, [])
+      .map((v) => v.what)
+      .join("\n");
+  };
+
+  it("accepts one gate per pack job, each job carrying its own job-level if:", () => {
+    expect(
+      what(
+        flow(job("pack-npm", { jobIf: "needs.setup.outputs.registry == 'npm'" }), job("pack-pypi")),
+      ),
+    ).not.toMatch(/verify:thing/);
+  });
+  it("rejects a pack job that does not run the gate", () => {
+    expect(what(flow(job("pack-npm"), job("pack-pypi", { gate: false })))).toMatch(
+      /job "pack-pypi" reaches "Pack the release artifact" without running it first/,
+    );
+  });
+  it("rejects a gate with its own if:", () => {
+    expect(what(flow(job("pack-npm", { gateIf: "false" })))).toMatch(
+      /can run past a failed gate \(if:\)/,
+    );
+  });
+  it("rejects a guarded step with its own if:", () => {
+    expect(what(flow(job("pack-npm", { packIf: "always()" })))).toMatch(
+      /can run past a failed gate \(if:\)/,
+    );
+  });
+  it("rejects a workflow with no step of that name", () => {
+    expect(
+      what("name: ship\njobs:\n  x:\n    steps:\n      - run: pnpm run verify:thing\n"),
+    ).toMatch(/has no step named "Pack the release artifact"/);
   });
 });

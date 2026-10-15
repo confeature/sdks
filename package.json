@@ -13,11 +13,12 @@
   "scripts": {
     "build": "vp run -r build",
     "test": "vp run -r test",
-    "verify": "pnpm run verify:fmt-lint && pnpm run verify:json-keys && pnpm run verify:gate-declarations && pnpm run verify:codeowners && pnpm run verify:manifest-author && pnpm run verify:sdk-extraction && pnpm run verify:seed-schema && pnpm run verify:wire-cases && pnpm vp run -F @confeature/repo-gates -F @confeature/dagger-call test",
+    "verify": "pnpm run verify:fmt-lint && pnpm run verify:json-keys && pnpm run verify:gate-declarations && pnpm run verify:workflows && pnpm run verify:codeowners && pnpm run verify:manifest-author && pnpm run verify:sdk-extraction && pnpm run verify:seed-schema && pnpm run verify:wire-cases && pnpm vp run -F @confeature/repo-gates -F @confeature/dagger-call test",
     "ready": "pnpm run verify && pnpm dagger:all && pnpm swift:check",
     "verify:fmt-lint": "node tools/repo-gates/verify-fmt-lint.mjs",
     "verify:json-keys": "node tools/repo-gates/verify-no-dup-json-keys.mjs package.json",
     "verify:gate-declarations": "node tools/repo-gates/verify-declarations.mjs",
+    "verify:workflows": "node tools/repo-gates/verify-workflows.mjs",
     "verify:codeowners": "node tools/repo-gates/verify-codeowners.mjs",
     "verify:manifest-author": "node tools/manifest-author.mjs",
     "verify:sdk-extraction": "node tools/verify-sdk-extraction-manifest.mjs",

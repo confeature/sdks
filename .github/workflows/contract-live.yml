@@ -100,24 +100,32 @@ jobs:
         continue-on-error: true
         # The default shell is `bash -e`: capture the runner's code instead of
         # letting it end the step, so a red run still records its duration.
+        # The runner is a command line from dagger/sdk-manifest.json; it
+        # reaches the shell through env: and runs as written.
+        env:
+          SDK_RUNNER: ${{ matrix.sdk.runner }}
         run: |
           start=$(date +%s)
           rc=0
-          ${{ matrix.sdk.runner }} || rc=$?
+          eval "$SDK_RUNNER" || rc=$?
           end=$(date +%s)
           echo "duration=$(( (end - start) * 1000 ))" >> "$GITHUB_OUTPUT"
           exit "$rc"
 
       - name: Write result artifact
         if: always()
+        env:
+          SDK_NAME: ${{ matrix.sdk.name }}
+          OUTCOME: ${{ steps.run.outcome }}
+          DURATION: ${{ steps.run.outputs.duration || 0 }}
         run: |
           status="pass"
-          [ "${{ steps.run.outcome }}" = "success" ] || status="fail"
+          [ "$OUTCOME" = "success" ] || status="fail"
           mkdir -p live-results
-          cat > "live-results/live-result-${{ matrix.sdk.name }}.json" <<EOF
-          { "sdk": "${{ matrix.sdk.name }}", "status": "$status", "ran": true, "durationMs": ${{ steps.run.outputs.duration || 0 }} }
+          cat > "live-results/live-result-${SDK_NAME}.json" <<EOF
+          { "sdk": "${SDK_NAME}", "status": "$status", "ran": true, "durationMs": ${DURATION} }
           EOF
-          cat "live-results/live-result-${{ matrix.sdk.name }}.json"
+          cat "live-results/live-result-${SDK_NAME}.json"
 
       - name: Upload result
         if: always()
@@ -130,8 +138,10 @@ jobs:
       # Red the job iff the SDK runner was red (the artifact is already uploaded).
       - name: Fail job on red suite
         if: steps.run.outcome != 'success'
+        env:
+          SDK_NAME: ${{ matrix.sdk.name }}
         run: |
-          echo "::error::live wire-cases failed for ${{ matrix.sdk.name }}"
+          echo "::error::live wire-cases failed for ${SDK_NAME}"
           exit 1
 
   # 3. Aggregate all results into one per-SDK conformance report.

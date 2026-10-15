@@ -57,6 +57,11 @@ concurrency:
 permissions:
   contents: read
 
+# The one home of the Node version the upload and promote jobs run
+# (tools/repo-gates/verify-workflows.mjs rule 9).
+env:
+  NODE_VERSION: "22.23.3"
+
 jobs:
   release:
     name: release ${{ github.ref_name }}
@@ -199,7 +204,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install wrangler (no lifecycle scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/test-harness-live-contract
@@ -244,7 +249,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install wrangler (no lifecycle scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/test-harness-live-contract

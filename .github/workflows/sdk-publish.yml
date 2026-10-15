@@ -1,32 +1,49 @@
 # SPDX-License-Identifier: MIT
 
-# Tag-triggered SDK publish, gated by a containerized test.
+# Tag-triggered SDK publish: one tag publishes one unit to its registry.
 #
-# Tag format: `sdk-<name>-v<X.Y.Z>` — e.g. `sdk-node-v0.1.0`,
-# `sdk-go-v1.2.3`. The workflow extracts the SDK name from the tag and
-# publishes the matching workspace package.
+# Tag format: `sdk-<name>-v<X.Y.Z>`, for example `sdk-node-v0.1.0`. The units,
+# their registries, coordinates, version sources and publish order live in ONE
+# place: `publish[]` in dagger/sdk-manifest.json. This workflow never maps a
+# tag to a package itself.
 #
-# Phase 5 (#204) introduces a manifest-driven test gate. `dagger/sdk-manifest.json`
-# is the single source of truth for per-SDK test coverage:
-#   - covered → run the SDK's containerized Dagger suite, then publish.
-#   - exempt  → publish without a test gate (documented reason).
-#   - pending → REFUSE to publish (hard fail). Nothing ships without a gate
-#               (operator decision 2026-05-30: build solid > ship fast).
+# The chain, each job gating the next (`needs:`):
 #
-# Today only `@confeature/sdk-node` exists (npm registry). The other 20
-# SDKs from the constitution's Principle IV roster land progressively;
-# this workflow is the single tag-driven publish path for all of them.
-# Future SDKs in non-npm runtimes (Go, Rust, PHP, Python, Swift, etc.)
-# will branch from the "publish" step on `sdk_name` — out of scope for
-# the initial sdk-node-only rollout.
+#   1. setup     tools/sdk-pack/resolve-publish.mjs accepts the tag, or refuses
+#                it before any job that can reach a credential: unknown unit,
+#                registry `none`, blocked, pending gate, version mismatch, an
+#                `after` dependency not yet on its registry, or a commit that is
+#                not on main. Every value later jobs use comes from the unit,
+#                never from a substring of the tag, and reaches `run:` through
+#                `env:` only.
+#   2. gate      the unit's containerized suite (its `.sdks[]` daggerFn), unless
+#                the unit is `exempt`.
+#   3. pack-*    ONE per registry. No environment, no `id-token`, no secret, no
+#                cache restore. It installs, runs the author rule, builds and
+#                packs the artifact, checks the artifact's own name and version
+#                against the resolver's, runs the registry's credential-free dry
+#                run, and hands the artifact on with its sha256.
+#   4. publish-* ONE per registry, a top-level job bound to environment
+#                `sdk-publish-<registry>` (a required reviewer, a tag-only
+#                deployment policy). It runs NO project code: it downloads the
+#                artifact from this same run, checks the digest, and runs the
+#                pinned upload command. OIDC trusted publishing wherever the
+#                registry has it; the trust configuration names this file AND
+#                the environment, so a job outside the environment gets nothing.
+#   5. conclude  fails unless the registry's pack job (and, for a tag, its
+#                publish job) actually succeeded: a registry with no jobs here
+#                yet is a red run, never a green one that published nothing.
 #
-# Required repo secret:
-#   NPM_TOKEN  npm "Automation" token scoped to the @confeature org with
-#              "Read and write" permission. Mint at https://www.npmjs.com/
-#              after enrolling the org.
+# A `workflow_dispatch` run is a DRY RUN, always: it packs and runs the dry run
+# of the named unit, and no publish job can run (they require a tag push).
+# A dry run proves the packaging, not the OIDC binding; the first real tag
+# proves that.
 #
-# Spec 053, the Dagger local runner (Phase 5, #204).
-# Contract: spec 053's release-gate-workflow contract.
+# The jobs, environments and rules here are checked by
+# tools/repo-gates/verify-workflows.mjs; the environments, their reviewers and
+# tag policies are declared in tools/repo-gates/release-settings.json.
+#
+# Registries wired so far: npm. The others land with their own child of #794.
 
 name: sdk-publish
 
@@ -34,95 +51,77 @@ on:
   push:
     tags:
       - "sdk-*-v*"
+  workflow_dispatch:
+    inputs:
+      unit:
+        description: "Publish unit to dry-run (a `publish[].name` from dagger/sdk-manifest.json)"
+        required: true
+        type: string
+      version:
+        description: "Only for a unit whose version comes from its tag (php, swift)"
+        required: false
+        type: string
+        default: ""
 
 # Never cancel an in-flight publish. Tag pushes are rare; concurrency
 # protects against accidental double-tag pushes.
 concurrency:
-  group: sdk-publish-${{ github.ref }}
+  group: sdk-publish-${{ github.ref }}-${{ inputs.unit }}
   cancel-in-progress: false
 
 permissions:
   contents: read
-  # id-token: write is reserved for npm provenance when we enable it
-  # (https://docs.npmjs.com/generating-provenance-statements). Off
-  # initially to keep the secret surface minimal.
+
+# The one home of each tool version a pack or publish job runs
+# (tools/repo-gates/verify-workflows.mjs rule 9).
+env:
+  NODE_VERSION: "22.23.3"
+  NPM_VERSION: "11.20.0"
 
 jobs:
-  # Resolve the SDK name from the tag, then consult the manifest to decide
-  # the gate: covered → run test then publish; exempt → publish directly;
-  # pending → fail the whole workflow (no test gate exists yet).
   setup:
-    name: setup ${{ github.ref_name }}
+    name: resolve ${{ github.ref_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      name: ${{ steps.resolve.outputs.sdk_name }}
-      package: ${{ steps.resolve.outputs.package }}
-      daggerFn: ${{ steps.gate.outputs.dagger_fn }}
-      gate: ${{ steps.gate.outputs.gate }}
+      name: ${{ steps.resolve.outputs.name }}
+      registry: ${{ steps.resolve.outputs.registry }}
+      coordinates: ${{ steps.resolve.outputs.coordinates }}
+      path: ${{ steps.resolve.outputs.path }}
+      version: ${{ steps.resolve.outputs.version }}
+      gate: ${{ steps.resolve.outputs.gate }}
+      daggerFn: ${{ steps.resolve.outputs.daggerFn }}
+      releaseTag: ${{ steps.resolve.outputs.releaseTag }}
+      mirrorRepository: ${{ steps.resolve.outputs.mirrorRepository }}
+      mirrorTag: ${{ steps.resolve.outputs.mirrorTag }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          persist-credentials: false
 
-      # Extract the SDK name from the tag. `sdk-node-v0.1.0` → `node`.
-      # The intermediate `sdk-` prefix and trailing `-v<version>` are
-      # both required; the name is whatever sits between.
-      - name: Resolve SDK package from tag
+      - name: Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs)
         id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+          UNIT: ${{ inputs.unit }}
+          VERSION: ${{ inputs.version }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          # Strip leading `sdk-` and trailing `-v.*`
-          SDK_NAME="${TAG#sdk-}"
-          SDK_NAME="${SDK_NAME%-v*}"
-          PACKAGE="@confeature/sdk-${SDK_NAME}"
-          echo "sdk_name=${SDK_NAME}" >> "$GITHUB_OUTPUT"
-          echo "package=${PACKAGE}" >> "$GITHUB_OUTPUT"
-          echo "Resolved tag '${TAG}' → package '${PACKAGE}'"
-
-      # Consult dagger/sdk-manifest.json. Branch on the SDK's status:
-      #   covered → gate=test (+ resolved daggerFn)
-      #   exempt  → gate=skip (annotate)
-      #   pending → FAIL with the refusal message (no false-green publishes)
-      #   unknown → FAIL (the SDK is not in the Principle IV roster)
-      - name: Consult manifest for test gate
-        id: gate
-        run: |
-          SDK_NAME='${{ steps.resolve.outputs.sdk_name }}'
-          ENTRY=$(jq -c --arg n "$SDK_NAME" '.sdks[] | select(.name == $n)' dagger/sdk-manifest.json)
-          if [ -z "$ENTRY" ]; then
-            echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: not found in dagger/sdk-manifest.json. Add it to the Principle IV roster (covered/pending/exempt) first."
-            exit 1
+          if [ "$EVENT" = "push" ]; then
+            git fetch --no-tags origin main
+            node tools/sdk-pack/resolve-publish.mjs --tag "$TAG" --commit "$GITHUB_SHA" --main-ref FETCH_HEAD
+          elif [ -n "$VERSION" ]; then
+            node tools/sdk-pack/resolve-publish.mjs --unit "$UNIT" --version "$VERSION"
+          else
+            node tools/sdk-pack/resolve-publish.mjs --unit "$UNIT"
           fi
-          STATUS=$(printf '%s' "$ENTRY" | jq -r '.status')
-          DAGGER_FN=$(printf '%s' "$ENTRY" | jq -r '.daggerFn // empty')
-          echo "Manifest entry for '${SDK_NAME}': status=${STATUS} daggerFn=${DAGGER_FN:-<none>}"
-          case "$STATUS" in
-            covered)
-              echo "gate=test" >> "$GITHUB_OUTPUT"
-              echo "dagger_fn=${DAGGER_FN}" >> "$GITHUB_OUTPUT"
-              echo "::notice::sdk-${SDK_NAME} is covered — gating publish on \`${DAGGER_FN}\`."
-              ;;
-            exempt)
-              echo "gate=skip" >> "$GITHUB_OUTPUT"
-              echo "dagger_fn=" >> "$GITHUB_OUTPUT"
-              echo "::notice::sdk-${SDK_NAME} is exempt — no test gate."
-              ;;
-            pending)
-              echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: no containerized test gate (status=pending). Containerize it (flip the manifest to covered) or mark it exempt first."
-              exit 1
-              ;;
-            *)
-              echo "::error::refuse to publish \`sdk-${SDK_NAME}\`: unknown manifest status '${STATUS}'."
-              exit 1
-              ;;
-          esac
 
-  # Containerized test gate — only reached for covered SDKs. A red test here
-  # propagates via `needs` to publish, which is then skipped ⇒ workflow fails.
-  test:
-    name: test ${{ needs.setup.outputs.name }} (${{ needs.setup.outputs.daggerFn }})
+  # Containerized test gate, for covered units only. A red gate propagates via
+  # `needs` to every pack job, which is then skipped, so nothing is published.
+  gate:
+    name: gate ${{ needs.setup.outputs.name }} (${{ needs.setup.outputs.daggerFn }})
     needs: setup
     if: needs.setup.outputs.gate == 'test'
     runs-on: ubuntu-latest
@@ -190,28 +189,34 @@ jobs:
           args: ${{ needs.setup.outputs.daggerFn }} --source=.
           enable-github-summary: true
 
-  # Publish. Reachable two ways:
-  #   - covered: needs [setup, test] — a red/skipped test blocks publish.
-  #   - exempt:  test is skipped, so we gate on the setup output instead.
-  # The `always() && ...` guard lets the job evaluate even when `test` was
-  # skipped (exempt path), while still failing closed if test failed.
-  publish:
-    name: publish ${{ needs.setup.outputs.name }}
-    needs: [setup, test]
+  # ---------------------------------------------------------------- npm ----
+
+  pack-npm:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    # `always()` lets an exempt unit (gate skipped) through; a failed or
+    # cancelled gate still stops it.
     if: >-
       always() &&
       needs.setup.result == 'success' &&
-      (needs.setup.outputs.gate == 'skip' ||
-       (needs.setup.outputs.gate == 'test' && needs.test.result == 'success'))
+      needs.setup.outputs.registry == 'npm' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
     runs-on: ubuntu-latest
-    # The publish token is reachable only through a named environment (#858).
-    # #794 creates it with a required reviewer and an sdk-* tag policy; until
-    # then it has no protection rule and the repository secret resolves as before.
-    environment: sdk-publish
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      file: ${{ steps.digest.outputs.file }}
+    env:
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -219,55 +224,137 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org/
-          scope: "@confeature"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       # The author rule: every manifest names MakerLabs as its author, with no
-      # email address in any author or contact field. Here because the publish
-      # below is the one step that cannot be undone: a registry keeps what it
-      # is given. Same job as the publish, so the job's `if:` gates both alike
-      # and a red rule stops the publish.
+      # email address in any author or contact field. A registry keeps what it
+      # is given, so this runs in every pack job, before the artifact exists.
       - name: Every manifest names MakerLabs (verify:manifest-author)
         run: pnpm run verify:manifest-author
 
-      # Sanity: assert the workspace package actually exists. Fails fast
-      # if someone pushes `sdk-typo-v0.1.0` against a non-existent package.
-      - name: Verify package exists in workspace
+      - name: Build the unit
+        run: pnpm --filter "$UNIT_COORDINATES" run build
+
+      # pnpm rewrites `workspace:` ranges into real versions while packing; the
+      # tarball is exactly what the publish job uploads.
+      - name: Pack the release artifact
+        run: pnpm --filter "$UNIT_COORDINATES" pack --pack-destination "$RUNNER_TEMP/release"
+
+      # The artifact's own manifest must name what the resolver accepted.
+      - name: Check the artifact against the resolved unit
         run: |
-          pnpm --filter "${{ needs.setup.outputs.package }}" exec node -e "console.log('OK:', require('./package.json').name)"
+          tgz="$(find "$RUNNER_TEMP/release" -maxdepth 1 -name '*.tgz')"
+          [ "$(printf '%s\n' "$tgz" | wc -l)" -eq 1 ] && [ -n "$tgz" ] ||
+            { echo "::error::expected exactly one tarball in $RUNNER_TEMP/release"; exit 1; }
+          tar -xOzf "$tgz" package/package.json > "$RUNNER_TEMP/packed.json"
+          node -e '
+            const m = require(process.argv[1]);
+            if (m.name !== process.env.UNIT_COORDINATES || m.version !== process.env.UNIT_VERSION) {
+              console.error(`::error::the tarball is ${m.name}@${m.version}, not ${process.env.UNIT_COORDINATES}@${process.env.UNIT_VERSION}`);
+              process.exit(1);
+            }
+            const deps = { ...m.dependencies, ...m.peerDependencies, ...m.optionalDependencies };
+            const left = Object.entries(deps).filter(([, r]) => String(r).startsWith("workspace:"));
+            if (left.length) { console.error(`::error::unrewritten workspace ranges: ${left.map(([n]) => n).join(", ")}`); process.exit(1); }
+          ' "$RUNNER_TEMP/packed.json"
 
-      - name: Build SDK
-        run: pnpm --filter "${{ needs.setup.outputs.package }}" run build
+      - name: Install the pinned npm
+        run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
 
-      # Verify the tag version matches package.json — prevents publishing
-      # `sdk-node-v0.1.0` with an unrelated version in package.json.
-      - name: Verify tag version matches package version
+      - name: npm publish --dry-run (no credentials)
+        run: npm publish --dry-run --access public --ignore-scripts "$RUNNER_TEMP"/release/*.tgz
+
+      - name: Record the artifact digest
+        id: digest
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#*-v}"
-          PKG_VERSION=$(pnpm --filter "${{ needs.setup.outputs.package }}" exec node -e "console.log(require('./package.json').version)")
-          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
-            echo "Tag version (${TAG_VERSION}) does not match package.json version (${PKG_VERSION})"
-            exit 1
-          fi
-          echo "Versions match: ${TAG_VERSION}"
+          cd "$RUNNER_TEMP/release"
+          file="$(ls -- *.tgz)"
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to npm
-        run: pnpm --filter "${{ needs.setup.outputs.package }}" publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-npm
+          path: ${{ runner.temp }}/release/*.tgz
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Publish summary
-        if: always()
+  publish-npm:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-npm]
+    # `always()` because `gate` is skipped for an exempt unit, and an implied
+    # success() would skip this job with it; the pack job's own result gates it.
+    if: >-
+      always() &&
+      needs.pack-npm.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-npm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-npm.outputs.sha256 }}
+      ARTIFACT: ${{ needs.pack-npm.outputs.file }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install the pinned npm
+        run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
+
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-npm
+          path: release
+
+      - name: Check the artifact against the pack job's digest
         run: |
-          echo "### SDK publish — ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Package: \`${{ needs.setup.outputs.package }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Tag: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Gate: \`${{ needs.setup.outputs.gate }}\` (test=run, skip=exempt)" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Yank procedure: see the release runbook." >> $GITHUB_STEP_SUMMARY
+          actual="$(sha256sum -- "release/$ARTIFACT" | cut -d' ' -f1)"
+          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
+            { echo "::error::release/$ARTIFACT is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+
+      # Trusted publishing: npm exchanges this job's OIDC token. No token is
+      # stored anywhere, and every package is set to disallow tokens.
+      - name: Upload
+        run: npm publish --access public --provenance --ignore-scripts "release/$ARTIFACT"
+
+  # ------------------------------------------------------------ conclude ----
+
+  conclude:
+    name: conclude
+    needs: [setup, gate, pack-npm, publish-npm]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEEDS: ${{ toJSON(needs) }}
+      EVENT: ${{ github.event_name }}
+    steps:
+      - name: The registry's jobs ran and succeeded
+        run: |
+          node -e '
+            const needs = JSON.parse(process.env.NEEDS);
+            const setup = needs.setup;
+            if (setup?.result !== "success") { console.error("::error::the tag was refused (setup)"); process.exit(1); }
+            const reg = setup.outputs.registry;
+            const want = [`pack-${reg}`, ...(process.env.EVENT === "push" ? [`publish-${reg}`] : [])];
+            for (const job of want) {
+              if (!(job in needs)) { console.error(`::error::this workflow has no ${job} job: registry ${reg} is not wired yet`); process.exit(1); }
+              if (needs[job].result !== "success") { console.error(`::error::${job} ended ${needs[job].result}`); process.exit(1); }
+            }
+            const out = [`### sdk-publish — ${setup.outputs.coordinates}@${setup.outputs.version}`, "",
+              `- Registry: \`${reg}\``, `- Gate: \`${setup.outputs.gate}\` ${setup.outputs.daggerFn}`,
+              `- Mode: ${process.env.EVENT === "push" ? "published" : "dry run (nothing published)"}`];
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
+          '

@@ -1,0 +1,117 @@
+{
+  "$comment": "The release settings of confeature/sdks, as data (#794). One home for: the publish environments, their reviewers and admin-bypass rule, the secrets each may hold (with a rotation date), the OIDC trust bindings entered on each registry, the third-party actions any workflow may use, the protected release-tag patterns (who may create a tag that publishes), and the release-shaped branch names nobody may create. The tag deployment policy of a registry environment is NOT written here: it is derived from publish[] in dagger/sdk-manifest.json (one sdk-<name>-v* pattern per unit of that registry). tools/repo-gates/verify-workflows.mjs holds the workflows to this file; the operator's tooling applies it to GitHub and reads it back.",
+  "reviewerTeam": "sdk-maintainers",
+  "environmentRules": {
+    "canAdminsBypass": false,
+    "preventSelfReview": false,
+    "preventSelfReviewReason": "sdk-maintainers has one member today, who both tags and approves; turn this on the day a second member joins"
+  },
+  "environments": [
+    {
+      "name": "sdk-publish-npm",
+      "registry": "npm",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-pypi",
+      "registry": "pypi",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-crates",
+      "registry": "crates",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-rubygems",
+      "registry": "rubygems",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-nuget",
+      "registry": "nuget",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-pubdev",
+      "registry": "pubdev",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-hex",
+      "registry": "hex",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-maven",
+      "registry": "maven",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-go",
+      "registry": "go",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-packagist",
+      "registry": "packagist",
+      "secrets": []
+    },
+    {
+      "name": "sdk-publish-swiftpm",
+      "registry": "swiftpm",
+      "secrets": []
+    },
+    {
+      "name": "cli-release",
+      "tagPatterns": ["cli-v*"],
+      "secrets": []
+    }
+  ],
+  "trustBindings": [
+    {
+      "registry": "npm",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-npm"
+    },
+    {
+      "registry": "pypi",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-pypi"
+    },
+    {
+      "registry": "crates",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-crates"
+    },
+    {
+      "registry": "rubygems",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-rubygems"
+    },
+    {
+      "registry": "nuget",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-nuget"
+    },
+    {
+      "registry": "pubdev",
+      "workflow": "sdk-publish.yml",
+      "environment": "sdk-publish-pubdev"
+    }
+  ],
+  "allowedActions": [
+    "astral-sh/setup-uv@*",
+    "dagger/dagger-for-github@*",
+    "denoland/setup-deno@*",
+    "pnpm/action-setup@*"
+  ],
+  "releaseTags": {
+    "name": "release tags: sdk-* and cli-v*",
+    "include": ["refs/tags/sdk-*", "refs/tags/cli-v*"]
+  },
+  "releaseBranchNames": {
+    "name": "release-shaped branch names",
+    "include": ["refs/heads/sdk-*", "refs/heads/cli-v*", "refs/heads/apps/sdk-go/*"]
+  }
+}
