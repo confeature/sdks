@@ -81,11 +81,13 @@
  *      runs on anything but a tag push, its `if:` requires one
  *      (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`,
  *      never ORed away): a dry run publishes nothing.
- *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs `pnpm run verify` on
- *      every push to main and every pull request, with no path filter, in a
- *      job and a step with no `if:` and no `continue-on-error`. sdk-publish.yml
- *      and cli-release.yml run these rules over the tagged commit in a first
- *      job everything else needs (declared in verify-declarations.mjs).
+ *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs PUBLIC_GATE_STEPS
+ *      (`pnpm run verify` and the CLI's deno suite) on every push to main and
+ *      every pull request, unfiltered, under plain bash, with no step env,
+ *      working-directory or continue-on-error, in jobs that need nothing.
+ *  14. THE RULES GATE THE RELEASES. sdk-publish.yml and cli-release.yml run
+ *      these rules over the tagged commit in a first job, workflow-rules,
+ *      which nothing can skip and every other job transitively needs.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -954,10 +956,14 @@ export function findings({ settings, manifest, workflows }) {
   return out;
 }
 
+/** The steps the public gate must run, each exactly, in a job and a step nothing can skip. */
+export const PUBLIC_GATE_STEPS = ["pnpm run verify", "deno task --cwd apps/cli test"];
+
 /**
- * Rule 13, over the workflows: `pnpm run verify` runs on every push to main
- * and every pull request, in a job and a step that nothing can skip. Separate
- * from `findings` so the rule fixtures need not each carry a verify.yml.
+ * Rule 13, over the workflows: verify.yml runs PUBLIC_GATE_STEPS on every push
+ * to main and every pull request, unfiltered, under plain bash, in jobs that
+ * wait on nothing and steps nothing can skip or redirect. Separate from
+ * `findings` so the rule fixtures need not each carry a verify.yml.
  */
 export function publicGateFindings(workflows) {
   const out = [];
@@ -969,25 +975,91 @@ export function publicGateFindings(workflows) {
   }
   const on = doc?.on ?? doc?.[true];
   const triggers = triggersOf(doc);
-  if (!triggers.includes("push") || !(on?.push?.branches ?? []).includes("main"))
-    add("does not run on every push to main");
+  const branches = on?.push?.branches;
+  if (
+    !triggers.includes("push") ||
+    !Array.isArray(branches) ||
+    branches.length !== 1 ||
+    branches[0] !== "main"
+  )
+    add("does not run on every push to main (push: branches: [main], exactly)");
   if (!triggers.includes("pull_request")) add("does not run on every pull request");
-  for (const t of ["push", "pull_request"])
-    for (const k of ["paths", "paths-ignore"])
+  for (const [t, keys] of [
+    ["push", ["paths", "paths-ignore", "branches-ignore", "tags", "tags-ignore"]],
+    ["pull_request", ["paths", "paths-ignore", "branches", "branches-ignore", "types"]],
+  ])
+    for (const k of keys)
       if (on?.[t]?.[k] !== undefined) add(`filters ${t} by ${k}, so a change can skip the gate`);
-  const runsGate = Object.values(doc?.jobs ?? {}).some(
-    (job) =>
-      job?.if === undefined &&
-      job?.["continue-on-error"] === undefined &&
-      (Array.isArray(job?.steps) ? job.steps : []).some(
-        (s) =>
-          typeof s?.run === "string" &&
-          s.run.trim() === "pnpm run verify" &&
-          s.if === undefined &&
-          s["continue-on-error"] === undefined,
-      ),
-  );
-  if (!runsGate) add("has no step that runs `pnpm run verify` and cannot be skipped");
+  if (
+    doc?.defaults?.run?.shell !== undefined ||
+    doc?.defaults?.run?.["working-directory"] !== undefined
+  )
+    add("sets defaults.run (a shell or working-directory every step inherits)");
+  const jobs = Object.values(doc?.jobs ?? {});
+  for (const job of jobs) {
+    if (job?.needs !== undefined) add("a job waits on another (needs:), which can skip it");
+    if (job?.defaults?.run !== undefined) add("a job sets defaults.run");
+    for (const s of Array.isArray(job?.steps) ? job.steps : []) {
+      if (s?.shell !== undefined && s.shell !== "bash")
+        add(`a step runs a shell other than bash (${String(s.shell)})`);
+      if (s?.["working-directory"] !== undefined) add("a step sets working-directory:");
+      if (s?.env !== undefined) add("a step sets env:, which can change what the gate runs");
+      if (s?.["continue-on-error"] !== undefined) add("a step sets continue-on-error:");
+    }
+  }
+  for (const gate of PUBLIC_GATE_STEPS) {
+    const runs = jobs.some(
+      (job) =>
+        job?.if === undefined &&
+        job?.["continue-on-error"] === undefined &&
+        (Array.isArray(job?.steps) ? job.steps : []).some(
+          (s) => typeof s?.run === "string" && s.run.trim() === gate && s.if === undefined,
+        ),
+    );
+    if (!runs) add(`has no step that runs \`${gate}\` and cannot be skipped`);
+  }
+  return out;
+}
+
+/** The first job of each release workflow, which runs these rules over the tagged commit. */
+export const RELEASE_GATE_JOB = "workflow-rules";
+
+/**
+ * Rule 14 (#794 review, round 3): in sdk-publish.yml and cli-release.yml,
+ * RELEASE_GATE_JOB exists, waits on nothing and cannot be skipped, and every
+ * other job transitively `needs` it, so no job of a tag whose workflows break
+ * these rules runs at all. Separate from `findings` for the same reason as
+ * rule 13.
+ */
+export function releaseGateFindings(workflows) {
+  const out = [];
+  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
+    const jobs = workflows[file]?.jobs ?? {};
+    const add = (job, why) => out.push({ file, job, why });
+    const gate = jobs[RELEASE_GATE_JOB];
+    if (gate === undefined) {
+      add("-", `has no ${RELEASE_GATE_JOB} job`);
+      continue;
+    }
+    for (const k of ["needs", "if", "continue-on-error"])
+      if (gate[k] !== undefined) add(RELEASE_GATE_JOB, `sets ${k}:, so the rules can be skipped`);
+    const needsOf = (id) => {
+      const n = jobs[id]?.needs;
+      return Array.isArray(n) ? n : n === undefined ? [] : [n];
+    };
+    for (const id of Object.keys(jobs)) {
+      if (id === RELEASE_GATE_JOB) continue;
+      const seen = new Set();
+      const stack = [...needsOf(id)];
+      while (stack.length > 0) {
+        const n = stack.pop();
+        if (seen.has(n)) continue;
+        seen.add(n);
+        stack.push(...needsOf(n));
+      }
+      if (!seen.has(RELEASE_GATE_JOB)) add(id, `does not wait on ${RELEASE_GATE_JOB}`);
+    }
+  }
   return out;
 }
 
@@ -998,7 +1070,11 @@ export function verifyWorkflows(root) {
   const workflows = {};
   for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
     workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
-  return [...findings({ settings, manifest, workflows }), ...publicGateFindings(workflows)];
+  return [
+    ...findings({ settings, manifest, workflows }),
+    ...publicGateFindings(workflows),
+    ...releaseGateFindings(workflows),
+  ];
 }
 
 function main() {

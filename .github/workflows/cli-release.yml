@@ -71,8 +71,9 @@ jobs:
   # The workflow rules (tools/repo-gates/verify-workflows.mjs) over the TAGGED
   # commit's workflows, before the release job's write token and the R2 jobs'
   # environment: a tag whose workflows break them releases nothing (#794
-  # review). It installs one dependency (`yaml`, from the lockfile, no install
-  # script) and holds nothing.
+  # review). It installs @confeature/repo-gates' dependencies and the root's
+  # (yaml, vitest, vite-plus, from the lockfile, no install script), loads yaml,
+  # and holds nothing. Every other job needs it (rule 14).
   workflow-rules:
     name: workflow rules
     runs-on: ubuntu-latest
@@ -94,7 +95,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install the rules' dependency (no scripts)
+      - name: Install the rules' dependencies (no scripts)
         run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/repo-gates
 
       - name: The workflow rules (verify:workflows)

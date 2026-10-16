@@ -8,7 +8,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
-import { findings, globMatches, publicGateFindings, verifyWorkflows } from "./verify-workflows.mjs";
+import {
+  findings,
+  globMatches,
+  publicGateFindings,
+  releaseGateFindings,
+  verifyWorkflows,
+} from "./verify-workflows.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHA = "34e114876b0b11c390a56381ad16ebd13914f8d5";
@@ -1108,6 +1114,7 @@ jobs:
     steps:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
+      - run: deno task --cwd apps/cli test
 `;
   const gate = (text) => publicGateFindings({ "verify.yml": parseYaml(text) }).map((f) => f.why);
   it("control: the fixture is clean, and so is the real verify.yml", () => {
@@ -1160,5 +1167,113 @@ jobs:
       VERIFY.replace("  verify:\n", "  verify:\n    continue-on-error: true\n"),
       /no step that runs/,
     ],
+    [
+      "the CLI's tests removed",
+      VERIFY.replace("      - run: deno task --cwd apps/cli test\n", ""),
+      /no step that runs `deno task/,
+    ],
+    [
+      "paths-ignore",
+      VERIFY.replace("  pull_request:\n", "  pull_request:\n    paths-ignore: [docs/**]\n"),
+      /filters pull_request by paths-ignore/,
+    ],
+    [
+      "push branches-ignore",
+      VERIFY.replace(
+        "    branches: [main]\n",
+        "    branches: [main]\n    branches-ignore: [main]\n",
+      ),
+      /filters push by branches-ignore/,
+    ],
+    ["push to more branches than main", VERIFY.replace("[main]", "[main, dev]"), /exactly/],
+    [
+      "pull_request branches",
+      VERIFY.replace("  pull_request:\n", "  pull_request:\n    branches: [main]\n"),
+      /filters pull_request by branches/,
+    ],
+    [
+      "pull_request types",
+      VERIFY.replace("  pull_request:\n", "  pull_request:\n    types: [labeled]\n"),
+      /filters pull_request by types/,
+    ],
+    [
+      "a step shell",
+      VERIFY.replace(
+        "      - run: pnpm run verify",
+        "      - shell: sh\n        run: pnpm run verify",
+      ),
+      /shell other than bash/,
+    ],
+    [
+      "a job defaults.run.shell",
+      VERIFY.replace("  verify:\n", "  verify:\n    defaults:\n      run:\n        shell: sh\n"),
+      /a job sets defaults.run/,
+    ],
+    [
+      "a workflow defaults.run",
+      `${VERIFY}defaults:\n  run:\n    working-directory: apps\n`,
+      /sets defaults.run/,
+    ],
+    [
+      "a step working-directory",
+      VERIFY.replace(
+        "      - run: pnpm run verify",
+        "      - working-directory: apps\n        run: pnpm run verify",
+      ),
+      /working-directory/,
+    ],
+    [
+      "a step env",
+      VERIFY.replace(
+        "      - run: pnpm run verify",
+        "      - env:\n          NODE_OPTIONS: --require ./x.js\n        run: pnpm run verify",
+      ),
+      /step sets env/,
+    ],
+    [
+      "a step continue-on-error",
+      VERIFY.replace(
+        "      - run: pnpm run verify",
+        "      - continue-on-error: true\n        run: pnpm run verify",
+      ),
+      /continue-on-error/,
+    ],
+    ["needs:", VERIFY.replace("  verify:\n", "  verify:\n    needs: other\n"), /needs:/],
   ])("refuses %s", (_, text, re) => fires(gate(text), re));
+});
+
+describe("14 every release job waits on workflow-rules (#794 review, round 3)", () => {
+  const W = (jobs) => parseYaml(`on: push\njobs:\n${jobs}`);
+  const GATE = "  workflow-rules:\n    steps: []\n";
+  const both = (pub, cli = `${GATE}  release:\n    needs: workflow-rules\n`) =>
+    releaseGateFindings({ "sdk-publish.yml": W(pub), "cli-release.yml": W(cli) }).map(
+      (f) => `${f.file} ${f.job}: ${f.why}`,
+    );
+  it("control: the real release workflows, and a transitive chain, are clean", () => {
+    expect(verifyWorkflows(ROOT).filter((f) => /does not wait|workflow-rules/.test(f.why))).toEqual(
+      [],
+    );
+    expect(
+      both(`${GATE}  setup:\n    needs: workflow-rules\n  pack-npm:\n    needs: [setup]\n`),
+    ).toEqual([]);
+  });
+  it("a job that does not wait on it", () =>
+    expect(
+      both(`${GATE}  setup:\n    needs: workflow-rules\n  pack-npm:\n    steps: []\n`),
+    ).toEqual(["sdk-publish.yml pack-npm: does not wait on workflow-rules"]));
+  it("a release workflow without it", () =>
+    expect(both("  setup:\n    steps: []\n")).toContain(
+      "sdk-publish.yml -: has no workflow-rules job",
+    ));
+  it.each(["needs: setup", "if: false", "continue-on-error: true"])(
+    "workflow-rules with %s",
+    (kv) =>
+      expect(
+        both(`  workflow-rules:\n    ${kv}\n  setup:\n    needs: workflow-rules\n`).join(),
+      ).toMatch(/so the rules can be skipped/),
+  );
+  it("cli-release.yml is held to it too", () =>
+    expect(both(GATE, `${GATE}  release:\n    steps: []\n`)).toEqual([
+      "cli-release.yml release: does not wait on workflow-rules",
+    ]));
 });
