@@ -1233,6 +1233,25 @@ describe("per-package homes must be reached by a pipeline", () => {
       expect(unreached()).toBe(false);
     });
 
+    it("accepts a $VAR... build (the unit and its workspace dependencies) before a $VAR pack", () => {
+      sdk();
+      const yml = PUBLISH({
+        buildFilter: '"${UNIT_COORDINATES}..."',
+        publishFilter: '"$UNIT_COORDINATES"',
+      }).replace(" publish --access public", ' pack --pack-destination "$RUNNER_TEMP/release"');
+      write(".github/workflows/sdk-publish.yml", yml);
+      expect(unreached()).toBe(false);
+    });
+
+    it("does not pair a $VAR... build with a pack of another variable", () => {
+      sdk();
+      write(
+        ".github/workflows/sdk-publish.yml",
+        PUBLISH({ buildFilter: '"${UNIT_COORDINATES}..."', publishFilter: '"$OTHER"' }),
+      );
+      expect(unreached()).toBe(true);
+    });
+
     it("does not count a resolver-set filter for a package that is not an npm unit", () => {
       sdk();
       write(

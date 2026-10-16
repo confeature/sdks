@@ -716,10 +716,17 @@ export function lifecycleHomeUnreached(root, rootPkg, name, script) {
   // Does this build's filter select the package? A literal filter must resolve
   // to it; a `${{ … }}` expression is resolved by the workflow from its tag, so
   // it counts only for the SDKs that workflow publishes — the manifest.
+  // A `$VAR...` build selects the unit AND its workspace dependencies (#899:
+  // sdk-react compiles against sdk-browser-js's dist/), so it still builds the
+  // unit; `${VAR}` and `$VAR` are one variable.
+  const unit = (filter) =>
+    filter
+      .replace(/^["']|["']$/g, "")
+      .replace(/^\$\{([A-Z_][A-Z0-9_]*)\}(?=$|\.\.\.$)/, "$$$1")
+      .replace(/^(\$[A-Z_][A-Z0-9_]*)\.\.\.$/, "$1");
   const selects = (filter) => {
-    const unquoted = filter.replace(/^["']|["']$/g, "");
-    if (/\$\{\{[^}]*\}\}/.test(unquoted) || /^\$\{?[A-Z_][A-Z0-9_]*\}?$/.test(unquoted))
-      return listed;
+    const unquoted = unit(filter);
+    if (/\$\{\{[^}]*\}\}/.test(unquoted) || /^\$[A-Z_][A-Z0-9_]*$/.test(unquoted)) return listed;
     return filterSelects(unquoted, workspace)?.has(name) === true;
   };
   for (const file of workflows) {
@@ -741,7 +748,7 @@ export function lifecycleHomeUnreached(root, rootPkg, name, script) {
         // after a failed build, shipping a bundle over its budget: refused.
         if (steps[j].stepIf) continue;
         const publish = PUBLISH.exec((steps[j].run ?? "").trim());
-        if (publish !== null && publish[1] === build[1]) return null;
+        if (publish !== null && unit(publish[1]) === unit(build[1])) return null;
       }
     }
   }
