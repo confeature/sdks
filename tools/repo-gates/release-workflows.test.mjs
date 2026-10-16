@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   ENVIRONMENT_COMMANDS,
   MANIFEST,
@@ -59,6 +59,30 @@ const append = (w, file, job, needle, line) => {
   if (s === undefined) throw new Error(`no step of ${job} with ${needle} in its env`);
   s.run = `${s.run}\n${line}\n`;
 };
+
+/**
+ * How many findings each refuses row adds to the real tree (round 7): a row
+ * must fail on its own reason AND add exactly these, so a regression that
+ * adds or drops a finding beside the pinned one is seen. Regenerate with
+ * RECORD_ROW_COUNTS=<file> and review the diff.
+ */
+const ROW_COUNTS = JSON.parse(
+  readFileSync(join(ROOT, "tools/repo-gates/fixtures/row-counts.json"), "utf8"),
+);
+const recorded = {};
+const seen = [];
+function expectCount(label, got) {
+  seen.push(label);
+  if (process.env.RECORD_ROW_COUNTS) {
+    recorded[label] = got.length;
+    return;
+  }
+  expect(got.length, `${label}:\n${got.join("\n")}`).toBe(ROW_COUNTS[label]);
+}
+afterAll(() => {
+  if (process.env.RECORD_ROW_COUNTS)
+    writeFileSync(process.env.RECORD_ROW_COUNTS, `${JSON.stringify(recorded, null, 2)}\n`);
+});
 
 describe("the real release workflows", () => {
   it("have no finding", () => expect(all(BASE)).toEqual([]));
@@ -194,8 +218,9 @@ describe("a credential leaves no job through curl or a file (round 5, HIGH)", ()
       },
       /credential COPY outside/,
     ],
-  ])("%s", (_, mutate, why) => {
+  ])("%s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -285,8 +310,9 @@ describe("16 every expression reference names something (round 5)", () => {
       },
       /job release has no output digest/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -393,8 +419,9 @@ describe("the values an exception trusts are pinned (round 5, MED)", () => {
       },
       /ARTIFACT is .*, not its pinned expression/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -434,8 +461,9 @@ describe("git's configuration isolation sits on the git steps (round 5)", () => 
       },
       /runs git without GIT_CONFIG_NOSYSTEM: 1|points every tool at another configuration/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -575,8 +603,9 @@ describe("the reviewers' round-4 driver cases, each refused for its own reason",
       }),
       /dotnet nuget push uploads only/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -802,8 +831,9 @@ describe("round 5's bypasses: a credential reaches no unpinned name, no test and
       at("publish-go", { run: `curl -fsS --proto =https "${PFX}list"` }),
       CURL,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -919,8 +949,9 @@ describe("16 reads the workflow env, secrets, vars and matrix too (round 6)", ()
       },
       /the workflow's env cannot read the needs context/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -980,8 +1011,9 @@ describe("expressions are read as GitHub reads them: case-folded, with their str
       },
       /reads the secrets context outside an environment/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1096,8 +1128,9 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
       },
       /a credentialed job's timeout-minutes: holds an expression/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1147,11 +1180,21 @@ describe("each secret name reads its own secret (round 7)", () => {
       },
       /GITHUB_SSH_KNOWN_HOST is .*, not its pinned expression/,
     ],
-  ])("refuses %s", (_, mutate, why) => {
+  ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
+    expectCount(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("the row counts", () => {
+  // Runs last (tests run in file order): every row was counted once, under a
+  // label of its own, and no recorded count is left over.
+  it.skipIf(Boolean(process.env.RECORD_ROW_COUNTS))("name every row once, and nothing else", () => {
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(Object.keys(ROW_COUNTS).sort()).toEqual([...seen].sort());
   });
 });

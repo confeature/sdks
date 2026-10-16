@@ -4,10 +4,11 @@
 // repository is clean, and every rule is seen to fire on a fixture that
 // breaks only that rule.
 
-import { dirname, resolve } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   CREDENTIALED_COMMANDS,
   ENVIRONMENT_COMMANDS,
@@ -686,6 +687,10 @@ describe("rule 3: caches that are on unless switched off (#794 review)", () => {
  * Why each row of the rule-3 refuses table is refused: the finding's own
  * words, so a row refused by a neighbouring check instead fails (round 4).
  */
+const RULE3_COUNTS = JSON.parse(
+  readFileSync(join(ROOT, "tools/repo-gates/fixtures/rule3-counts.json"), "utf8"),
+);
+const RULE3_RECORDED = {};
 const REASONS = {
   "a backslash continuation": "pnpm is not a command a credentialed job runs",
   "a continuation inside npm's arguments":
@@ -963,10 +968,23 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ["rustup run", "rustup run stable node x"],
     ["rustup with an expansion before --", 'rustup toolchain install "$X"'],
   ];
+  it("records a count for exactly the rows of the table", () =>
+    expect(Object.keys(RULE3_COUNTS).sort()).toEqual(RULE3_ROWS.map(([label]) => label).sort()));
+  afterAll(() => {
+    if (process.env.RECORD_ROW_COUNTS)
+      writeFileSync(
+        join(ROOT, "tools/repo-gates/fixtures/rule3-counts.json"),
+        `${JSON.stringify(RULE3_RECORDED, null, 2)}\n`,
+      );
+  });
   it("records a reason for exactly the rows of the table, and none left over", () =>
     expect(Object.keys(REASONS).sort()).toEqual(RULE3_ROWS.map(([label]) => label).sort()));
   it.each(RULE3_ROWS)("refuses %s, for its own reason", (label, cmd) => {
     const got = inPublish(cmd);
+    // And with exactly its recorded number of rule-3 findings (round 7).
+    const cred = got.filter((w) => CRED.test(w));
+    if (process.env.RECORD_ROW_COUNTS) RULE3_RECORDED[label] = cred.length;
+    else expect(cred.length, `${label}:\n${cred.join("\n")}`).toBe(RULE3_COUNTS[label]);
     expect(Object.hasOwn(REASONS, label), `no reason recorded for ${label}`).toBe(true);
     expect(
       got.some((w) => CRED.test(w) && w.includes(REASONS[label])),
