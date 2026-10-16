@@ -28,6 +28,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -193,7 +194,15 @@ function runBlock({ run, doc, jobId }, cwd, env, { test = {}, stubs = {}, tools 
     cwd,
     encoding: "utf8",
     // LC_ALL=C: the runner's messages, not this machine's locale.
-    env: { PATH, HOME: scratch(), LC_ALL: "C", ...env, GIT_ALLOW_PROTOCOL: "file", ...test },
+    env: {
+      PATH,
+      HOME: scratch(),
+      TMPDIR: scratch(),
+      LC_ALL: "C",
+      ...env,
+      GIT_ALLOW_PROTOCOL: "file",
+      ...test,
+    },
   });
 }
 
@@ -775,5 +784,22 @@ describe("the digest checks accept the pack job's artifact and refuse any other"
     expect(runBlock(s, ws, env(sha256(join(ws, "dist/SHA256SUMS")))).status).toBe(0);
     expect(runBlock(s, ws, env("0".repeat(64))).status).not.toBe(0);
     expect(runBlock(s, ws, env("")).status).not.toBe(0);
+  });
+});
+
+describe("a block's temporary files stay in its own scratch directory", () => {
+  // GNU mktemp (the runner's) honours TMPDIR; macOS's ignores it, so the
+  // test checks the block's environment, not a file.
+  it("TMPDIR is a fresh scratch directory of the test, not the machine's", () => {
+    const r = runBlock(
+      { run: 'printf "%s\\n" "$TMPDIR"', doc: PUBLISH, jobId: "publish-maven" },
+      scratch(),
+      {},
+    );
+    expect(r.status, r.stderr).toBe(0);
+    const dir = r.stdout.trim();
+    expect(dir).toMatch(/publish-blocks-/);
+    expect(dir).not.toBe(tmpdir());
+    expect(readdirSync(dir)).toEqual([]);
   });
 });

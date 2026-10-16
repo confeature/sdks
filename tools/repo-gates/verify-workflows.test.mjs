@@ -1750,6 +1750,7 @@ describe("15 an assignment counts only at command position (round 5)", () => {
     ["local", 'f() { local FOO=1; echo "$FOO"; }'],
     ["a while read", 'while IFS= read -r FOO; do echo "$FOO"; done < x'],
     ["a for loop", 'for FOO in a b; do echo "$FOO"; done'],
+    ["one after a here-string", 'cat <<< EOF\nFOO=1\necho "$FOO"'],
   ])("%s defines the name", (_, body) => {
     expect(pack(body)).toEqual([]);
     expect(pack(`X="$(true)"\necho "$X"\n${body}`)).toEqual([]);

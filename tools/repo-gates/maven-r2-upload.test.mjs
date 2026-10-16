@@ -6,7 +6,16 @@
 // credential refusal.
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -254,6 +263,22 @@ describe("maven-r2-upload.sh", () => {
 // from https://maven.confeature.io (round 6): the java and android roots name
 // no target (no "available-at"), the kotlin-mp root names its targets.
 const LIVE = join(ROOT, "tools/repo-gates/fixtures/maven-live");
+it("the live fixtures are the recorded bytes (SHA256SUMS)", () => {
+  const sums = readFileSync(join(LIVE, "SHA256SUMS"), "utf8").trim().split("\n");
+  const files = readdirSync(LIVE)
+    .filter((f) => f.endsWith(".module"))
+    .sort();
+  expect(sums.map((l) => l.split("  ")[1]).sort()).toEqual(files);
+  for (const l of sums) {
+    const [sum, f] = l.split("  ");
+    expect(
+      createHash("sha256")
+        .update(readFileSync(join(LIVE, f)))
+        .digest("hex"),
+      f,
+    ).toBe(sum);
+  }
+});
 describe("maven-r2-upload.sh on the live 0.1.0 layouts", () => {
   /** A release of `root` at 0.1.0 whose root .module is the live one, plus a jar/pom per `targets`. */
   function liveRelease(root, targets = []) {
@@ -290,14 +315,18 @@ describe("maven-r2-upload.sh on the live 0.1.0 layouts", () => {
     },
   );
 
-  it("a root module grep cannot read still stops the run before any put (grep's exit 2 is not 'no match')", () => {
-    const root = "confeature-java-client";
-    const dir = liveRelease(root);
-    chmodSync(join(dir, `release/io/confeature/${root}/0.1.0/${root}-0.1.0.module`), 0o000);
-    const r = run(dir, at(root));
-    expect(r.status).not.toBe(0);
-    expect(read(dir, "puts")).toBe("");
-  });
+  // root reads a mode-000 file anyway, so the case is meaningless as uid 0.
+  it.skipIf(process.getuid?.() === 0)(
+    "a root module grep cannot read still stops the run before any put (grep's exit 2 is not 'no match')",
+    () => {
+      const root = "confeature-java-client";
+      const dir = liveRelease(root);
+      chmodSync(join(dir, `release/io/confeature/${root}/0.1.0/${root}-0.1.0.module`), 0o000);
+      const r = run(dir, at(root));
+      expect(r.status).not.toBe(0);
+      expect(read(dir, "puts")).toBe("");
+    },
+  );
 
   const KMP = "confeature-kotlin-client";
   const TARGETS = [

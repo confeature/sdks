@@ -882,7 +882,8 @@ export function assignedNames(run) {
   const kept = [];
   for (let i = 0; i < lines.length; i += 1) {
     kept.push(lines[i]);
-    const h = /<<-?\s*(['"]?)([A-Za-z_]\w*)\1/.exec(lines[i]);
+    // `<<<` is a here-string, whose next lines are commands (round 7).
+    const h = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_]\w*)\1/.exec(lines[i]);
     if (h !== null) while (i + 1 < lines.length && lines[i + 1].trim() !== h[2]) i += 1;
   }
   let bare = kept
