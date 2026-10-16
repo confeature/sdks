@@ -207,6 +207,28 @@ export const DECLARED_GATES = {
       },
     ],
   },
+  "check-on-main": {
+    // A `cli-v*` tag on a commit that is not on main publishes nothing
+    // (round 10). DIRECT workflow homes: the credentialed jobs run no pnpm, so
+    // each runs the script itself, in every job before the step it guards —
+    // build before its compile, release and upload before they receive the
+    // build. verify-workflows.mjs freezes those steps (FROZEN_JOBS).
+    script: "apps/cli/scripts/check-on-main.sh",
+    homes: [
+      {
+        file: ".github/workflows/cli-release.yml",
+        before: "Compile all targets",
+        perJob: true,
+        direct: true,
+      },
+      {
+        file: ".github/workflows/cli-release.yml",
+        before: "Receive the build",
+        perJob: true,
+        direct: true,
+      },
+    ],
+  },
   "verify:codeowners": {
     // CODEOWNERS names org teams only, never a person (verify-codeowners.mjs).
     script: "tools/repo-gates/verify-codeowners.mjs",
@@ -975,6 +997,13 @@ export function verifyGateDeclarations(
         }
         continue;
       }
+      // A direct workflow home (round 10) runs one of the gate's scripts
+      // itself (`bash apps/cli/scripts/check-on-main.sh`), under the same
+      // discipline as a direct package home: in a job that runs no pnpm.
+      const runsHome = (run) =>
+        home.direct === true
+          ? scriptsOf(decl).some((path) => runsExecutable(run, path))
+          : invokesGate(run, gate);
       let steps;
       try {
         steps = parseSteps(read(home.file));
@@ -1005,7 +1034,7 @@ export function verifyGateDeclarations(
               s.job === target.job &&
               steps.indexOf(s) < steps.indexOf(target) &&
               s.run !== null &&
-              invokesGate(s.run, gate),
+              runsHome(s.run),
           );
           if (guard === undefined) {
             fail(
@@ -1031,7 +1060,7 @@ export function verifyGateDeclarations(
         }
         continue;
       }
-      const at = steps.findIndex((s) => s.run !== null && invokesGate(s.run, gate));
+      const at = steps.findIndex((s) => s.run !== null && runsHome(s.run));
       if (at === -1) {
         fail(
           `${gate}: no step in ${home.file} runs it`,

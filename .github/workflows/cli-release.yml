@@ -125,16 +125,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Who may push a `cli-v*` tag is the release-tag ruleset's decision, and
-      # who may reach the R2 token is the `cli-release` environment's (a
-      # `cli-v*` tag-only policy). This step adds that a
-      # tag on a commit that is not on main publishes nothing.
-      # fetch-depth 0 already brings refs/remotes/origin/main; no `git fetch`
-      # is needed, and the checkout keeps no credential.
+      # A tag on a commit that is not on main publishes nothing; release and
+      # upload repeat the check (check-on-main.sh), and the rules freeze
+      # every step of these three jobs (verify-workflows.mjs, rule 17).
       - name: Refuse a tag that is not on main
-        run: |
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
-            { echo "::error::${GITHUB_REF_NAME} points at a commit that is not on main — nothing is published"; exit 1; }
+        run: bash apps/cli/scripts/check-on-main.sh
 
       - name: Setup Deno
         uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
@@ -198,8 +193,13 @@ jobs:
       - name: Checkout (release-github.sh)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 1
+          # Full history: the on-main check needs origin/main's ancestry.
+          fetch-depth: 0
           persist-credentials: false
+
+      # The build job's check again, in the job that holds the token.
+      - name: Refuse a tag that is not on main
+        run: bash apps/cli/scripts/check-on-main.sh
 
       - name: Receive the build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -237,8 +237,13 @@ jobs:
       - name: Checkout (publish-r2.sh)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          fetch-depth: 1
+          # Full history: the on-main check needs origin/main's ancestry.
+          fetch-depth: 0
           persist-credentials: false
+
+      # The build job's check again, in the job that holds the token.
+      - name: Refuse a tag that is not on main
+        run: bash apps/cli/scripts/check-on-main.sh
 
       - name: Receive the build
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

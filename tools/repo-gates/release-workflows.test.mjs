@@ -1696,7 +1696,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
       [
         "X27 release: GH_TOKEN on the digest step",
         (w) => {
-          const s = j(w, C, "release").steps.find((x) => x.run && !x.env?.GH_TOKEN);
+          const s = j(w, C, "release").steps.find((x) => /build job's digest/.test(x.name ?? ""));
           s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
         },
         /sets the credential GH_TOKEN but its run: does not read it/,
@@ -1899,5 +1899,119 @@ describe("the rule list reads in order (round 9)", () => {
     const nums = [...head.matchAll(/^ \*\s+(\d+)\. [A-Z]/gm)].map((m) => Number(m[1]));
     expect(nums).toEqual(nums.map((_, i) => i + 1));
     expect(nums.length).toBeGreaterThanOrEqual(18);
+  });
+});
+
+describe("every CLI job that publishes re-checks the tag is on main (round 10, MED-1)", () => {
+  const guard = (w, job) =>
+    w[C].jobs[job].steps.find((s) => s.name === "Refuse a tag that is not on main");
+  const at = (w, job) => w[C].jobs[job].steps.indexOf(guard(w, job));
+  const SURFACE = /ACTION_SURFACE records/;
+  const rows = [];
+  for (const job of ["build", "release", "upload"])
+    rows.push(
+      [
+        `B1 ${job}: the on-main step deleted`,
+        (w) => void w[C].jobs[job].steps.splice(at(w, job), 1),
+        /runs \d+ actions, ACTION_SURFACE records \d+/,
+      ],
+      [
+        `B2 ${job}: the on-main step with if: false`,
+        (w) => void (guard(w, job).if = "false"),
+        SURFACE,
+      ],
+      [
+        `B3 ${job}: the on-main run replaced with true`,
+        (w) => void (guard(w, job).run = "true\n"),
+        SURFACE,
+      ],
+      [
+        `B4 ${job}: the on-main run with || true`,
+        (w) => void (guard(w, job).run = "bash apps/cli/scripts/check-on-main.sh || true"),
+        SURFACE,
+      ],
+      [
+        `B4b ${job}: the on-main step moved after the download`,
+        (w) => {
+          const st = w[C].jobs[job].steps;
+          const [g] = st.splice(at(w, job), 1);
+          st.splice(st.length - 1, 0, g);
+        },
+        SURFACE,
+      ],
+      [
+        `B4c ${job}: a shallow checkout (no origin/main to check against)`,
+        (w) => void (w[C].jobs[job].steps[0].with["fetch-depth"] = 1),
+        SURFACE,
+      ],
+    );
+  rows.push(
+    [
+      "B5 build: job-level continue-on-error",
+      (w) => void (w[C].jobs.build["continue-on-error"] = true),
+      /build: sets continue-on-error: \(its failure would be reported green\)/,
+    ],
+    [
+      "B5b release: job-level continue-on-error",
+      (w) => void (w[C].jobs.release["continue-on-error"] = true),
+      /release: sets continue-on-error:/,
+    ],
+    [
+      "B5c release-gate test: job-level continue-on-error",
+      (w) => void (w["release-gate.yml"].jobs.test["continue-on-error"] = true),
+      /test: sets continue-on-error:/,
+    ],
+    [
+      "B7 build: the SHA256SUMS step rewritten",
+      (w) => {
+        const s = w[C].jobs.build.steps.find((x) => x.id === "sums");
+        s.run =
+          'sha256sum confeature-* > SHA256SUMS\necho "digest=$(sha256sum SHA256SUMS | cut -d\' \' -f1)" >> "$GITHUB_OUTPUT"\n';
+      },
+      SURFACE,
+    ],
+    [
+      "B7b build: a step added after the compile",
+      (w) => {
+        const st = w[C].jobs.build.steps;
+        st.splice(
+          st.findIndex((x) => x.id === "sums"),
+          0,
+          { name: "x", run: "echo hi > apps/cli/dist/confeature-extra" },
+        );
+      },
+      SURFACE,
+    ],
+    [
+      "B8 release: GH_TOKEN on the on-main step",
+      (w) => void (guard(w, "release").env = { GH_TOKEN: "${{ github.token }}" }),
+      SURFACE,
+    ],
+    [
+      "B8b upload: an R2 secret on the on-main step",
+      (w) =>
+        void (guard(w, "upload").env = {
+          R2_SECRET_ACCESS_KEY: "${{ secrets.R2_SECRET_ACCESS_KEY }}",
+        }),
+      SURFACE,
+    ],
+    [
+      "B9 promote: the on-main exception is not promote's",
+      (w) => {
+        w[C].jobs.promote.steps.splice(1, 0, {
+          name: "x",
+          run: "bash apps/cli/scripts/check-on-main.sh",
+        });
+      },
+      /promote step x: a credentialed job runs `bash apps\/cli\/scripts\/check-on-main\.sh`/,
+    ],
+  );
+  it.each(ROWS.rows(rows))("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
   });
 });

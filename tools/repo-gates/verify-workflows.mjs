@@ -225,10 +225,17 @@ export const PUBLISH_EXCEPTIONS = {
     "publish-maven": [/^bash tools\/sdk-pack\/maven-r2-upload\.sh release$/],
   },
   [CLI_WORKFLOW]: {
-    upload: [/^bash apps\/cli\/scripts\/publish-r2\.sh upload "\$\{TAG#cli-v\}" dist$/],
+    // Each job holding a token re-checks that the tag is on main (round 10).
+    upload: [
+      /^bash apps\/cli\/scripts\/check-on-main\.sh$/,
+      /^bash apps\/cli\/scripts\/publish-r2\.sh upload "\$\{TAG#cli-v\}" dist$/,
+    ],
     promote: [/^bash apps\/cli\/scripts\/publish-r2\.sh promote "\$\{TAG#cli-v\}"$/],
     // The GitHub release (round 9): view, create, upload without --clobber.
-    release: [/^bash apps\/cli\/scripts\/release-github\.sh "\$TAG" dist$/],
+    release: [
+      /^bash apps\/cli\/scripts\/check-on-main\.sh$/,
+      /^bash apps\/cli\/scripts\/release-github\.sh "\$TAG" dist$/,
+    ],
   },
 };
 
@@ -283,6 +290,43 @@ const setupNode = () =>
   step(PIN.setupNode, { with: { "node-version": "${{ env.NODE_VERSION }}" } });
 /** A job that calls a reusable workflow, with its exact inputs. */
 const call = (uses, inputs) => ({ call: uses, with: inputs });
+/**
+ * A run step of a FROZEN_JOBS job: its name, its run: text by sha256, and its
+ * id, if:, env:, working-directory, shell, continue-on-error when it has
+ * them. To record a reviewed change, copy the `got` surface the finding
+ * prints (it carries the new sha256), or compute it with
+ *   node -e 'const y=require("yaml"),f=require("fs");const s=y.parse(f.readFileSync(process.argv[1],"utf8")).jobs[process.argv[2]].steps[+process.argv[3]];console.log(require("crypto").createHash("sha256").update(s.run??s.with.script).digest("hex"))' <workflow> <job> <index>
+ * (the same command gives a github-script `script:` sha256).
+ */
+const runStep = (name, sha256, extra = {}) => ({ name, run: { sha256 }, ...extra });
+/** release's and upload's check of the artifact against the build job's SHA256SUMS digest. */
+const checkBuildDigest = () =>
+  runStep(
+    "Check the build against the build job's digest",
+    "22101f7ea6c139adcf9682466d2db0509f20a621f25927c3304e3bc9cb46071a",
+    { env: { EXPECTED: "${{ needs.build.outputs.sums-digest }}" } },
+  );
+/** The on-main guard every token-holding CLI job runs first (round 10, check-on-main.sh). */
+const onMain = () =>
+  runStep(
+    "Refuse a tag that is not on main",
+    createHash("sha256").update("bash apps/cli/scripts/check-on-main.sh").digest("hex"),
+  );
+
+/**
+ * The jobs whose EVERY step, run steps included, is frozen (round 10), not
+ * only their actions: cli-release's build (its on-main guard and the
+ * SHA256SUMS step decide what is released, yet it holds no token, so no
+ * credential rule reads it), release and upload (each re-runs the guard
+ * first), and release-gate's test (WRITE_TOKEN_EXEMPT: rules 3 and 15 skip
+ * it, so a step added before its github-script could reach the token).
+ */
+export const FROZEN_JOBS = new Set([
+  `${CLI_WORKFLOW}#build`,
+  `${CLI_WORKFLOW}#release`,
+  `${CLI_WORKFLOW}#upload`,
+  "release-gate.yml#test",
+]);
 
 export const ACTION_SURFACE = {
   [PUBLISH_WORKFLOW]: {
@@ -446,9 +490,26 @@ export const ACTION_SURFACE = {
   },
   [CLI_WORKFLOW]: {
     "workflow-rules": [shallowCheckout(), step(PIN.pnpm), setupNode()],
+    // FROZEN_JOBS: every step, the on-main guard first after the checkout.
     build: [
       fullCheckout(),
+      onMain(),
       step(PIN.setupDeno, { with: { "deno-version": "2.8.2" } }),
+      runStep(
+        "Verify tag matches the declared CLI version",
+        "5168636d2709cbe00ceda991557ea863371bd2fa5c41e0b29b5bb76ce8d53285",
+        { env: { TAG: "${{ github.ref_name }}" }, "working-directory": "apps/cli" },
+      ),
+      runStep(
+        "Compile all targets",
+        "bbbee17f86555becfff17b399108d1f04d9546419ddf2e384763257244b95032",
+        { "working-directory": "apps/cli" },
+      ),
+      runStep(
+        "Generate SHA256SUMS",
+        "be84fd5aaae520e9a8f11f8de7433117cf764a0ce59bd6caec5df39ee4ee6c6a",
+        { id: "sums", "working-directory": "apps/cli/dist" },
+      ),
       step(PIN.upload, {
         with: {
           name: "cli-dist",
@@ -457,9 +518,41 @@ export const ACTION_SURFACE = {
           "if-no-files-found": "error",
         },
       }),
+      runStep(
+        "Release summary",
+        "d4a139464632e78041a3f8e61587f484890b15ee7ce0e9aae4f53e99baef05b2",
+        { if: "always()", env: { TAG: "${{ github.ref_name }}", SHA: "${{ github.sha }}" } },
+      ),
     ],
-    release: [shallowCheckout(), download("cli-dist", "dist")],
-    upload: [shallowCheckout(), download("cli-dist", "dist")],
+    release: [
+      fullCheckout(),
+      onMain(),
+      download("cli-dist", "dist"),
+      checkBuildDigest(),
+      runStep(
+        "Create the GitHub release and upload its assets (mirror)",
+        "008e0b0518054df4ed7658b2b1f74cc2ca5865505ed4ab8cc9b90ae3fce62afb",
+        { env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" } },
+      ),
+    ],
+    upload: [
+      fullCheckout(),
+      onMain(),
+      download("cli-dist", "dist"),
+      checkBuildDigest(),
+      runStep(
+        "Upload v<ver>/ to R2",
+        "e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82",
+        {
+          env: {
+            R2_ACCESS_KEY_ID: "${{ secrets.R2_ACCESS_KEY_ID }}",
+            R2_SECRET_ACCESS_KEY: "${{ secrets.R2_SECRET_ACCESS_KEY }}",
+            CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+            TAG: "${{ github.ref_name }}",
+          },
+        },
+      ),
+    ],
     "verify-pinned": [
       call("./.github/workflows/cli-windows-install-verify.yml", {
         version: "${{ github.ref_name }}",
@@ -475,8 +568,19 @@ export const ACTION_SURFACE = {
   },
   "release-gate.yml": {
     setup: [shallowCheckout()],
+    // FROZEN_JOBS: every step (WRITE_TOKEN_EXEMPT holds it to this instead of rule 3).
     test: [
       shallowCheckout(),
+      runStep(
+        "Read the Dagger engine version (dagger/dagger.json)",
+        "bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8",
+        { id: "pin" },
+      ),
+      runStep(
+        "Install the checksum-verified Dagger CLI",
+        "c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86",
+        { env: { DAGGER_VERSION: "${{ steps.pin.outputs.version }}" } },
+      ),
       step(PIN.dagger, {
         with: {
           version: "${{ steps.pin.outputs.version }}",
@@ -501,6 +605,15 @@ export const ACTION_SURFACE = {
  * with: (a github-script `script:` by its sha256, so the table stays short).
  */
 const surfaceOf = (s) => {
+  if (typeof s?.uses !== "string") {
+    const o = {
+      name: s?.name,
+      run: { sha256: createHash("sha256").update(String(s?.run)).digest("hex") },
+    };
+    for (const k of ["id", "if", "env", "working-directory", "shell", "continue-on-error"])
+      if (s?.[k] !== undefined) o[k] = s[k];
+    return o;
+  }
   const o = { uses: s.uses };
   for (const k of ["id", "if", "env", "continue-on-error"]) if (s[k] !== undefined) o[k] = s[k];
   if (s.with !== undefined) {
@@ -541,7 +654,7 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
         typeof job?.uses === "string"
           ? [call(job.uses, job.with ?? {})]
           : (Array.isArray(job?.steps) ? job.steps : [])
-              .filter((s) => typeof s?.uses === "string")
+              .filter((s) => FROZEN_JOBS.has(`${file}#${jobId}`) || typeof s?.uses === "string")
               .map(surfaceOf);
       if (got.length !== want.length)
         add(`runs ${got.length} actions, ACTION_SURFACE records ${want.length}`);
@@ -1490,12 +1603,6 @@ function credentialScopeRule(file, jobId, job, doc, add) {
  * not set at all, so a failed publish is never reported green (round 8).
  */
 function jobKeysRule(file, jobId, job, add) {
-  if (job?.["continue-on-error"] !== undefined)
-    add(
-      file,
-      jobId,
-      "a credentialed job sets continue-on-error: (its failure would be reported green)",
-    );
   for (const [k, v] of Object.entries(job ?? {})) {
     if (["env", "steps", "with"].includes(k)) continue;
     if (k !== "name" && k !== "if") {
@@ -1530,16 +1637,8 @@ function stepCredentialRules(file, jobId, job, add) {
     const where = s?.name ?? "?";
     for (const [k, v] of Object.entries(s ?? {})) {
       if (k === "env" || k === "with" || k === "run") continue;
-      // A step that may fail without failing the job (round 9: a digest
-      // check or a guard with continue-on-error lets the upload run anyway).
-      if (k === "continue-on-error") {
-        add(
-          file,
-          jobId,
-          `step ${where} sets continue-on-error: (a failed check would not stop the job)`,
-        );
-        continue;
-      }
+      // continueOnErrorFindings refuses it, in every job of these workflows.
+      if (k === "continue-on-error") continue;
       if (k === "if") {
         if (!RECORDED_STEP_IFS.includes(String(v)))
           add(
@@ -1604,20 +1703,29 @@ export const WRITE_PERMISSIONS = {
 
 /**
  * No step or job of the release workflows may fail without failing its job
- * (round 9): a guard with continue-on-error (the on-main check, a digest
+ * (rounds 9, 10; the one place it is checked): a guard with continue-on-error (the on-main check, a digest
  * check) would let the build, the pack or the upload after it run anyway.
  */
 export function continueOnErrorFindings(workflows) {
   const out = [];
-  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW])
-    for (const [jobId, job] of Object.entries(workflows[file]?.jobs ?? {}))
+  for (const file of SURFACE_WORKFLOWS)
+    for (const [jobId, job] of Object.entries(workflows[file]?.jobs ?? {})) {
+      // A job that may fail green (round 10: build's, whose guard and
+      // SHA256SUMS decide what release and upload publish).
+      if (job?.["continue-on-error"] !== undefined)
+        out.push({
+          file,
+          job: jobId,
+          why: "sets continue-on-error: (its failure would be reported green)",
+        });
       for (const s of Array.isArray(job?.steps) ? job.steps : [])
         if (s?.["continue-on-error"] !== undefined)
           out.push({
             file,
             job: jobId,
-            why: `step ${s?.name ?? "?"} sets continue-on-error: in a release workflow`,
+            why: `step ${s?.name ?? "?"} sets continue-on-error: (a failed check would not stop the job)`,
           });
+    }
   return out;
 }
 

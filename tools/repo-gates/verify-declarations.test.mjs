@@ -1393,6 +1393,59 @@ jobs:
   });
 });
 
+describe("a direct workflow home runs the script itself, in every job (round 10)", () => {
+  // check-on-main.sh runs as `bash <path>` in jobs that may run no pnpm.
+  const DIRECT = {
+    ...GATES,
+    "guard-x": {
+      script: "tools/guard-x.sh",
+      homes: [
+        {
+          file: ".github/workflows/ship.yml",
+          before: "Pack the release artifact",
+          perJob: true,
+          direct: true,
+        },
+      ],
+    },
+  };
+  const job = (name, run) =>
+    [
+      `  ${name}:`,
+      "    steps:",
+      "      - name: Thing",
+      "        run: pnpm run verify:thing",
+      ...(run === null ? [] : ["      - name: Guard", `        run: ${run}`]),
+      "      - name: Pack the release artifact",
+      "        run: pnpm pack",
+    ].join("\n");
+  const what = (...jobs) => {
+    seed({
+      workflow: `name: ship\njobs:\n${jobs.join("\n")}\n`,
+      agents:
+        "## Quality gates\n\n| Surface | What runs |\n| --- | --- |\n" +
+        "| verify | `verify:thing` then `verify:gate-declarations` |\n" +
+        "| ship.yml | `verify:thing`, `guard-x` |\n\n## Next\n",
+    });
+    write("tools/guard-x.sh", "#!/usr/bin/env bash\nset -e\nexit 1\n");
+    return verifyGateDeclarations(root, DIRECT, [])
+      .map((v) => v.what)
+      .join("\n");
+  };
+  it("accepts `bash <script>` before the guarded step in every job", () =>
+    expect(what(job("a", "bash tools/guard-x.sh"), job("b", "bash tools/guard-x.sh"))).not.toMatch(
+      /guard-x/,
+    ));
+  it("rejects a job that does not run it", () =>
+    expect(what(job("a", "bash tools/guard-x.sh"), job("b", null))).toMatch(
+      /guard-x: job "b" reaches "Pack the release artifact" without running it first/,
+    ));
+  it("rejects a run that swallows its failure", () =>
+    expect(what(job("a", "bash tools/guard-x.sh || true"))).toMatch(/job "a" reaches/));
+  it("rejects a run that only names it", () =>
+    expect(what(job("a", "echo bash tools/guard-x.sh"))).toMatch(/job "a" reaches/));
+});
+
 describe("perJob: every job that reaches the guarded step runs the gate first, in that job (#794)", () => {
   // The release tier packs in one job per registry. A single gate invocation
   // in one pack job orders nothing in the others, so `perJob` asks each job.
