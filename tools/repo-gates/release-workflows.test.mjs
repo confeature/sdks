@@ -1119,3 +1119,39 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
     expect(got.some((g) => /a secret is read only in an env: value/.test(g))).toBe(true);
   });
 });
+
+describe("each secret name reads its own secret (round 7)", () => {
+  it.each([
+    [
+      "MAVEN_R2_ACCESS_KEY_ID from another declared secret",
+      (w) => {
+        w[P].jobs["publish-maven"].steps.find(
+          (s) => s.name === "Upload",
+        ).env.MAVEN_R2_ACCESS_KEY_ID = "${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}";
+      },
+      /MAVEN_R2_ACCESS_KEY_ID is .*, not its pinned expression/,
+    ],
+    [
+      "the Go DEPLOY_KEY from the mirrors' secret",
+      (w) => {
+        w[P].jobs["publish-go"].steps.find(
+          (s) => s.name === "Install the deploy key",
+        ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+      },
+      /DEPLOY_KEY is \$\{\{ secrets\.MIRROR_DEPLOY_KEY \}\}, not its pinned expression/,
+    ],
+    [
+      "another known host",
+      (w) => {
+        w[P].env.GITHUB_SSH_KNOWN_HOST = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL";
+      },
+      /GITHUB_SSH_KNOWN_HOST is .*, not its pinned expression/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+});

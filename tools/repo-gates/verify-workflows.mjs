@@ -245,7 +245,14 @@ const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?N
 const EXPR = (e) => new RegExp(`^\\$\\{\\{\\s*${e}\\s*\\}\\}$`);
 const LIT = (v) => new RegExp(`^${v.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}$`);
 const VERSION_PIN = /^\d+\.\d+\.\d+$/;
-const SECRET_PIN = EXPR("secrets\\.[A-Z][A-Z0-9_]*");
+/** Each secret env name reads its own secret (round 7), never another declared one. */
+const SECRET = (name) => EXPR(`secrets\\.${name}`);
+/** The one deploy key each git job's environment holds. */
+const DEPLOY_KEY_SECRET = {
+  "publish-go": "GO_TAG_DEPLOY_KEY",
+  "publish-packagist": "MIRROR_DEPLOY_KEY",
+  "publish-swiftpm": "MIRROR_DEPLOY_KEY",
+};
 const PACK = (jobId, out) =>
   EXPR(`needs\\.${jobId.replace(/^publish-/, "pack-")}\\.outputs\\.${out}`);
 const WS = "\\$\\{\\{ github\\.workspace \\}\\}";
@@ -263,7 +270,11 @@ export const PINNED_ENV = {
   DENO_VERSION: () => VERSION_PIN,
   MAVEN_URL: () => LIT("https://maven.confeature.io"),
   MAVEN_BUCKET: () => LIT("confeature-maven"),
-  GITHUB_SSH_KNOWN_HOST: () => /^github\.com ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/,
+  // github.com's published ed25519 host key, exact (docs.github.com).
+  GITHUB_SSH_KNOWN_HOST: () =>
+    LIT(
+      "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+    ),
   UNIT_PATH: () => EXPR("needs\\.setup\\.outputs\\.path"),
   UNIT_VERSION: () => EXPR("needs\\.setup\\.outputs\\.version"),
   UNIT_COORDINATES: () => EXPR("needs\\.setup\\.outputs\\.coordinates"),
@@ -276,12 +287,12 @@ export const PINNED_ENV = {
   EXPECTED_SUMS: (j) => PACK(j, "sums"),
   SPLIT_SHA: (j) => PACK(j, "split"),
   EXPECTED: () => EXPR("needs\\.release\\.outputs\\.sums-digest"),
-  DEPLOY_KEY: () => SECRET_PIN,
-  R2_ACCESS_KEY_ID: () => SECRET_PIN,
-  R2_SECRET_ACCESS_KEY: () => SECRET_PIN,
-  CLOUDFLARE_ACCOUNT_ID: () => SECRET_PIN,
-  MAVEN_R2_ACCESS_KEY_ID: () => SECRET_PIN,
-  MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET_PIN,
+  DEPLOY_KEY: (j) => SECRET(DEPLOY_KEY_SECRET[j] ?? "NO_DEPLOY_KEY_FOR_THIS_JOB"),
+  R2_ACCESS_KEY_ID: () => SECRET("R2_ACCESS_KEY_ID"),
+  R2_SECRET_ACCESS_KEY: () => SECRET("R2_SECRET_ACCESS_KEY"),
+  CLOUDFLARE_ACCOUNT_ID: () => SECRET("CLOUDFLARE_ACCOUNT_ID"),
+  MAVEN_R2_ACCESS_KEY_ID: () => SECRET("MAVEN_R2_ACCESS_KEY_ID"),
+  MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET("MAVEN_R2_SECRET_ACCESS_KEY"),
   NUGET_API_KEY: () => EXPR("steps\\.login\\.outputs\\.NUGET_API_KEY"),
   CARGO_REGISTRY_TOKEN: () => EXPR("steps\\.auth\\.outputs\\.token"),
   DOTNET_NOLOGO: () => LIT("1"),

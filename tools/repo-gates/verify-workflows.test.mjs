@@ -404,13 +404,13 @@ describe("each rule fires on a fixture that breaks only it", () => {
   });
   it("1 a secret its environment does not declare", () =>
     fires(
-      run(READS_SECRET("DEPLOY_KEY")),
-      /reads secret DEPLOY_KEY, which environment sdk-publish-npm does not declare/,
+      run(READS_SECRET("R2_ACCESS_KEY_ID")),
+      /reads secret R2_ACCESS_KEY_ID, which environment sdk-publish-npm does not declare/,
     ));
   it("1 a secret its environment declares", () => {
     const s = settings();
-    s.environments[0].secrets.push({ name: "DEPLOY_KEY", kind: "deploy-key" });
-    expect(run(READS_SECRET("DEPLOY_KEY"), { s })).toEqual([]);
+    s.environments[0].secrets.push({ name: "R2_ACCESS_KEY_ID", kind: "key-id" });
+    expect(run(READS_SECRET("R2_ACCESS_KEY_ID"), { s })).toEqual([]);
   });
 
   it.each([
