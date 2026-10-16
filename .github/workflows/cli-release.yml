@@ -81,7 +81,7 @@ jobs:
 
       # Who may push a `cli-v*` tag is the release-tag ruleset's decision, and
       # who may reach the R2 token is the `cli-release` environment's (a
-      # required reviewer, a `cli-v*` tag-only policy). This step adds that a
+      # `cli-v*` tag-only policy). This step adds that a
       # tag on a commit that is not on main publishes nothing.
       # fetch-depth 0 already brings refs/remotes/origin/main; no `git fetch`
       # is needed, and the checkout keeps no credential.
@@ -170,7 +170,8 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     # The R2 token is an ENVIRONMENT secret of `cli-release` (#794): this job
-    # waits for the sdk-maintainers reviewer, and the environment accepts
+    # accepts `cli-v*` tags only (no approval click: operator ruling 2026-10-16;
+    # the release-tag ruleset decides who can push one), and the environment accepts
     # `cli-v*` tags only. No repository-level copy exists (read back by the
     # operator's release-settings tooling).
     environment: cli-release
@@ -232,7 +233,8 @@ jobs:
     needs: verify-pinned
     runs-on: ubuntu-latest
     # The R2 token is an ENVIRONMENT secret of `cli-release` (#794): this job
-    # waits for the sdk-maintainers reviewer, and the environment accepts
+    # accepts `cli-v*` tags only (no approval click: operator ruling 2026-10-16;
+    # the release-tag ruleset decides who can push one), and the environment accepts
     # `cli-v*` tags only. No repository-level copy exists (read back by the
     # operator's release-settings tooling).
     environment: cli-release

@@ -24,7 +24,7 @@
 #                against the resolver's, runs the registry's credential-free dry
 #                run, and hands the artifact on with its sha256.
 #   4. publish-* ONE per registry, a top-level job bound to environment
-#                `sdk-publish-<registry>` (a required reviewer, a tag-only
+#                `sdk-publish-<registry>` (a tag-only
 #                deployment policy). It runs NO project code: it downloads the
 #                artifact from this same run, checks the digest, and runs the
 #                pinned upload command. OIDC trusted publishing wherever the
@@ -40,7 +40,7 @@
 # proves that.
 #
 # The jobs, environments and rules here are checked by
-# tools/repo-gates/verify-workflows.mjs; the environments, their reviewers and
+# tools/repo-gates/verify-workflows.mjs; the environments, their rules and
 # tag policies are declared in tools/repo-gates/release-settings.json.
 #
 # Registries wired so far: npm. The others land with their own child of #794.

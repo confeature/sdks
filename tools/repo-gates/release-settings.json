@@ -1,7 +1,9 @@
 {
-  "$comment": "The release settings of confeature/sdks, as data (#794). One home for: the publish environments, their reviewers and admin-bypass rule, the secrets each may hold (with a rotation date), the OIDC trust bindings entered on each registry, the third-party actions any workflow may use, the protected release-tag patterns (who may create a tag that publishes), and the release-shaped branch names nobody may create. The tag deployment policy of a registry environment is NOT written here: it is derived from publish[] in dagger/sdk-manifest.json (one sdk-<name>-v* pattern per unit of that registry). tools/repo-gates/verify-workflows.mjs holds the workflows to this file; the operator's tooling applies it to GitHub and reads it back.",
+  "$comment": "The release settings of confeature/sdks, as data (#794). One home for: the publish environments and their review and admin-bypass rules, the secrets each may hold (with a rotation date), the OIDC trust bindings entered on each registry, the third-party actions any workflow may use, the protected release-tag patterns (who may create a tag that publishes), and the release-shaped branch names nobody may create. The tag deployment policy of a registry environment is NOT written here: it is derived from publish[] in dagger/sdk-manifest.json (one sdk-<name>-v* pattern per unit of that registry). tools/repo-gates/verify-workflows.mjs holds the workflows to this file; the operator's tooling applies it to GitHub and reads it back.",
   "reviewerTeam": "sdk-maintainers",
   "environmentRules": {
+    "requireReviewers": false,
+    "requireReviewersReason": "operator ruling 2026-10-16: no approval click before a publish. The gate is who may push a release tag (the release-tag ruleset: sdk-maintainers and organisation admins), the tag-only deployment policy of each environment, and the confirmation the operator gives when the tag is pushed. Turn this on the day a second maintainer joins.",
     "canAdminsBypass": false,
     "preventSelfReview": false,
     "preventSelfReviewReason": "sdk-maintainers has one member today, who both tags and approves; turn this on the day a second member joins"

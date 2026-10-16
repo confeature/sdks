@@ -55,10 +55,10 @@ gh secret set CLI_R2_API_TOKEN --env cli-release --repo confeature/sdks   # past
 ```
 
 It is an **environment** secret of `cli-release`, never a repository secret: only the upload and
-promote jobs bind that environment, each waits for a sdk-maintainers approval, and the environment
-accepts `cli-v*` tags only. The secret is declared, with its rotation date, in
-`tools/repo-gates/release-settings.json`; a secret that is not declared there fails the operator's
-read-back, and so does one past its rotation date.
+promote jobs bind that environment (no approval click since 2026-10-16: who may push a `cli-v*` tag
+is the release-tag ruleset's decision), and the environment accepts `cli-v*` tags only. The secret
+is declared, with its rotation date, in `tools/repo-gates/release-settings.json`; a secret that is
+not declared there fails the operator's read-back, and so does one past its rotation date.
 
 The token must not reach any other bucket. Check with
 `pnpm exec wrangler r2 object get <another-bucket>/<any-key> --remote` using that token: it must be
