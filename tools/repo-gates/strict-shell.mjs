@@ -13,8 +13,9 @@
  *   - plain words from [A-Za-z0-9_./:=@%+,-] and the exact words `[` and `]`;
  *   - single quotes (literal);
  *   - double quotes holding literal text and `$NAME` / `${NAME}` (an operator
- *     expansion such as `${TAG#cli-v}` is lexed, flagged `opExpansion`, and
- *     allowed only inside a recorded exception);
+ *     expansion `${NAME#lit}`, `${NAME%lit}` or `${NAME:-lit}`, such as
+ *     `${TAG#cli-v}`, is lexed, flagged `opExpansion`, and allowed only inside
+ *     a recorded exception; any other `${…}` form is refused);
  *   - the redirections `>`, `>>` and `<`, to a literal target;
  *   - backslash-newline continuations and `#` comments.
  *
@@ -90,7 +91,15 @@ export function lexStrict(src) {
         refuse("an expansion this grammar does not allow (${ with $, (, { or `)");
         return end === -1 ? src.length : i + 2 + end;
       }
-      if (!new RegExp(`${NAME.source}$`).test(body)) w.opExpansion = true;
+      // A plain name, or the operator forms the exceptions use (`#`, `%`, `:-`)
+      // with a literal operand: never a subscript, `@` transform, `/`
+      // substitution, `#` length, `!` indirection or substring offset.
+      const plain = new RegExp(`${NAME.source}$`).test(body);
+      if (!plain && !/^[A-Za-z_][A-Za-z0-9_]*(?:#|%|:-)[A-Za-z0-9_.\/-]*$/.test(body)) {
+        refuse("an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}");
+        return i + 2 + end;
+      }
+      if (!plain) w.opExpansion = true;
       w.text += `\${${body}}`;
       w.hasExpansion = true;
       if (lead) w.leadsWithExpansion = true;

@@ -177,15 +177,15 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ));
 
   it.each([
-    ["pnpm install", "pnpm install"],
-    ["a repository script", "node tools/x.mjs"],
-    ["a build", "pnpm run build"],
-    ["make", "make release"],
-    ["a local executable", "./gradlew publish"],
-    ["a shell script", "bash scripts/x.sh"],
-    ["npm ci", "npm ci"],
-  ])("3 a publish job that runs %s", (_, cmd) =>
-    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
+    ["pnpm install", "pnpm install", /pnpm is not a command/],
+    ["a repository script", "node tools/x.mjs", /node is not a command/],
+    ["a build", "pnpm run build", /pnpm is not a command/],
+    ["make", "make release", /make is not a command/],
+    ["a local executable", "./gradlew publish", /\.\/gradlew is not a command/],
+    ["a shell script", "bash scripts/x.sh", /bash is not a command/],
+    ["npm ci", "npm ci", /npm runs only `publish`/],
+  ])("3 a publish job that runs %s", (_, cmd, why) =>
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), why),
   );
   it("3 a publish job's checkout that keeps its credential", () =>
     fires(
@@ -349,17 +349,17 @@ describe("each rule fires on a fixture that breaks only it", () => {
     expect(run(swap(INSTALL_STEP, `      - run: npm publish --ignore-scripts ${arg}`))).toEqual([]),
   );
   it.each([
-    "cargo build --release",
-    'cargo "+${RUST_VERSION}" package',
-    "dotnet build",
-    "dotnet pack -c Release",
-    "gem build confeature.gemspec",
-    "uv build",
-    "uvx twine check dist/*",
-    "dart pub get",
-    "python3 setup.py sdist",
-    "rake release",
-  ])("3 a publish job running %s", (cmd) => fires(run(swap(UPLOAD, cmd)), /a credentialed job/));
+    ["cargo build --release", /cargo is not a command/],
+    ['cargo "+${RUST_VERSION}" package', /cargo is not a command/],
+    ["dotnet build", /dotnet runs only `nuget push`/],
+    ["dotnet pack -c Release", /dotnet runs only `nuget push`/],
+    ["gem build confeature.gemspec", /gem runs only `push`/],
+    ["uv build", /uv is not a command/],
+    ["uvx twine check dist/*", /a glob character/],
+    ["dart pub get", /dart is not a command/],
+    ["python3 setup.py sdist", /python3 is not a command/],
+    ["rake release", /rake is not a command/],
+  ])("3 a publish job running %s", (cmd, why) => fires(run(swap(UPLOAD, cmd)), why));
   it.each([
     'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
@@ -435,17 +435,20 @@ describe("each rule fires on a fixture that breaks only it", () => {
       ).toEqual([]);
   });
   it.each([
-    "$UNIT_PATH/gradlew publish",
-    "(cd apps/sdk-java && ./gradlew publish)",
-    "gradle publish",
-    "mvnw deploy",
-    "mvn deploy",
-  ])("3 a publish job running a JVM build (%s)", (cmd) =>
-    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
+    ["$UNIT_PATH/gradlew publish", /an unquoted \$/],
+    ["(cd apps/sdk-java && ./gradlew publish)", /a \( \) or \{ \}/],
+    ["gradle publish", /gradle is not a command/],
+    ["mvnw deploy", /mvnw is not a command/],
+    ["mvn deploy", /mvn is not a command/],
+  ])("3 a publish job running a JVM build (%s)", (cmd, why) =>
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), why),
   );
-  it.each(["bundle install", "bundle exec rake release", "(bundle exec rake)"])(
-    "3 a publish job running bundler (%s)",
-    (cmd) => fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
+  it.each([
+    ["bundle install", /bundle is not a command/],
+    ["bundle exec rake release", /bundle is not a command/],
+    ["(bundle exec rake)", /a \( \) or \{ \}/],
+  ])("3 a publish job running bundler (%s)", (cmd, why) =>
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), why),
   );
 
   it("11 control: a declared mirror and Go module tags are clean", () => {
@@ -660,6 +663,136 @@ describe("rule 3: caches that are on unless switched off (#794 review)", () => {
   });
 });
 
+/**
+ * Why each row of the rule-3 refuses table is refused: the finding's own
+ * words, so a row refused by a neighbouring check instead fails (round 4).
+ */
+const REASONS = {
+  "a backslash continuation": "pnpm is not a command a credentialed job runs",
+  "a continuation inside npm's arguments":
+    "npm runs only `publish`, or installs itself at NPM_VERSION",
+  "an option before npm's subcommand": "npm runs only `publish`, or installs itself at NPM_VERSION",
+  "npm publish without --ignore-scripts": "npm publish must run with --ignore-scripts",
+  "npm publish --ignore-scripts=false": "npm publish: --ignore-scripts takes no value",
+  bunx: "bunx is not a command a credentialed job runs",
+  deno: "deno is not a command a credentialed job runs",
+  tsx: "tsx is not a command a credentialed job runs",
+  "go test": "go is not a command a credentialed job runs",
+  source: "source is not a command a credentialed job runs",
+  ". (source)": ". is not a command a credentialed job runs",
+  "a repository path without ./": "apps/cli/scripts/x.sh is not a command a credentialed job runs",
+  "a command substitution":
+    "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+  "a substitution inside a quoted argument":
+    "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+  "a process substitution": "a process substitution",
+  "a substitution inside ${ }": "an expansion this grammar does not allow (${ with $, (, { or `)",
+  "a backtick substitution": "a backtick command substitution",
+  "a variable as the command": "${CMD} is not a command a credentialed job runs",
+  eval: "eval is not a command a credentialed job runs",
+  exec: "exec is not a command a credentialed job runs",
+  env: "env is not a command a credentialed job runs",
+  xargs: "xargs is not a command a credentialed job runs",
+  "find -exec": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "sort --compress-program": "sort: --compress-program is not an option it may take",
+  "sed's e flag": "sed runs one single-quoted s/\u2026/\u2026/ script (flag g at most)",
+  "sed -e": "sed runs one single-quoted s/\u2026/\u2026/ script (flag g at most)",
+  "sed -f": "sed runs one single-quoted s/\u2026/\u2026/ script (flag g at most)",
+  "a second sed script": "sed runs one single-quoted s/\u2026/\u2026/ script (flag g at most)",
+  "git -c before the subcommand":
+    "git: -c is not a global option it may take (--git-dir=publish-tmp/\u2026 only)",
+  "git --upload-pack": "git fetch: --upload-pack is not an option it may take",
+  "git config": "git runs only init, bundle verify, fetch, push and rev-parse",
+  "a loop": "while is not a command a credentialed job runs",
+  "a case": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "a subshell": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "a function": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  export: "export is not a command a credentialed job runs",
+  "a prefix assignment": "a credentialed job assigns no variable",
+  "an assignment": "a credentialed job assigns no variable",
+  "a write to GITHUB_PATH":
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+  "((\u2026)) read as arithmetic":
+    "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "$((\u2026)) read as arithmetic": "an unquoted $ (every expansion is double-quoted)",
+  "case after then": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "case inside $( )":
+    "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+  "case in a group": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "case after !": "a ! (negation)",
+  "case with in on the next line":
+    "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "ANSI-C quoting": "an unquoted $ (every expansion is double-quoted)",
+  '$"\u2026" quoting': "an unquoted $ (every expansion is double-quoted)",
+  "a one-line function": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "function shadowing an earlier command":
+    "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "a function defined in a skipped branch":
+    "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  local: "local is not a command a credentialed job runs",
+  read: "read is not a command a credentialed job runs",
+  "printf -v": "printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'",
+  "for \u2026 in": "for is not a command a credentialed job runs",
+  "for without in": "set is not a command a credentialed job runs",
+  "an arithmetic for": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "${\u2026:=\u2026}":
+    "an operator expansion other than ${NAME#\u2026}, ${NAME%\u2026} or ${NAME:-\u2026}",
+  "export without a value": "export is not a command a credentialed job runs",
+  "export of an expansion": "export is not a command a credentialed job runs",
+  "an arithmetic subscript":
+    "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+  "a substring expansion":
+    "an operator expansion other than ${NAME#\u2026}, ${NAME%\u2026} or ${NAME:-\u2026}",
+  "a funsub": "an operator expansion other than ${NAME#\u2026}, ${NAME%\u2026} or ${NAME:-\u2026}",
+  "a valsub": "an operator expansion other than ${NAME#\u2026}, ${NAME%\u2026} or ${NAME:-\u2026}",
+  "a substitution inside arithmetic":
+    "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+  "indirect expansion":
+    "an operator expansion other than ${NAME#\u2026}, ${NAME%\u2026} or ${NAME:-\u2026}",
+  "an option through a variable":
+    "git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names",
+  "an operand that starts with an expansion":
+    'git push: "$X" starts with an expansion, which could become an option',
+  "brace expansion": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "a glob": "a glob character (* ? [ ])",
+  "an abbreviated long option (git)": "git push: --receive-pa is not an option it may take",
+  "an abbreviated long option (sort)": "sort: --compress-prog is not an option it may take",
+  "git init --template": "git init: --template is not an option it may take",
+  "cd before an exception": "cd is not a command a credentialed job runs",
+  "GITHUB_ENV through a literal":
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+  "the runner's file-command directory":
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+  RUNNER_TEMP: "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+  "a write outside publish-tmp":
+    "a credentialed job writes only publish-tmp/ or /dev/null (apps/cli/scripts/publish-r2.sh)",
+  "rm outside publish-tmp": "rm touches only publish-tmp/",
+  "mkdir outside publish-tmp": "mkdir touches only publish-tmp/",
+  "an ext:: remote":
+    "git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names",
+  "an fd:: remote":
+    "git fetch: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names, or a received release/*.bundle",
+  "an ext:: remote after end-of-options":
+    "git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names",
+  "a repository the settings do not name":
+    "git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names",
+  "a forced refspec":
+    "git push: every refspec is <HEAD|refs/\u2026>:refs/heads|tags/\u2026, never forced",
+  "a refspec that is an expansion":
+    "git push: every refspec is <HEAD|refs/\u2026>:refs/heads|tags/\u2026, never forced",
+  "dotnet --source elsewhere":
+    "dotnet nuget push: --source must be exactly https://api.nuget.org/v3/index.json",
+  "gem push --host": "gem push: --host is not an option it may take",
+  "curl -o": "curl: -o is not an option it may take",
+  "curl -K": "curl: -K is not an option it may take",
+  "curl to another host": "curl reaches https://proxy.golang.org/ only",
+  "aws (only the reviewed Maven script uploads to R2)":
+    "aws is not a command a credentialed job runs",
+  "rustup run": "rustup runs only `toolchain install`",
+  "rustup with an expansion before --":
+    'rustup toolchain install: "$X" starts with an expansion, which could become an option',
+};
+
 describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 review)", () => {
   const block = (cmd) => `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
   const inPublish = (cmd, opts) => run(swap(PUBLISH_STEP, block(cmd)), opts);
@@ -788,11 +921,12 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ],
     ["rustup run", "rustup run stable node x"],
     ["rustup with an expansion before --", 'rustup toolchain install "$X"'],
-  ])("refuses %s", (_, cmd) => {
+  ])("refuses %s, for its own reason", (label, cmd) => {
     const got = inPublish(cmd);
+    expect(Object.hasOwn(REASONS, label), `no reason recorded for ${label}`).toBe(true);
     expect(
-      got.some((w) => CRED.test(w)),
-      `accepted: ${cmd}\n${got.join("\n")}`,
+      got.some((w) => CRED.test(w) && w.includes(REASONS[label])),
+      `${cmd}\nwant: ${REASONS[label]}\ngot:\n${got.join("\n")}`,
     ).toBe(true);
   });
 
@@ -804,6 +938,21 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ["a glob", "ls release/*", /a glob character/],
     ["a & background job", "echo x & echo y", /a & \(background/],
     ["a subshell around an allowed command", "( echo hi )", /a \( \) or \{ \}/],
+    ["a tilde", "echo ~/x", /a ~ \(tilde expansion\)/],
+    ["an unterminated single quote", "echo 'abc", /an unterminated single quote/],
+    ["an unterminated double quote", 'echo "abc', /an unterminated double quote/],
+    ["a descriptor redirection", "echo x 2> publish-tmp/e", /a descriptor redirection/],
+    ["two redirections in a row", "echo x > > publish-tmp/e", /two redirections in a row/],
+    ["a redirection with no target", "echo x >", /a > with no target/],
+    ["a disallowed character", "echo x^y", /a character this grammar does not allow \("\^"\)/],
+    ["a ;;", "echo a ;; echo b", /a ;; \(case\)/],
+    ["a |& pipe", "echo a |& cat", /a \|& pipe/],
+    ["a <( process substitution", "cat <(echo)", /a process substitution/],
+    ["a ! negation", "! echo x", /a ! \(negation\)/],
+    ["a subscript in ${ }", 'echo "${x[0]}"', /an operator expansion other than/],
+    ["an @ transform in ${ }", 'echo "${x@Q}"', /an operator expansion other than/],
+    ["a / substitution in ${ }", 'echo "${x/a/b}"', /an operator expansion other than/],
+    ["a # length in ${ }", 'echo "${#x}"', /an operator expansion other than/],
     ["a group around an allowed command", "{ echo hi; }", /a \( \) or \{ \}/],
     ["a backslash outside quotes", "echo a\\ b", /a backslash outside quotes/],
     ["a substitution inside ${ }", 'echo "${X:-$(echo)}"', /\$\{ with \$/],
