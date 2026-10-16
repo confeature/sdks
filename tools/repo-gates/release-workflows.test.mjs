@@ -1450,6 +1450,13 @@ describe("a step output is written by the command that redirects it (round 8, F6
     ['echo "x sha256=y" >> "$GITHUB_OUTPUT"', false],
     ['{ echo x; echo "sha256=y"; } >> "$GITHUB_OUTPUT"', false],
     ['echo "sha256=y" >> "$GITHUB_STEP_SUMMARY"', false],
+    // round 9: the group's brace is the group's, never the `{` of `${file}`
+    ['x=1; { echo "file=${file}"; echo y; } >> "$GITHUB_OUTPUT"', true],
+    ['x=1; { echo y; echo "file=${file}"; } >> "$GITHUB_OUTPUT"', false],
+    ['echo "${file}"; { echo "file=y"; } >> "$GITHUB_OUTPUT"', true],
+    ['echo "file=${file}"; { echo y; } >> "$GITHUB_OUTPUT"', false],
+    ['echo x; { echo y; echo file=${file}; } >> "$GITHUB_OUTPUT"', false],
+    ['x=1; { echo file=${file}; echo y; } >> "$GITHUB_OUTPUT"', true],
   ])("%s writes sha256: %s", async (line, want) => {
     const { writesOutput } = await import("./verify-workflows.mjs");
     expect(
