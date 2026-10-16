@@ -3,7 +3,7 @@
 #
 # One unit's history, split out for its public mirror, or refused.
 #
-#   bash tools/sdk-pack/split-mirror.sh apps/sdk-php "$RUNNER_TEMP/release/php.bundle"
+#   bash tools/sdk-pack/split-mirror.sh apps/sdk-php "$RUNNER_TEMP/release/mirror.bundle"
 #
 # Two registries take a whole git repository, not an archive: Packagist reads
 # composer.json and SwiftPM reads Package.swift at the ROOT of a repository, and
