@@ -1771,17 +1771,57 @@ export function writePermissions(job, doc) {
 }
 
 /**
- * Jobs that hold a write token but are not credentialed for rule 3, each
- * with why (round 9). release-gate.yml's test job runs the containerized SDK
- * suites on a published release and may open a follow-up issue: its token is
- * `issues: write` and `contents: read` only, so it can publish nothing, and
- * the one step that uses it, actions/github-script, is frozen by rule 17.
- * Rules 3 and 15 would forbid the suites it exists to run.
+ * Jobs that hold a write token but are exempt from rules 3 and 15 only, each
+ * with why (rounds 9, 10). release-gate.yml's test job runs the containerized
+ * SDK suites on a published release and may open a follow-up issue: its token
+ * is `issues: write` and `contents: read` only, so it can publish nothing.
+ * Rules 3 and 15 would forbid the suites it exists to run; instead every step
+ * of it is frozen (FROZEN_JOBS), and no expression of the job or of its
+ * workflow outside `jobs:` may name github.token or secrets
+ * (exemptTokenFindings), so the token reaches the frozen github-script step
+ * only, through that action's default input.
  */
 export const WRITE_TOKEN_EXEMPT = {
   "release-gate.yml#test":
-    "issues: write only; publishes nothing; its one token step is frozen by rule 17",
+    "issues: write only; publishes nothing; every step frozen; no expression names github.token or secrets",
 };
+
+/** github.token or the secrets context, in an expression (GitHub folds case). */
+const TOKEN_NAME = /\b(?:github\s*\.\s*token|secrets)\b/i;
+
+/**
+ * A WRITE_TOKEN_EXEMPT job, or its workflow outside `jobs:`, naming
+ * github.token or secrets (round 10): the exemption returned before that
+ * test, so `env: T: ${{ github.token }}` at step or job level passed.
+ */
+export function exemptTokenFindings(workflows) {
+  const out = [];
+  for (const key of Object.keys(WRITE_TOKEN_EXEMPT)) {
+    const [file, jobId] = key.split("#");
+    const doc = workflows[file];
+    const job = doc?.jobs?.[jobId];
+    if (job === undefined) {
+      out.push({
+        file,
+        job: jobId,
+        why: "WRITE_TOKEN_EXEMPT records a job the workflow does not have",
+      });
+      continue;
+    }
+    const workflowLevel = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== "jobs"));
+    for (const [where, node] of [
+      [jobId, job],
+      ["-", workflowLevel],
+    ])
+      if (allExpressions(node).some((e) => TOKEN_NAME.test(withoutStrings(e))))
+        out.push({
+          file,
+          job: where,
+          why: `names github.token or secrets in a WRITE_TOKEN_EXEMPT ${where === "-" ? "job's workflow" : "job"} (its token reaches its frozen github-script step only)`,
+        });
+  }
+  return out;
+}
 
 /**
  * Whether a job is credentialed (round 9): it binds an environment, or holds
@@ -1793,9 +1833,7 @@ export function isCredentialed(file, jobId, job, doc) {
   if (envName(job) !== undefined) return true;
   if (Object.hasOwn(WRITE_TOKEN_EXEMPT, `${file}#${jobId}`)) return false;
   if (writePermissions(job, doc).length > 0) return true;
-  return allExpressions(job).some((e) =>
-    /\b(?:github\s*\.\s*token|secrets)\b/i.test(withoutStrings(e)),
-  );
+  return allExpressions(job).some((e) => TOKEN_NAME.test(withoutStrings(e)));
 }
 
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
@@ -2699,14 +2737,24 @@ export function verifyWorkflows(root) {
   const workflows = {};
   for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
     workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
+  return allFindings({ settings, manifest, workflows, scriptOutputs: readScriptOutputs() });
+}
+
+/**
+ * Every rule over one parsed tree: the one aggregate the gate and its tests
+ * share (round 10: the tests listed the rule functions themselves, so a rule
+ * the gate forgot to run still passed its rows).
+ */
+export function allFindings({ settings, manifest, workflows, scriptOutputs }) {
   return [
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
-    ...referenceFindings(workflows, readScriptOutputs(), settings),
+    ...referenceFindings(workflows, scriptOutputs, settings),
     ...surfaceFindings(workflows),
     ...writePermissionFindings(workflows),
     ...continueOnErrorFindings(workflows),
+    ...exemptTokenFindings(workflows),
   ];
 }
 

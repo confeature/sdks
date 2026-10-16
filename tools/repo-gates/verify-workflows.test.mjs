@@ -11,7 +11,6 @@ import { rowSnapshots } from "./row-snapshots.mjs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   CREDENTIALED_COMMANDS,
-  ENVIRONMENT_COMMANDS,
   findings,
   globMatches,
   publicGateFindings,

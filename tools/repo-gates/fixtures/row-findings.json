@@ -1125,5 +1125,40 @@
   ],
   "B9 promote: the on-main exception is not promote's": [
     "cli-release.yml: promote step x: a credentialed job runs `bash apps/cli/scripts/check-on-main.sh`: bash is not a command a credentialed job runs"
+  ],
+  "E1 test: a step env from github.token, sent by curl": [
+    "release-gate.yml: test: action 2 is {\"env\":{\"T\":\"${{ github.token }}\"},\"name\":\"x\",\"run\":{\"sha256\":\"44ee31510c0eeb21e9de4c0e15a50c24e6d1ed830f927eadee180aa5e8cb14a4\"}}, ACTION_SURFACE records {\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}",
+    "release-gate.yml: test: action 3 is {\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}, ACTION_SURFACE records {\"env\":{\"DAGGER_VERSION\":\"${{ steps.pin.outputs.version }}\"},\"name\":\"Install the checksum-verified Dagger CLI\",\"run\":{\"sha256\":\"c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86\"}}",
+    "release-gate.yml: test: action 4 is {\"env\":{\"DAGGER_VERSION\":\"${{ steps.pin.outputs.version }}\"},\"name\":\"Install the checksum-verified Dagger CLI\",\"run\":{\"sha256\":\"c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86\"}}, ACTION_SURFACE records {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"${{ matrix.sdk.daggerFn }} --source=.\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}",
+    "release-gate.yml: test: action 5 is {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"${{ matrix.sdk.daggerFn }} --source=.\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}, ACTION_SURFACE records {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6\"}}}",
+    "release-gate.yml: test: action 6 is {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6\"}}}, ACTION_SURFACE records null",
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: runs 6 actions, ACTION_SURFACE records 5"
+  ],
+  "E1b test: github.token in the dagger step's with:": [
+    "release-gate.yml: test: action 4 is {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"x --token=${{ github.token }}\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}, ACTION_SURFACE records {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"${{ matrix.sdk.daggerFn }} --source=.\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}",
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)"
+  ],
+  "E1c test: an upper-case GITHUB.TOKEN in a step env": [
+    "release-gate.yml: test: action 2 is {\"env\":{\"T\":\"${{ GITHUB.TOKEN }}\"},\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}, ACTION_SURFACE records {\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}",
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)"
+  ],
+  "E4 test: a project script on the host before github-script": [
+    "release-gate.yml: test: action 2 is {\"name\":\"x\",\"run\":{\"sha256\":\"b6d5d6ff6ff35ed6ef2755ed1b02b30b27f661da0a5b2a39ad4ed7c2c4d55e13\"}}, ACTION_SURFACE records {\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}",
+    "release-gate.yml: test: action 3 is {\"id\":\"pin\",\"name\":\"Read the Dagger engine version (dagger/dagger.json)\",\"run\":{\"sha256\":\"bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8\"}}, ACTION_SURFACE records {\"env\":{\"DAGGER_VERSION\":\"${{ steps.pin.outputs.version }}\"},\"name\":\"Install the checksum-verified Dagger CLI\",\"run\":{\"sha256\":\"c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86\"}}",
+    "release-gate.yml: test: action 4 is {\"env\":{\"DAGGER_VERSION\":\"${{ steps.pin.outputs.version }}\"},\"name\":\"Install the checksum-verified Dagger CLI\",\"run\":{\"sha256\":\"c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86\"}}, ACTION_SURFACE records {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"${{ matrix.sdk.daggerFn }} --source=.\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}",
+    "release-gate.yml: test: action 5 is {\"uses\":\"dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77\",\"with\":{\"args\":\"${{ matrix.sdk.daggerFn }} --source=.\",\"enable-github-summary\":true,\"module\":\"./dagger\",\"verb\":\"call\",\"version\":\"${{ steps.pin.outputs.version }}\"}}, ACTION_SURFACE records {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6\"}}}",
+    "release-gate.yml: test: action 6 is {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6\"}}}, ACTION_SURFACE records null",
+    "release-gate.yml: test: runs 6 actions, ACTION_SURFACE records 5"
+  ],
+  "E8 test: a job env from github.token": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)"
+  ],
+  "E8b test: a job env from a secret": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: reads the secrets context outside an environment"
+  ],
+  "E9 release-gate: a workflow env from github.token": [
+    "release-gate.yml: -: names github.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow (its token reaches its frozen github-script step only)"
   ]
 }
