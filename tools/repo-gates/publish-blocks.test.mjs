@@ -624,7 +624,9 @@ case "$1 $2" in
   "release view")
     [ -f "$GH_REMOTE/.exists" ] || exit 1
     [ "$4" = "--json" ] && /bin/ls -1 "$GH_REMOTE" ;;
-  "release download") /bin/cp "$GH_REMOTE"/* "$5"/ ;;
+  "release download")
+    /bin/cp "$GH_REMOTE"/* "$5"/
+    [ -z "$GH_DOWNLOAD_SKIP" ] || /bin/rm -f "$5/$GH_DOWNLOAD_SKIP" ;;
   "release upload") shift 3; /bin/cp "$@" "$GH_REMOTE"/ ;;
 esac
 exit 0`;
@@ -642,11 +644,19 @@ exit 0`;
         .sort()
         .join("\n") + "\n";
     /** dist/ with `files` and a SHA256SUMS over `summed`; the release's assets in `remote`. */
-    const gh = ({ files = BIN, summed = files, remote = null, test = {}, tag } = {}) => {
+    const gh = ({
+      files = BIN,
+      summed = files,
+      sumsText,
+      noSums = false,
+      remote = null,
+      test = {},
+      tag,
+    } = {}) => {
       const ws = workspace(
         {
           ...Object.fromEntries(Object.entries(files).map(([n, b]) => [`dist/${n}`, b])),
-          "dist/SHA256SUMS": sums(summed),
+          ...(noSums ? {} : { "dist/SHA256SUMS": sumsText ?? sums(summed) }),
         },
         ["apps/cli/scripts/release-github.sh"],
       );
@@ -728,6 +738,48 @@ exit 0`;
       expect(r.status).toBe(1);
       expect(r.stderr).toMatch(/the release's confeature-x86_64 is not this build's/);
       expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it("fails on a release with every name but one binary's bytes foreign, uploading nothing", () => {
+      // Every asset name is there, so nothing is missing: the byte check
+      // must still run before the "already complete" exit (round 11, HIGH).
+      const { r, argv } = gh({
+        remote: { "confeature-x86_64": "b1", "confeature-aarch64": "foreign", SHA256SUMS: "SUMS" },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/the release's confeature-aarch64 is not this build's/);
+      expect(r.stdout).not.toMatch(/already carries/);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it.each([
+      [
+        "a binary-mode line (*name)",
+        (s) => s.replace("  confeature-x86_64", " *confeature-x86_64"),
+      ],
+      ["a path (../)", (s) => s.replace("  confeature-x86_64", "  ../confeature-x86_64")],
+      ["a subdirectory", (s) => s.replace("  confeature-x86_64", "  bin/confeature-x86_64")],
+      ["an extra field", (s) => s.replace("  confeature-x86_64", "  confeature-x86_64 extra")],
+      ["a short digest", (s) => s.replace(/^[0-9a-f]{64}/m, "abc")],
+      ["a name that is not confeature-*", (s) => `${s}${"0".repeat(64)}  install.sh\n`],
+    ])("refuses a SHA256SUMS with %s before any gh call", (_label, mangle) => {
+      const { r, argv } = gh({ sumsText: mangle(sums(BIN)) });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/holds a line that is not '<sha256>  confeature-<name>'/);
+      expect(argv).toEqual([]);
+    });
+    it("fails when a listed asset does not download, uploading nothing", () => {
+      const { r, argv } = gh({
+        remote: { "confeature-x86_64": "b1" },
+        test: { GH_DOWNLOAD_SKIP: "confeature-x86_64" },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/the release lists confeature-x86_64 but it did not download/);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it("exits 2 with no dist/SHA256SUMS, before any gh call", () => {
+      const { r, argv } = gh({ noSums: true });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toMatch(/no dist\/SHA256SUMS/);
+      expect(argv).toEqual([]);
     });
     it("fails on a present SHA256SUMS that is not this build's", () => {
       const { r } = gh({ remote: { SHA256SUMS: "0  confeature-x86_64\n" } });
