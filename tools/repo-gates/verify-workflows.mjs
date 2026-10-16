@@ -19,18 +19,24 @@
  *      requests no `id-token: write` and reads no `secrets` context, and no
  *      workflow grants either at the top level, where every job would inherit
  *      it. A pack job or a dry run is exactly such a job.
- *   3. CREDENTIALED PUBLISH JOBS RUN NO PROJECT CODE, AND RESTORE NO CACHE. A
- *      job bound to a registry environment runs no package manager, build
- *      tool, script or interpreter on repository files (the pinned registry
- *      client installing itself is the one exception), keeps no checkout
- *      credential, and uses no cache: no `actions/cache`, no `cache:` /
- *      `bundler-cache:` / `cache-jdk:` input — nor does a pack job, whose artifact the publish
- *      job uploads. A dependency that runs in the job holding the OIDC token or
- *      a key can publish or steal it; a poisoned cache is such a dependency.
- *      `cache: false` restores nothing, and an action that caches unless told
- *      not to (DEFAULT_CACHE: actions/setup-go) must say it.
- *      PUBLISH_EXCEPTIONS names the one command each source-only registry
- *      (crates.io, pub.dev) needs instead, exact and for its job only.
+ *   3. CREDENTIALED JOBS RUN ONLY THEIR ALLOWLIST, AND RESTORE NO CACHE. EVERY
+ *      job bound to an environment (a registry's, or cli-release's, whose two
+ *      jobs hold the R2 token) runs only the commands of CREDENTIALED_COMMANDS
+ *      (shell builtins, file tools that run no program, curl, git's transport,
+ *      each registry client's upload, the pinned npm installing itself), read
+ *      by shell-commands.mjs from every nesting level of every `run:` block,
+ *      plus its PUBLISH_EXCEPTIONS (the one command crates.io, pub.dev and the
+ *      CLI bucket each need, exact and for its job only). It sets no variable
+ *      that decides what a later command runs, writes no GITHUB_ENV or
+ *      GITHUB_PATH, runs no shell but bash, no container and no local or
+ *      container action, and keeps no checkout credential. It uses no cache:
+ *      no `actions/cache`, no `cache:` / `enable-cache:` / `bundler-cache:` /
+ *      `cache-jdk:` input other than false — nor does a pack job, whose
+ *      artifact the publish job uploads. An action that caches unless told not
+ *      to (DEFAULT_CACHE: setup-go, setup-uv) must say false. A dependency that
+ *      runs in the job holding the OIDC token or a key can publish or steal it;
+ *      a poisoned cache is such a dependency. The allowlist replaced a
+ *      blocklist that review walked past five ways (#794 review).
  *   4. NO UNTRUSTED TRIGGERS. No workflow runs on `pull_request_target` or
  *      `workflow_run`, the two triggers that hand a fork's change a privileged
  *      context.
@@ -38,7 +44,9 @@
  *      through `env:`, so text can never become a command.
  *   6. PUBLISH JOBS ARE TOP-LEVEL. A reusable workflow (`on: workflow_call`)
  *      binds no environment, and no caller passes `secrets: inherit`: a
- *      registry's trust binding names the CALLING file.
+ *      registry's trust binding names the CALLING file. A release workflow
+ *      calls only the reusable workflows RELEASE_CALLS records, and passes them
+ *      no secret; a local call names a workflow of this repository.
  *   7. ONE SHAPE PER REGISTRY. In sdk-publish.yml, `pack-<registry>` and
  *      `publish-<registry>` name a registry that has publish units, and
  *      `publish-<registry>` binds THAT registry's environment (the conclude job
@@ -48,9 +56,10 @@
  *      applier DERIVES from the units (it is never written out here); every
  *      registry environment has units; each trust binding names a declared
  *      environment of its registry and an existing workflow.
- *   8. ACTIONS. Every third-party `uses:` is pinned to a full commit SHA and
- *      allowed by `allowedActions`; every allowed entry is used somewhere (an
- *      allowance nobody needs is a standing hole).
+ *   8. ACTIONS. Every third-party `uses:`, a step's action or a job's reusable
+ *      workflow, is pinned to a full commit SHA and allowed by
+ *      `allowedActions`; every allowed entry is used somewhere (an allowance
+ *      nobody needs is a standing hole).
  *   9. PINNED TOOLS. A pack or publish job installs npm at an exact version and
  *      gives `setup-node` an exact `node-version` — written once per workflow
  *      in its top-level `env:` (`NPM_VERSION`, `NODE_VERSION`) and referenced
@@ -66,6 +75,12 @@
  *      unit with a mirror has an entry. `goModuleTags` names the go registry's
  *      environment and covers every go unit's `releaseTag`, which each has.
  *      The operator's applier creates the deploy keys and rulesets from them.
+ *  12. THIS RUN'S ARTIFACT, ON A TAG PUSH (plan §5). A credentialed job
+ *      downloads artifacts from its own run only (no `run-id`, `github-token`
+ *      or `repository` input on download-artifact), and, in a workflow that
+ *      runs on anything but a tag push, its `if:` requires one
+ *      (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`,
+ *      never ORed away): a dry run publishes nothing.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -75,11 +90,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
+import { shellCommands } from "./shell-commands.mjs";
 
 export const SETTINGS = "tools/repo-gates/release-settings.json";
 export const MANIFEST = "dagger/sdk-manifest.json";
 export const WORKFLOWS = ".github/workflows";
 export const PUBLISH_WORKFLOW = "sdk-publish.yml";
+export const CLI_WORKFLOW = "cli-release.yml";
 
 const EXACT = /^\d+\.\d+\.\d+$/;
 
@@ -104,26 +121,190 @@ const triggersOf = (doc) => {
 };
 
 /**
- * A shell line that runs repository code or a package manager: forbidden in a
- * publish job. `bundle` is bundler, not `git bundle` and not a `*.bundle` file
- * (the mirror publish jobs verify one, #901).
- */
-const PROJECT_CODE =
-  /\b(?:pnpm|yarn|bun|npx|make|gradlew?|mvnw?|mix|(?<!\bgit\s+|[.$/{-])bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
-/**
- * Rule 3's recorded exceptions: the one command a registry that takes no
- * prebuilt archive needs in the job holding its credential (#900). crates.io:
- * `cargo publish --no-verify` packages the commit again and compiles nothing.
- * pub.dev: `dart pub publish --force` packs and uploads in one command, and
- * pub.dev accepts it only from the OIDC job. Each is exact, and for its job only.
+ * Rule 3's recorded exceptions: the one command a credentialed job needs that
+ * the allowlist below does not hold, exact, for its workflow and job only.
+ * Each is matched against the whole command, so a prefix assignment, an extra
+ * argument or a chained command is not the exception.
+ *   crates.io (#900): `cargo publish --no-verify` packages the commit again and
+ *     compiles nothing; crates.io takes no prebuilt archive.
+ *   pub.dev (#900): `dart pub publish --force` packs and uploads in one
+ *     command, and pub.dev accepts it only from the OIDC job.
+ *   cli.confeature.io (#801): publish-r2.sh is the only writer of the bucket
+ *     (it checks every binary against SHA256SUMS, refuses to rewrite a
+ *     released version, and moves `latest` forward only), so the two jobs
+ *     holding the R2 token run it, each with its one verb.
  */
 export const PUBLISH_EXCEPTIONS = {
-  "publish-crates": [/^cargo "\+\$\{RUST_VERSION\}" publish --no-verify$/],
-  "publish-pubdev": [/^dart pub publish --force$/],
+  [PUBLISH_WORKFLOW]: {
+    "publish-crates": [/^cargo "\+\$\{RUST_VERSION\}" publish --no-verify$/],
+    "publish-pubdev": [/^dart pub publish --force$/],
+  },
+  [CLI_WORKFLOW]: {
+    upload: [/^bash apps\/cli\/scripts\/publish-r2\.sh upload "\$\{TAG#cli-v\}" dist$/],
+    promote: [/^bash apps\/cli\/scripts\/publish-r2\.sh promote "\$\{TAG#cli-v\}"$/],
+  },
 };
-/** Actions that restore a cache unless their `cache` input is false. */
-const DEFAULT_CACHE = new Set(["actions/setup-go"]);
+
+/**
+ * The reusable workflows a release workflow may call (rule 6), exact. A called
+ * workflow runs with the caller's token, so a release workflow calls none but
+ * these. cli-windows-install-verify.yml installs the CLI from the public host
+ * between upload and promote: it binds no environment (rule 6), receives no
+ * secret (checked), and its own jobs are held to every rule here.
+ */
+export const RELEASE_CALLS = {
+  [PUBLISH_WORKFLOW]: [],
+  [CLI_WORKFLOW]: ["./.github/workflows/cli-windows-install-verify.yml"],
+};
+
+/**
+ * Cache inputs (rule 3): any value but `false` restores a cache. setup-uv's
+ * `enable-cache` defaults to "auto", which caches on GitHub-hosted runners.
+ */
+const CACHE_INPUTS = ["cache", "enable-cache", "bundler-cache", "cache-jdk"];
+/** Actions that restore a cache unless the named input is false, which they must therefore say. */
+const DEFAULT_CACHE = new Map([
+  ["actions/setup-go", "cache"],
+  ["astral-sh/setup-uv", "enable-cache"],
+]);
+const isFalse = (v) => v === false || v === "false";
 const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?NPM_VERSION\}?"?$/;
+
+/**
+ * Variables that decide what a later command runs or loads: a credentialed job
+ * never sets one, in a `run:` block or an `env:` map. GIT_SSH_COMMAND is the
+ * deploy-key jobs' one need, and is allowed as plain `ssh` with no config file
+ * and no option that runs a command (SSH_COMMAND_RUNS).
+ */
+const EXEC_ENV =
+  /^(?:PATH|HOME|ENV|BASH_ENV|BASH_FUNC_\w+|SHELLOPTS|BASHOPTS|PS4|PROMPT_COMMAND|LD_\w+|DYLD_\w+|GIT_(?!SSH_COMMAND$)\w+|SSH_ASKPASS|XDG_CONFIG_HOME|CURL_HOME|NODE_OPTIONS|NODE_PATH|NPM_CONFIG_\w+|npm_config_\w+|RUBYOPT|RUBYLIB|GEM_HOME|GEM_PATH|BUNDLE_\w+|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PERL5OPT|PERL5LIB|CARGO_HOME|CARGO_BUILD_\w+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTUP_HOME|RUSTUP_TOOLCHAIN|NUGET_PLUGIN_PATHS|PUB_CACHE|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE)$/;
+const SSH_COMMAND_RUNS =
+  /ProxyCommand|LocalCommand|KnownHostsCommand|-F\s+(?!\/dev\/null(?:\s|$))/i;
+
+/** A word as bash sees it once quoting is removed, near enough to read an option. */
+const dequote = (w) => w.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
+
+/** Why setting `name` to `value` is refused, or null. */
+function envProblem(name, value) {
+  if (name === "GIT_SSH_COMMAND")
+    return /^ssh\s/.test(value) && !SSH_COMMAND_RUNS.test(value)
+      ? null
+      : "GIT_SSH_COMMAND must be plain `ssh -F /dev/null …`, with no option that runs a command";
+  return EXEC_ENV.test(name) ? `it sets ${name}, which decides what a later command runs` : null;
+}
+const assignmentProblem = (word) => {
+  const m = /^([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)$/s.exec(word);
+  return m === null ? null : envProblem(m[1], dequote(m[2]));
+};
+
+const ok = () => null;
+/** The command only with exactly these leading words. */
+const only =
+  (...sub) =>
+  (args, name) =>
+    sub.every((s, n) => args[n] === s) ? null : `${name} runs only \`${name} ${sub.join(" ")}\``;
+const GIT_SUBCOMMANDS = new Set(["init", "fetch", "push", "bundle", "rev-parse"]);
+const SED_SCRIPT = /^s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gpI0-9]*$/;
+
+/**
+ * Rule 3's allowlist: every program a credentialed job may run, and, where
+ * the program can run another, the arguments it may take. It is what the jobs
+ * bound to an environment run today, and nothing else: shell builtins, file and
+ * text tools that run no program, curl, git's transport commands, and each
+ * registry client's upload. Functions the block defines are allowed (their
+ * bodies are commands too, and are checked). Anything else is refused.
+ */
+export const CREDENTIALED_COMMANDS = {
+  // Shell builtins: control and state, never another program.
+  "[": ok,
+  test: ok,
+  ":": ok,
+  true: ok,
+  false: ok,
+  echo: ok,
+  printf: ok,
+  exit: ok,
+  return: ok,
+  cd: ok,
+  umask: ok,
+  set: ok,
+  read: ok,
+  local: ok,
+  export: (args) => args.map(assignmentProblem).find((p) => p !== null) ?? null,
+  // File and text tools: they read and write files and run nothing, except
+  // through the options refused here.
+  mkdir: ok,
+  rm: ok,
+  ls: ok,
+  cat: ok,
+  head: ok,
+  tail: ok,
+  wc: ok,
+  tr: ok,
+  cut: ok,
+  grep: ok,
+  basename: ok,
+  dirname: ok,
+  sha256sum: ok,
+  shasum: ok,
+  sort: (args) =>
+    args.some((a) => a.startsWith("--compress-program"))
+      ? "sort --compress-program runs a program"
+      : null,
+  find: (args) =>
+    args.some((a) => /^-(?:exec|execdir|ok|okdir)$/.test(a)) ? "find -exec runs a program" : null,
+  sed: (args) => {
+    const script = args.filter((a) => !/^-[nEr]$|^--quiet$/.test(a));
+    return script.length >= 1 && SED_SCRIPT.test(script[0]) && !script[0].startsWith("-")
+      ? null
+      : "sed runs only one s/…/…/ script ([gpI0-9] flags: never e or w)";
+  },
+  curl: ok,
+  // git's transport, which runs nothing locally unless told to.
+  git: (args) => {
+    if (!GIT_SUBCOMMANDS.has(args[0]))
+      return `git runs only ${[...GIT_SUBCOMMANDS].join(", ")} (and no option before them)`;
+    return args.some((a) => /^--(?:upload-pack|receive-pack|exec)(?:=|$)/.test(a))
+      ? "git --upload-pack, --receive-pack and --exec run a program"
+      : null;
+  },
+  // Each registry client, for its upload only.
+  npm: (args, _name, text) =>
+    PINNED_SELF_INSTALL.test(text) || (args[0] === "publish" && args.includes("--ignore-scripts"))
+      ? null
+      : "npm runs only `publish --ignore-scripts`, or installs itself at NPM_VERSION",
+  gem: only("push"),
+  dotnet: only("nuget", "push"),
+  aws: only("s3api"),
+  rustup: only("toolchain", "install"),
+};
+
+/** Words a command may start with that are grammar, not a program. */
+const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until"]);
+for (const k of ["!", "{", "}", "esac"]) KEYWORDS.add(k);
+/** Headers whose remaining words are data (their substitutions are scanned on their own). */
+const HEADERS = new Set(["for", "case", "function", "select"]);
+
+/** Why one simple command may not run in a credentialed job, or null. */
+function commandProblem(words, functions, exceptions) {
+  let k = 0;
+  while (k < words.length && KEYWORDS.has(words[k])) k += 1;
+  const rest = words.slice(k);
+  if (rest.length === 0 || HEADERS.has(rest[0])) return null;
+  if (exceptions.some((re) => re.test(rest.join(" ")))) return null;
+  let n = 0;
+  for (; n < rest.length && /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(rest[n]); n += 1) {
+    const p = assignmentProblem(rest[n]);
+    if (p !== null) return p;
+  }
+  const cmd = rest.slice(n);
+  if (cmd.length === 0) return null; // assignments only
+  const [name, ...args] = cmd;
+  if (functions.has(name)) return null;
+  if (!Object.hasOwn(CREDENTIALED_COMMANDS, name))
+    return `${name} is not a command a credentialed job runs`;
+  return CREDENTIALED_COMMANDS[name](args.map(dequote), name, cmd.join(" "));
+}
 
 /** Rules 4 and 6 (workflow scope) and the workflow-level half of rule 2. */
 function workflowRules(file, doc, add) {
@@ -146,22 +327,33 @@ function workflowPins(file, doc, add) {
   return pins;
 }
 
-function runRules(file, where, run, { jobId, isPublish, isPackOrPublish, pins, add }) {
+/** Rule 3's allowlist over one `run:` block of a job bound to an environment. */
+function credentialedRun(file, where, run, { jobId, add }) {
+  const { commands, functions, problems } = shellCommands(run);
+  for (const p of problems) add(file, where, `a credentialed job's run: block has ${p}`);
+  const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
+  for (const words of commands) {
+    const why = commandProblem(words, functions, exceptions);
+    if (why !== null) add(file, where, `a credentialed job runs \`${words.join(" ")}\`: ${why}`);
+  }
+  if (/\bGITHUB_(?:ENV|PATH)\b/.test(run))
+    add(
+      file,
+      where,
+      "a credentialed job writes GITHUB_ENV or GITHUB_PATH, which decide what a later step runs",
+    );
+}
+
+function runRules(file, where, run, ctx) {
+  const { credentialed, isPackOrPublish, pins, add } = ctx;
   if (run.includes("${{"))
     add(file, where, "a run: block interpolates ${{ }} (pass it through env:)");
-  const lines = run
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "" && !l.startsWith("#"));
-  if (isPublish)
-    for (const line of lines)
-      if (
-        PROJECT_CODE.test(line) &&
-        !PINNED_SELF_INSTALL.test(line) &&
-        !(PUBLISH_EXCEPTIONS[jobId] ?? []).some((re) => re.test(line))
-      )
-        add(file, where, "a credentialed publish job runs a package manager or repository code");
+  if (credentialed) credentialedRun(file, where, run, ctx);
   if (isPackOrPublish) {
+    const lines = run
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "" && !l.startsWith("#"));
     if (/\bnpx\b/.test(run)) add(file, where, "runs a tool through npx (unpinned)");
     if (/\beval\b/.test(run)) add(file, where, "a pack or publish job evals a string");
     for (const line of lines.filter((l) => /\bnpm publish\b/.test(l)))
@@ -179,10 +371,11 @@ function runRules(file, where, run, { jobId, isPublish, isPackOrPublish, pins, a
   }
 }
 
-function usesRules(file, where, step, ctx) {
-  const { isPublish, isPackOrPublish, allowed, used, pins, add } = ctx;
-  const uses = step.uses;
-  if (uses.startsWith("./") || uses.startsWith("docker://")) return;
+/**
+ * Rule 8 for one `uses:` reference, a step's action or a job's reusable
+ * workflow: pinned to a full commit SHA, and allowed. Returns the `owner/repo`.
+ */
+function pinRules(file, where, uses, { allowed, used, add }) {
   const [repoPath, ref] = uses.split("@");
   const repo = repoPath.split("/").slice(0, 2).join("/");
   const owner = repo.split("/")[0];
@@ -192,18 +385,41 @@ function usesRules(file, where, step, ctx) {
     if (!allowed.includes(`${repo}@*`))
       add(file, where, `uses ${repo}, which ${SETTINGS} does not allow`);
   }
+  return repo;
+}
+
+function usesRules(file, where, step, ctx) {
+  const { credentialed, isPackOrPublish, pins, add } = ctx;
+  const uses = step.uses;
+  if (uses.startsWith("./") || uses.startsWith("docker://")) {
+    // A local action is repository code; a container image is code no SHA or
+    // allow-list entry pins. Neither runs where an artifact or a credential is.
+    if (isPackOrPublish)
+      add(
+        file,
+        where,
+        `uses ${uses}: a pack or credentialed job runs no local or container action`,
+      );
+    return;
+  }
+  const repo = pinRules(file, where, uses, ctx);
   const w = step.with ?? {};
-  const noCache = w.cache === false || w.cache === "false";
   const caches =
     repo === "actions/cache" ||
-    ("cache" in w && !noCache) ||
-    (DEFAULT_CACHE.has(repo) && !noCache) ||
-    "bundler-cache" in w ||
-    // setup-java's JDK cache, its own input (#902).
-    ("cache-jdk" in w && w["cache-jdk"] !== false && w["cache-jdk"] !== "false");
+    CACHE_INPUTS.some((k) => k in w && !isFalse(w[k])) ||
+    (DEFAULT_CACHE.has(repo) && !isFalse(w[DEFAULT_CACHE.get(repo)]));
   if (isPackOrPublish && caches) add(file, where, "a pack or credentialed job restores a cache");
-  if (isPublish && repo === "actions/checkout" && w["persist-credentials"] !== false)
-    add(file, where, "a publish job's checkout keeps its credential (persist-credentials: false)");
+  if (credentialed && repo === "actions/checkout" && w["persist-credentials"] !== false)
+    add(
+      file,
+      where,
+      "a credentialed job's checkout keeps its credential (persist-credentials: false)",
+    );
+  // §5: a credentialed job uploads only what THIS run packed.
+  if (credentialed && repo === "actions/download-artifact")
+    for (const k of ["run-id", "github-token", "repository"])
+      if (k in w)
+        add(file, where, `a credentialed job downloads an artifact from another run (${k}:)`);
   if (isPackOrPublish && repo === "actions/setup-node") {
     const v = String(w["node-version"] ?? "");
     if (!/^\$\{\{\s*env\.NODE_VERSION\s*\}\}$/.test(v) || pins.NODE_VERSION === undefined)
@@ -215,8 +431,81 @@ function usesRules(file, where, step, ctx) {
   }
 }
 
+/** Rules 6 and 8 for a job that calls a reusable workflow (a job-level `uses:`). */
+function callRules(file, jobId, job, ctx) {
+  const { workflows, add } = ctx;
+  const uses = job.uses;
+  const release = Object.hasOwn(RELEASE_CALLS, file);
+  if (release && !RELEASE_CALLS[file].includes(uses))
+    add(file, jobId, `a release workflow calls ${uses}, which RELEASE_CALLS does not record`);
+  if (release && job.secrets !== undefined)
+    add(file, jobId, "a release workflow passes secrets to a called workflow");
+  if (uses.startsWith("./")) {
+    const m = /^\.\/\.github\/workflows\/([^/]+\.ya?ml)$/.exec(uses);
+    if (m === null || !(m[1] in workflows))
+      add(file, jobId, `calls ${uses}, which is not a workflow of this repository`);
+  } else pinRules(file, jobId, uses, ctx);
+}
+
+/**
+ * Whether a workflow runs only on a tag push: `on: push` with `tags`, and no
+ * branch filter or other trigger. Its jobs need no `if:` to stay off branches.
+ */
+function tagPushOnly(doc) {
+  const on = doc?.on ?? doc?.[true];
+  const push = on?.push;
+  const triggers = triggersOf(doc);
+  return (
+    triggers.length === 1 &&
+    triggers[0] === "push" &&
+    Array.isArray(push?.tags) &&
+    push.branches === undefined &&
+    push["branches-ignore"] === undefined
+  );
+}
+
+/** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
+function credentialedJobRules(file, jobId, job, doc, add) {
+  if (job?.container !== undefined || job?.services !== undefined)
+    add(
+      file,
+      jobId,
+      "a credentialed job runs in a container or beside services, whose images no rule pins",
+    );
+  const cond = typeof job?.if === "string" ? job.if : "";
+  if (
+    !tagPushOnly(doc) &&
+    (!/github\.event_name\s*==\s*'push'/.test(cond) ||
+      !/startsWith\(\s*github\.ref\s*,\s*'refs\/tags\/'\s*\)/.test(cond) ||
+      cond.includes("||"))
+  )
+    add(
+      file,
+      jobId,
+      "a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))",
+    );
+  const shells = [
+    doc?.defaults?.run?.shell,
+    job?.defaults?.run?.shell,
+    ...(Array.isArray(job?.steps) ? job.steps.map((s) => s?.shell) : []),
+  ];
+  for (const sh of shells)
+    if (sh !== undefined && !/^bash(?:\s+[-\w]+)*(?:\s+\{0\})?$/.test(String(sh)))
+      add(file, jobId, `a credentialed job runs a shell other than bash (${String(sh)})`);
+  const envMaps = [
+    doc?.env,
+    job?.env,
+    ...(Array.isArray(job?.steps) ? job.steps.map((s) => s?.env) : []),
+  ];
+  for (const map of envMaps)
+    for (const [k, v] of Object.entries(map ?? {})) {
+      const why = envProblem(k, String(v));
+      if (why !== null) add(file, jobId, `a credentialed job's env: ${why}`);
+    }
+}
+
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
-function jobRules({ file, jobId, job, reusable, envs, allowed, used, pins, add }) {
+function jobRules({ file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, add }) {
   const env = envName(job);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   const credentialed = env !== undefined;
@@ -239,9 +528,12 @@ function jobRules({ file, jobId, job, reusable, envs, allowed, used, pins, add }
       add(file, jobId, "requests id-token: write outside an environment");
     if (readsSecrets(job)) add(file, jobId, "reads the secrets context outside an environment");
   }
-  const isPublish = typeof declared?.registry === "string";
-  const isPackOrPublish = isPublish || jobId.startsWith("pack-") || declared !== undefined;
-  const ctx = { jobId, credentialed, isPublish, isPackOrPublish, allowed, used, pins, add };
+  // Rule 3 holds EVERY job bound to an environment, not only a registry's:
+  // cli-release's upload and promote hold the R2 token (#794 review).
+  const isPackOrPublish = credentialed || jobId.startsWith("pack-");
+  const ctx = { jobId, credentialed, isPackOrPublish, workflows, allowed, used, pins, add };
+  if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
+  if (typeof job?.uses === "string") callRules(file, jobId, job, ctx);
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;
     if (typeof step?.run === "string") runRules(file, where, step.run, ctx);
@@ -374,7 +666,7 @@ export function findings({ settings, manifest, workflows }) {
     const pins = workflowPins(file, doc, add);
     const reusable = triggersOf(doc).includes("workflow_call");
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {}))
-      jobRules({ file, jobId, job, reusable, envs, allowed, used, pins, add });
+      jobRules({ file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, add });
   }
   for (const a of allowed)
     if (!used.has(a)) add(SETTINGS, "-", `allows ${a}, which no workflow uses`);

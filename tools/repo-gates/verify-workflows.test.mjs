@@ -45,6 +45,7 @@ const GOOD = `  pack-npm:
           node-version: \${{ env.NODE_VERSION }}
       - run: pnpm install --frozen-lockfile
   publish-npm:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     environment: sdk-publish-npm
     permissions:
       id-token: write
@@ -53,7 +54,7 @@ const GOOD = `  pack-npm:
         with:
           node-version: \${{ env.NODE_VERSION }}
       - run: npm install --global --ignore-scripts "npm@\${NPM_VERSION}"
-      - run: npm publish "./release/$ARTIFACT"
+      - run: npm publish --ignore-scripts "./release/$ARTIFACT"
 `;
 const flow = (jobs, head = HEAD) => parseYaml(`${head}jobs:\n${jobs}`);
 const run = (jobs, { s = settings(), m = manifest, extra = {}, head = HEAD } = {}) =>
@@ -67,7 +68,8 @@ const swap = (from, to) => {
   if (!GOOD.includes(from)) throw new Error(`fixture lacks ${from}`);
   return GOOD.replace(from, to);
 };
-const PUBLISH_STEP = '      - run: npm publish "./release/$ARTIFACT"';
+const UPLOAD = 'npm publish --ignore-scripts "./release/$ARTIFACT"';
+const PUBLISH_STEP = `      - run: ${UPLOAD}`;
 const INSTALL_STEP = "      - run: pnpm install --frozen-lockfile";
 
 /** A Packagist mirror and a Go module tag, declared the way release-settings.json does. */
@@ -163,10 +165,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ["a shell script", "bash scripts/x.sh"],
     ["npm ci", "npm ci"],
   ])("3 a publish job that runs %s", (_, cmd) =>
-    fires(
-      run(swap(PUBLISH_STEP, `      - run: ${cmd}`)),
-      /runs a package manager or repository code/,
-    ),
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
   );
   it("3 a publish job's checkout that keeps its credential", () =>
     fires(
@@ -318,12 +317,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     fires(run(swap("pnpm install --frozen-lockfile", "npx something")), /through npx/));
   it("10 a relative tarball path without ./ (npm reads it as a GitHub repository)", () =>
     fires(
-      run(
-        swap(
-          'npm publish "./release/$ARTIFACT"',
-          'npm publish --access public "release/$ARTIFACT"',
-        ),
-      ),
+      run(swap(UPLOAD, 'npm publish --ignore-scripts --access public "release/$ARTIFACT"')),
       /npm publish release\/\$ARTIFACT: a path without/,
     ));
   it.each([
@@ -332,7 +326,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     '"./x.tgz"',
     '--dry-run --access public "./x.tgz"',
   ])("10 accepts npm publish %s", (arg) =>
-    expect(run(swap('npm publish "./release/$ARTIFACT"', `npm publish ${arg}`))).toEqual([]),
+    expect(run(swap(UPLOAD, `npm publish --ignore-scripts ${arg}`))).toEqual([]),
   );
   it.each([
     "cargo build --release",
@@ -346,29 +340,23 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "python3 setup.py sdist",
     "rake release",
   ])("3 a publish job running %s", (cmd) =>
-    fires(
-      run(swap('npm publish "./release/$ARTIFACT"', cmd)),
-      /a credentialed publish job runs a package manager or repository code/,
-    ),
+    fires(run(swap(UPLOAD, cmd)), /a credentialed job runs/),
   );
   it.each([
     'dotnet nuget push "./release/x.nupkg" --api-key "$K" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
   ])("3 accepts the registry client upload %s", (cmd) =>
-    expect(run(swap('npm publish "./release/$ARTIFACT"', cmd))).toEqual([]),
+    expect(run(swap(UPLOAD, cmd))).toEqual([]),
   );
   it.each([
     ['cargo "+${RUST_VERSION}" publish --no-verify', "publish-crates"],
     ["dart pub publish --force", "publish-pubdev"],
   ])("3 a source-only upload (%s) is allowed in %s only", (cmd, job) => {
-    const PROJECT = /a credentialed publish job runs a package manager or repository code/;
+    const PROJECT = /a credentialed job runs/;
     // In another publish job it is project code.
-    fires(run(swap('npm publish "./release/$ARTIFACT"', cmd)), PROJECT);
+    fires(run(swap(UPLOAD, cmd)), PROJECT);
     // In its own job, and nowhere else, it is the recorded exception.
-    const own = swap("  publish-npm:\n", `  ${job}:\n`).replace(
-      'npm publish "./release/$ARTIFACT"',
-      cmd,
-    );
+    const own = swap("  publish-npm:\n", `  ${job}:\n`).replace(UPLOAD, cmd);
     expect(run(own).filter((w) => PROJECT.test(w))).toEqual([]);
     // A variant of it is not the exception.
     const variant = own.replace(cmd, `${cmd} && cargo build`);
@@ -432,10 +420,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "mvnw deploy",
     "mvn deploy",
   ])("3 a publish job running a JVM build (%s)", (cmd) =>
-    fires(
-      run(swap(PUBLISH_STEP, `      - run: ${cmd}`)),
-      /runs a package manager or repository code/,
-    ),
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
   );
   it.each([
     'aws s3api --endpoint-url "$endpoint" put-object --bucket "$MAVEN_BUCKET" --key "$1" --body "$1" --if-none-match \'*\'',
@@ -446,11 +431,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
   );
   it.each(["bundle install", "bundle exec rake release", "(bundle exec rake)"])(
     "3 a publish job running bundler (%s)",
-    (cmd) =>
-      fires(
-        run(swap(PUBLISH_STEP, `      - run: ${cmd}`)),
-        /runs a package manager or repository code/,
-      ),
+    (cmd) => fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
   );
   it.each([
     'git bundle verify "$RUNNER_TEMP/release/php.bundle"',
@@ -542,4 +523,344 @@ describe("each rule fires on a fixture that breaks only it", () => {
       run(GOOD.replaceAll("node-version: ${{ env.NODE_VERSION }}", "node-version: 22")),
       /node-version is 22/,
     ));
+});
+
+/** cli-release.yml as the fixture: two jobs bound to `cli-release`, which has no registry. */
+const CLI = `on:
+  push:
+    tags: ["cli-v*"]
+jobs:
+  upload:
+    environment: cli-release
+    steps:
+      - uses: actions/checkout@${SHA}
+        with:
+          persist-credentials: false
+      - run: bash apps/cli/scripts/publish-r2.sh upload "\${TAG#cli-v}" dist
+  promote:
+    environment: cli-release
+    steps:
+      - run: bash apps/cli/scripts/publish-r2.sh promote "\${TAG#cli-v}"
+  verify-pinned:
+    uses: ./.github/workflows/cli-windows-install-verify.yml
+`;
+const VERIFY_CALLEE = parseYaml("on: workflow_call\njobs: {}\n");
+const runCli = (cli = CLI, jobs = GOOD) =>
+  run(jobs, {
+    extra: { "cli-release.yml": parseYaml(cli), "cli-windows-install-verify.yml": VERIFY_CALLEE },
+  });
+const RAN = /a credentialed job runs/;
+
+describe("rule 3 holds every job bound to an environment, not only a registry's (#794 review)", () => {
+  it("control: cli-release's upload and promote, as recorded, are clean", () =>
+    expect(runCli()).toEqual([]));
+  it("a cli-release job that runs project code", () =>
+    fires(
+      runCli(
+        CLI.replace(
+          'promote "${TAG#cli-v}"',
+          'promote "${TAG#cli-v}"\n      - run: deno task compile',
+        ),
+      ),
+      RAN,
+    ));
+  it("a cli-release job whose checkout keeps its credential", () =>
+    fires(
+      runCli(CLI.replace("        with:\n          persist-credentials: false\n", "")),
+      /keeps its credential/,
+    ));
+  it("a cli-release job that restores a cache", () =>
+    fires(
+      runCli(
+        CLI.replace(
+          "      - run: bash apps/cli/scripts/publish-r2.sh promote",
+          `      - uses: actions/cache@${SHA}\n      - run: bash apps/cli/scripts/publish-r2.sh promote`,
+        ),
+      ),
+      /restores a cache/,
+    ));
+  it("publish-r2.sh is the exception in upload and promote only, each with its own verb", () => {
+    // The promote command in the upload job is not upload's exception.
+    fires(runCli(CLI.replace('upload "${TAG#cli-v}" dist', 'promote "${TAG#cli-v}"')), RAN);
+    // A rollback is not recorded anywhere.
+    fires(runCli(CLI.replace('promote "${TAG#cli-v}"', 'rollback "${TAG#cli-v}"')), RAN);
+    // The same command in sdk-publish.yml is project code.
+    fires(
+      runCli(
+        CLI,
+        swap(
+          PUBLISH_STEP,
+          '      - run: bash apps/cli/scripts/publish-r2.sh promote "${TAG#cli-v}"',
+        ),
+      ),
+      RAN,
+    );
+    // A prefix assignment or a chained command breaks the exact match.
+    fires(
+      runCli(
+        CLI.replace(
+          "- run: bash apps/cli/scripts/publish-r2.sh promote",
+          "- run: WRANGLER=x bash apps/cli/scripts/publish-r2.sh promote",
+        ),
+      ),
+      RAN,
+    );
+  });
+});
+
+describe("rule 3: caches that are on unless switched off (#794 review)", () => {
+  const UV = (input) =>
+    `      - uses: astral-sh/setup-uv@${SHA}\n        with:\n          version: "0.10.7"\n${input}`;
+  const withUv = (input) => {
+    const s = settings();
+    s.allowedActions.push("astral-sh/setup-uv@*");
+    return run(GOOD.replace(INSTALL_STEP, `${UV(input)}${INSTALL_STEP}`), { s });
+  };
+  it.each([
+    ["enable-cache: true", "          enable-cache: true\n"],
+    ['enable-cache: "auto" (its default)', '          enable-cache: "auto"\n'],
+    ["no enable-cache at all", ""],
+  ])("setup-uv with %s restores a cache", (_, input) => fires(withUv(input), /restores a cache/));
+  it("enable-cache: true on any action is a cache, not only on setup-uv", () =>
+    fires(
+      run(
+        swap(
+          `      - uses: pnpm/action-setup@${SHA}\n`,
+          `      - uses: pnpm/action-setup@${SHA}\n        with:\n          enable-cache: true\n`,
+        ),
+      ),
+      /restores a cache/,
+    ));
+  it("setup-uv with enable-cache: false restores nothing", () =>
+    expect(withUv("          enable-cache: false\n")).toEqual([]));
+  it("bundler-cache: false restores nothing; bundler-cache: true does", () => {
+    const s = settings();
+    s.allowedActions.push("ruby/setup-ruby@*");
+    const ruby = (v) =>
+      run(
+        GOOD.replace(
+          INSTALL_STEP,
+          `      - uses: ruby/setup-ruby@${SHA}\n        with:\n          bundler-cache: ${v}\n${INSTALL_STEP}`,
+        ),
+        { s },
+      );
+    expect(ruby("false")).toEqual([]);
+    fires(ruby("true"), /restores a cache/);
+  });
+});
+
+describe("rule 3: a credentialed job runs only its allowlist (#794 review)", () => {
+  const inPublish = (cmd) =>
+    run(swap(PUBLISH_STEP, `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`));
+  it.each([
+    ["a backslash continuation", "pn\\\npm install"],
+    ["a continuation inside npm's arguments", "npm \\\n  ci"],
+    ["an option before npm's subcommand", "npm --prefix x ci"],
+    [
+      "npm publish without --ignore-scripts (it runs the package's scripts)",
+      'npm publish "./release/$ARTIFACT"',
+    ],
+    ["bunx", "bunx some-tool"],
+    ["deno", "deno run x.ts"],
+    ["tsx", "tsx x.ts"],
+    ["go test", "go test ./..."],
+    ["source", "source scripts/x.sh"],
+    [". (source)", ". scripts/x.sh"],
+    ["a repository path without ./", "apps/cli/scripts/x.sh upload"],
+    ["a command substitution", 'v="$(python3 evil.py)"'],
+    ["a substitution inside a quoted argument", 'echo "$(node x.mjs)"'],
+    ["a process substitution", "cat <(node x.mjs)"],
+    ["a substitution inside ${ }", 'echo "${X:-$(node x.mjs)}"'],
+    ["a backtick substitution", "echo `node x.mjs`"],
+    ["a variable as the command", '"$CMD" publish'],
+    ["eval", 'eval "$X"'],
+    ["exec", "exec python3 x.py"],
+    ["env", "env FOO=1 bash x.sh"],
+    ["xargs", "ls | xargs sh"],
+    ["find -exec", "find . -exec sh {} \\;"],
+    ["sort --compress-program", "sort --compress-program=sh x"],
+    ["sed's e flag", "sed 's/x/id/e' f"],
+    ["sed -e", "sed -e 's/x/y/' f"],
+    ["git -c before the subcommand", "git -c core.sshCommand=sh push x"],
+    ["git --upload-pack", "git fetch --upload-pack=sh x"],
+    ["git config (aliases and hooks run programs)", "git config alias.x '!sh'"],
+    ["a command inside a loop", "while read -r x; do python3 x; done < f"],
+    ["a command inside a case branch", 'case "$x" in a) python3 y ;; esac'],
+    ["a command inside a subshell", "(cd x && make)"],
+    ["a command inside a function", "f() { pnpm install; }; f"],
+    ["PATH set in the shell", 'export PATH="./bin:$PATH"'],
+    ["BASH_ENV as a prefix assignment", "BASH_ENV=x.sh echo hi"],
+    ["GIT_SSH_COMMAND that is not ssh", 'export GIT_SSH_COMMAND="sh evil.sh"'],
+    ["GIT_SSH_COMMAND with a ProxyCommand", 'export GIT_SSH_COMMAND="ssh -o ProxyCommand=x"'],
+    ["GIT_SSH_COMMAND with a config file", 'export GIT_SSH_COMMAND="ssh -F ssh_config"'],
+    ["a write to GITHUB_PATH", 'echo "$PWD/bin" >> "$GITHUB_PATH"'],
+    ["a here-document", "cat <<EOF\n$(node x)\nEOF"],
+  ])("refuses %s", (_, cmd) => {
+    const got = inPublish(cmd);
+    expect(got.length, `accepted: ${cmd}`).toBeGreaterThan(0);
+    expect(
+      got.some((w) => /a credentialed job/.test(w)),
+      got.join("\n"),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "a function, a case and a process substitution (publish-maven's shape)",
+      `type_of() {
+  case "$1" in
+    *.pom | "$base/"*.xml) echo "application/xml" ;;
+    *) echo "application/octet-stream" ;;
+  esac
+}
+s3() { aws s3api --endpoint-url "$endpoint" "$@"; }
+while IFS= read -r f; do echo "$(type_of "$f") $f"; done < <(find . -type f | sed 's|^\\./||') | sort -k1,1n > "$RUNNER_TEMP/order"
+if ! err="$(s3 get-object --key "$1" x 2>&1 >/dev/null)"; then echo "$err"; fi`,
+    ],
+    [
+      "a deploy-key push (publish-go's shape)",
+      `umask 077
+printf '%s\\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
+export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o StrictHostKeyChecking=yes"
+git push git@github.com:confeature/sdks.git "\${GITHUB_SHA}:refs/tags/\${RELEASE_TAG}"
+rm -rf "$RUNNER_TEMP/ssh"`,
+    ],
+    [
+      "a digest check with an apostrophe in a double-quoted message",
+      `actual="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
+[ -n "$EXPECTED" ] && [ "$actual" = "$EXPECTED" ] ||
+  { echo "::error::digest $actual != release job's $EXPECTED"; exit 1; }`,
+    ],
+  ])("accepts %s", (_, script) => {
+    const block = script.replace(/\n/g, "\n          ");
+    expect(run(swap(PUBLISH_STEP, `      - run: |\n          ${block}`))).toEqual([]);
+  });
+
+  it("joins a backslash continuation the way bash does, so an exception still matches", () => {
+    const own = swap("  publish-npm:\n", "  publish-crates:\n").replace(
+      PUBLISH_STEP,
+      '      - run: |\n          cargo "+${RUST_VERSION}" publish \\\n            --no-verify',
+    );
+    expect(run(own).filter((w) => RAN.test(w))).toEqual([]);
+  });
+
+  it.each([
+    // `echo hi` is on the allowlist: only the shell makes it Python.
+    ["a step shell other than bash", `      - shell: python {0}\n        run: echo hi`],
+    ["BASH_ENV in a step's env:", `      - env:\n          BASH_ENV: ./x.sh\n        run: echo hi`],
+    [
+      "NODE_OPTIONS in a step's env:",
+      `      - env:\n          NODE_OPTIONS: --require ./x.js\n        run: echo hi`,
+    ],
+  ])("refuses %s", (_, step) => fires(run(swap(PUBLISH_STEP, step)), /credentialed job/));
+  it("refuses a credentialed job in a container", () =>
+    fires(
+      run(
+        swap(
+          "    environment: sdk-publish-npm\n",
+          "    environment: sdk-publish-npm\n    container: node:22\n",
+        ),
+      ),
+      /in a container/,
+    ));
+});
+
+describe("rule 8 and rule 6: local, container and reusable-workflow references (#794 review)", () => {
+  it.each([
+    ["a local action in a publish job", "./.github/actions/x"],
+    ["a container action in a publish job", "docker://alpine:3"],
+  ])("refuses %s", (_, uses) =>
+    fires(run(swap(PUBLISH_STEP, `      - uses: ${uses}`)), /runs no local or container action/),
+  );
+  it("refuses a local action in a pack job", () =>
+    fires(
+      run(GOOD.replace(INSTALL_STEP, `      - uses: ./.github/actions/x\n${INSTALL_STEP}`)),
+      /runs no local or container action/,
+    ));
+  it("allows a local action in a job that packs and holds nothing", () =>
+    expect(run(`${GOOD}  lint:\n    steps:\n      - uses: ./.github/actions/x\n`)).toEqual([]));
+  it("a job-level reusable workflow is held to the SHA and allow-list rules", () => {
+    const call = (uses) =>
+      run(GOOD, { extra: { "x.yml": parseYaml(`on: push\njobs:\n  j:\n    uses: ${uses}\n`) } });
+    fires(call("evil/flows/.github/workflows/w.yml@main"), /without a full commit SHA/);
+    fires(
+      call(`evil/flows/.github/workflows/w.yml@${SHA}`),
+      /uses evil\/flows, which .* does not allow/,
+    );
+  });
+  it("sdk-publish.yml calls no reusable workflow at all", () =>
+    fires(
+      run(`${GOOD}  w:\n    uses: ./.github/workflows/cli-windows-install-verify.yml\n`, {
+        extra: { "cli-windows-install-verify.yml": VERIFY_CALLEE },
+      }),
+      /RELEASE_CALLS does not record/,
+    ));
+  it("cli-release.yml calls only the recorded workflow, and passes it no secret", () => {
+    fires(
+      runCli(CLI.replace("cli-windows-install-verify.yml", "other.yml")),
+      /RELEASE_CALLS does not record/,
+    );
+    fires(runCli(`${CLI}    secrets:\n      T: x\n`), /passes secrets to a called workflow/);
+  });
+  it("a call to a workflow that does not exist", () =>
+    fires(
+      run(GOOD, {
+        extra: {
+          "x.yml": parseYaml("on: push\njobs:\n  j:\n    uses: ./.github/workflows/gone.yml\n"),
+        },
+      }),
+      /not a workflow of this repository/,
+    ));
+});
+
+describe("§5: a credentialed job publishes this run's artifact, on a tag push only (#794 review)", () => {
+  it.each(["run-id: 123", "github-token: x", "repository: other/repo"])(
+    "refuses download-artifact with %s",
+    (input) =>
+      fires(
+        run(
+          swap(
+            PUBLISH_STEP,
+            `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: release-npm\n          ${input}`,
+          ),
+        ),
+        /downloads an artifact from another run/,
+      ),
+  );
+  it("accepts download-artifact of this run", () =>
+    expect(
+      run(
+        swap(
+          PUBLISH_STEP,
+          `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: release-npm\n          path: release`,
+        ),
+      ),
+    ).toEqual([]));
+  const IF = "    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')\n";
+  // sdk-publish.yml also runs on workflow_dispatch, a dry run that must publish nothing.
+  const DISPATCH = HEAD.replace(
+    '    tags: ["sdk-*-v*"]\n',
+    '    tags: ["sdk-*-v*"]\n  workflow_dispatch:\n',
+  );
+  it("control: the tag-push condition, in a workflow a dispatch also runs, is clean", () =>
+    expect(run(GOOD, { head: DISPATCH })).toEqual([]));
+  it.each([
+    ["no if: at all", ""],
+    ["no tag condition", "    if: github.event_name == 'push'\n"],
+    ["no push condition", "    if: startsWith(github.ref, 'refs/tags/')\n"],
+    [
+      "the condition ORed away",
+      "    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') || always()\n",
+    ],
+  ])("refuses a publish job with %s, in a workflow a dispatch also runs", (_, cond) =>
+    fires(run(swap(IF, cond), { head: DISPATCH }), /does not require a tag push/),
+  );
+  it("a workflow that runs on tag pushes only needs no if:", () => {
+    expect(run(swap(IF, ""))).toEqual([]);
+    const branches = HEAD.replace(
+      '    tags: ["sdk-*-v*"]\n',
+      '    tags: ["sdk-*-v*"]\n    branches: [main]\n',
+    );
+    fires(run(swap(IF, ""), { head: branches }), /does not require a tag push/);
+  });
 });
