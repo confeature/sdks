@@ -27,3 +27,6 @@ lcov.info
 
 # Written by tools/repo-gates/verify-fmt-lint.mjs on every run.
 .vp-untracked-ignore
+
+# Declarations `pnpm run build` emits beside the parity fixtures' sources.
+/packages/test-fixtures-sdk-parity/src/*.d.ts

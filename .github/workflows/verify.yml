@@ -56,5 +56,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The type-aware lint reads each SDK against its workspace dependencies'
+      # dist/ (sdk-shared's above all), which a fresh checkout does not have.
+      - name: Build the workspace packages
+        run: pnpm run build
+
       - name: The public gate
         run: pnpm run verify

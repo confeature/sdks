@@ -6,7 +6,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "resolveJsonModule": true,
-    "types": ["deno"],
+    "types": ["deno", "node"],
     "strict": true,
     "noUnusedLocals": true,
     "declaration": true,
