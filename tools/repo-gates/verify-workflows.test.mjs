@@ -8,7 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
-import { findings, globMatches, verifyWorkflows } from "./verify-workflows.mjs";
+import { findings, globMatches, publicGateFindings, verifyWorkflows } from "./verify-workflows.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SHA = "34e114876b0b11c390a56381ad16ebd13914f8d5";
@@ -863,4 +863,69 @@ describe("§5: a credentialed job publishes this run's artifact, on a tag push o
     );
     fires(run(swap(IF, ""), { head: branches }), /does not require a tag push/);
   });
+});
+
+describe("13 the public gate runs on every push to main and every pull request (#794 review)", () => {
+  const VERIFY = `on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  verify:
+    steps:
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
+`;
+  const gate = (text) => publicGateFindings({ "verify.yml": parseYaml(text) }).map((f) => f.why);
+  it("control: the fixture is clean, and so is the real verify.yml", () => {
+    expect(gate(VERIFY)).toEqual([]);
+    expect(verifyWorkflows(ROOT).filter((f) => f.file === "verify.yml")).toEqual([]);
+  });
+  it("a missing verify.yml", () =>
+    fires(
+      publicGateFindings({}).map((f) => f.why),
+      /is missing/,
+    ));
+  it.each([
+    [
+      "no push trigger",
+      VERIFY.replace("  push:\n    branches: [main]\n", ""),
+      /every push to main/,
+    ],
+    ["push to another branch", VERIFY.replace("[main]", "[develop]"), /every push to main/],
+    ["no pull_request trigger", VERIFY.replace("  pull_request:\n", ""), /every pull request/],
+    [
+      "a path filter",
+      VERIFY.replace("  pull_request:\n", "  pull_request:\n    paths: [apps/**]\n"),
+      /filters pull_request by paths/,
+    ],
+    [
+      "the gate step removed",
+      VERIFY.replace("      - run: pnpm run verify\n", ""),
+      /no step that runs/,
+    ],
+    [
+      "the gate stubbed",
+      VERIFY.replace("pnpm run verify", "echo pnpm run verify"),
+      /no step that runs/,
+    ],
+    [
+      "an if: on the step",
+      VERIFY.replace(
+        "      - run: pnpm run verify",
+        "      - if: false\n        run: pnpm run verify",
+      ),
+      /no step that runs/,
+    ],
+    [
+      "an if: on the job",
+      VERIFY.replace("  verify:\n", "  verify:\n    if: false\n"),
+      /no step that runs/,
+    ],
+    [
+      "continue-on-error",
+      VERIFY.replace("  verify:\n", "  verify:\n    continue-on-error: true\n"),
+      /no step that runs/,
+    ],
+  ])("refuses %s", (_, text, re) => fires(gate(text), re));
 });

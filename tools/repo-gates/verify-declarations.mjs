@@ -188,9 +188,24 @@ export const DECLARED_GATES = {
     // no credential outside one, no install or cache in a credentialed job,
     // no untrusted trigger, no expression in a shell, pinned actions and
     // tools, and tag patterns that agree across trigger, ruleset and policy
-    // (#794). Its data is tools/repo-gates/release-settings.json.
+    // (#794). Its data is tools/repo-gates/release-settings.json. Three homes:
+    // `verify` (which verify.yml runs on every push to main and every pull
+    // request, verify-workflows.mjs rule 13), and the first job of each release
+    // workflow, over the TAGGED commit's workflows, before the first job that
+    // can reach a credential: sdk-publish.yml's resolver and cli-release.yml's
+    // release job both need it (#794 review).
     script: "tools/repo-gates/verify-workflows.mjs",
-    homes: [{ file: "package.json", script: "verify" }],
+    homes: [
+      { file: "package.json", script: "verify" },
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs)",
+      },
+      {
+        file: ".github/workflows/cli-release.yml",
+        before: "Refuse a tag that is not on main",
+      },
+    ],
   },
   "verify:codeowners": {
     // CODEOWNERS names org teams only, never a person (verify-codeowners.mjs).

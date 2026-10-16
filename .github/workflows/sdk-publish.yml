@@ -9,6 +9,9 @@
 #
 # The chain, each job gating the next (`needs:`):
 #
+#   0. workflow-rules  tools/repo-gates/verify-workflows.mjs over this commit's
+#                workflows: a tag whose workflows break the rules is refused
+#                before anything else runs.
 #   1. setup     tools/sdk-pack/resolve-publish.mjs accepts the tag, or refuses
 #                it before any job that can reach a credential: unknown unit,
 #                registry `none`, blocked, pending gate, version mismatch, an
@@ -105,8 +108,41 @@ env:
   GITHUB_SSH_KNOWN_HOST: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 jobs:
+  # The workflow rules (tools/repo-gates/verify-workflows.mjs) over the TAGGED
+  # commit's workflows, before any job that can reach a credential: a tag whose
+  # workflows break them publishes nothing (#794 review). A job of its own, so
+  # the one dependency it installs (`yaml`, from the lockfile, no install
+  # script) never runs beside the resolver whose outputs the publish jobs trust.
+  workflow-rules:
+    name: workflow rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install the rules' dependency (no scripts)
+        run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/repo-gates
+
+      - name: The workflow rules (verify:workflows)
+        run: pnpm run verify:workflows
+
   setup:
     name: resolve ${{ github.ref_name }}
+    needs: workflow-rules
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -1612,6 +1648,7 @@ jobs:
   conclude:
     name: conclude
     needs:
+      - workflow-rules
       - setup
       - gate
       - pack-npm
@@ -1645,6 +1682,7 @@ jobs:
         run: |
           node -e '
             const needs = JSON.parse(process.env.NEEDS);
+            if (needs["workflow-rules"]?.result !== "success") { console.error("::error::the tagged workflows break the workflow rules (workflow-rules)"); process.exit(1); }
             const setup = needs.setup;
             if (setup?.result !== "success") { console.error("::error::the tag was refused (setup)"); process.exit(1); }
             const reg = setup.outputs.registry;

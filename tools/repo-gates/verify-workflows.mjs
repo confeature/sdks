@@ -81,6 +81,11 @@
  *      runs on anything but a tag push, its `if:` requires one
  *      (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`,
  *      never ORed away): a dry run publishes nothing.
+ *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs `pnpm run verify` on
+ *      every push to main and every pull request, with no path filter, in a
+ *      job and a step with no `if:` and no `continue-on-error`. sdk-publish.yml
+ *      and cli-release.yml run these rules over the tagged commit in a first
+ *      job everything else needs (declared in verify-declarations.mjs).
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -97,6 +102,7 @@ export const MANIFEST = "dagger/sdk-manifest.json";
 export const WORKFLOWS = ".github/workflows";
 export const PUBLISH_WORKFLOW = "sdk-publish.yml";
 export const CLI_WORKFLOW = "cli-release.yml";
+export const VERIFY_WORKFLOW = "verify.yml";
 
 const EXACT = /^\d+\.\d+\.\d+$/;
 
@@ -675,6 +681,43 @@ export function findings({ settings, manifest, workflows }) {
   return out;
 }
 
+/**
+ * Rule 13, over the workflows: `pnpm run verify` runs on every push to main
+ * and every pull request, in a job and a step that nothing can skip. Separate
+ * from `findings` so the rule fixtures need not each carry a verify.yml.
+ */
+export function publicGateFindings(workflows) {
+  const out = [];
+  const add = (why) => out.push({ file: VERIFY_WORKFLOW, job: "-", why });
+  const doc = workflows[VERIFY_WORKFLOW];
+  if (doc === undefined) {
+    add("is missing: `pnpm run verify` would run on no automated path");
+    return out;
+  }
+  const on = doc?.on ?? doc?.[true];
+  const triggers = triggersOf(doc);
+  if (!triggers.includes("push") || !(on?.push?.branches ?? []).includes("main"))
+    add("does not run on every push to main");
+  if (!triggers.includes("pull_request")) add("does not run on every pull request");
+  for (const t of ["push", "pull_request"])
+    for (const k of ["paths", "paths-ignore"])
+      if (on?.[t]?.[k] !== undefined) add(`filters ${t} by ${k}, so a change can skip the gate`);
+  const runsGate = Object.values(doc?.jobs ?? {}).some(
+    (job) =>
+      job?.if === undefined &&
+      job?.["continue-on-error"] === undefined &&
+      (Array.isArray(job?.steps) ? job.steps : []).some(
+        (s) =>
+          typeof s?.run === "string" &&
+          s.run.trim() === "pnpm run verify" &&
+          s.if === undefined &&
+          s["continue-on-error"] === undefined,
+      ),
+  );
+  if (!runsGate) add("has no step that runs `pnpm run verify` and cannot be skipped");
+  return out;
+}
+
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
 export function verifyWorkflows(root) {
   const settings = JSON.parse(readFileSync(join(root, SETTINGS), "utf8"));
@@ -682,7 +725,7 @@ export function verifyWorkflows(root) {
   const workflows = {};
   for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
     workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
-  return findings({ settings, manifest, workflows });
+  return [...findings({ settings, manifest, workflows }), ...publicGateFindings(workflows)];
 }
 
 function main() {
