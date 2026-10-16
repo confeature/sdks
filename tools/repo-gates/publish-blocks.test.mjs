@@ -37,7 +37,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { ENVIRONMENT_COMMANDS, referenceProblem } from "./verify-workflows.mjs";
+import { ENVIRONMENT_COMMANDS, declaredSecrets, referenceProblem } from "./verify-workflows.mjs";
 import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -45,6 +45,10 @@ const flow = (f) => parseYaml(readFileSync(join(ROOT, ".github/workflows", f), "
 const PUBLISH = flow("sdk-publish.yml");
 const CLI = flow("cli-release.yml");
 const BASH = "/bin/bash";
+/** The secrets release-settings.json declares, so a test table cannot name another. */
+const SECRETS = declaredSecrets(
+  JSON.parse(readFileSync(join(ROOT, "tools/repo-gates/release-settings.json"), "utf8")),
+);
 
 const dirs = [];
 afterEach(() => {
@@ -91,7 +95,7 @@ function step(doc, jobId, name) {
 function resolveEnv({ env, doc, jobId }, table) {
   // One table serves a job's steps, so each key is checked at job scope.
   for (const key of Object.keys(table)) {
-    const why = referenceProblem(key, { doc, jobId });
+    const why = referenceProblem(key, { doc, jobId, secretsOf: SECRETS });
     if (why !== null) throw new Error(`test value for \${{ ${key} }} names nothing: ${why}`);
   }
   const out = {};

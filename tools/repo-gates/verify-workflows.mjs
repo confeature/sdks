@@ -1539,7 +1539,7 @@ const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
  */
 export function referenceProblem(
   expr,
-  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {} },
+  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {}, secretsOf = null },
 ) {
   // Only dot paths into a context are judged here, so whatever reaches a
   // context any other way is refused outright (round 6): an index
@@ -1572,9 +1572,27 @@ export function referenceProblem(
     ...Object.keys(on?.workflow_call?.inputs ?? {}),
   ]);
   for (const m of expr.matchAll(
-    /(?<![\w.])(needs|steps|env|inputs)\.([A-Za-z_][\w-]*)(?:\.([A-Za-z_][\w-]*))?(?:\.([A-Za-z_][\w-]*))?/g,
+    /(?<![\w.])(needs|steps|env|inputs|secrets|vars|matrix)\.([A-Za-z_][\w-]*)(?:\.([A-Za-z_][\w-]*))?(?:\.([A-Za-z_][\w-]*))?/g,
   )) {
     const [ref, ctxName, a, b, c] = m;
+    // The workflow's own env sees no job's needs, steps or env.
+    if (jobId === null && ["needs", "steps", "env"].includes(ctxName))
+      return `${ref}: the workflow's env cannot read the ${ctxName} context`;
+    if (ctxName === "secrets") {
+      // A secret is read only where release-settings.json declares it: in its
+      // environment's job (rules 1 and 2 hold the same line over job text).
+      const environment =
+        typeof job?.environment === "string" ? job.environment : job?.environment?.name;
+      if (secretsOf === null) return `${ref}: no release settings to check the secret against`;
+      if (!secretsOf(environment).has(a))
+        return `${ref}: ${environment === undefined ? "a job outside an environment" : `environment ${environment}`} declares no secret ${a}`;
+      continue;
+    }
+    if (ctxName === "vars") {
+      if (!RELEASE_VARS.includes(a)) return `${ref}: RELEASE_VARS records no variable ${a}`;
+      continue;
+    }
+    if (ctxName === "matrix") return `${ref}: the release workflows use no matrix`;
     if (ctxName === "needs") {
       if (!needs.includes(a)) return `${ref}: ${jobId} does not need ${a}`;
       if (b === "outputs" && !Object.hasOwn(doc.jobs[a]?.outputs ?? {}, c ?? ""))
@@ -1600,15 +1618,22 @@ export function referenceProblem(
  * a declared input. A renamed `setup.outputs.path` would otherwise hand every
  * job an empty UNIT_PATH while every other check stays green.
  */
-export function referenceFindings(workflows, scriptOutputs = {}) {
+export function referenceFindings(workflows, scriptOutputs = {}, settings = null) {
   const out = [];
   const exprs = (v) => [...String(v).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+  const secretsOf = settings === null ? null : declaredSecrets(settings);
   for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
     const doc = workflows[file];
+    // The workflow's own env values (round 6: they were never read).
+    for (const v of Object.values(doc?.env ?? {}))
+      for (const e of exprs(v)) {
+        const why = referenceProblem(e, { doc, jobId: null, scriptOutputs, secretsOf });
+        if (why !== null) out.push({ file, job: "-", why });
+      }
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
       const check = (where, list, scope) => {
         for (const e of list) {
-          const why = referenceProblem(e, { doc, jobId, scriptOutputs, ...scope });
+          const why = referenceProblem(e, { doc, jobId, scriptOutputs, secretsOf, ...scope });
           if (why !== null) out.push({ file, job: where, why });
         }
       };
@@ -1675,6 +1700,20 @@ function stepOutputProblem(s, name, scriptOutputs) {
   const writes =
     /GITHUB_OUTPUT/.test(run) && new RegExp(`(?:^|[\\s"'{;])${name}(?:=|<<)`, "m").test(run);
   return writes ? null : `step ${s?.id} writes no ${name}= to $GITHUB_OUTPUT`;
+}
+
+/** The repository variables the release workflows read (NuGet's account name, not a secret). */
+export const RELEASE_VARS = ["NUGET_USER"];
+
+/** The secrets release-settings.json declares for an environment, as a lookup. */
+export function declaredSecrets(settings) {
+  const by = new Map(
+    (settings?.environments ?? []).map((e) => [
+      e.name,
+      new Set((e.secrets ?? []).map((s) => s?.name)),
+    ]),
+  );
+  return (environment) => by.get(environment) ?? new Set();
 }
 
 /** The first job of each release workflow, which runs these rules over the tagged commit. */
@@ -1767,7 +1806,7 @@ export function verifyWorkflows(root) {
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
-    ...referenceFindings(workflows, readScriptOutputs(root)),
+    ...referenceFindings(workflows, readScriptOutputs(root), settings),
   ];
 }
 

@@ -41,7 +41,7 @@ const all = (w) =>
     ...findings({ settings, manifest, workflows: w }),
     ...publicGateFindings(w),
     ...releaseGateFindings(w),
-    ...referenceFindings(w, SCRIPTS),
+    ...referenceFindings(w, SCRIPTS, settings),
   ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
@@ -875,5 +875,55 @@ describe("16 a step output reference names an output the step writes (round 6)",
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("16 reads the workflow env, secrets, vars and matrix too (round 6)", () => {
+  it.each([
+    [
+      "a secret the job's environment does not declare",
+      (w) => {
+        w[P].jobs["publish-go"].steps.find(
+          (s) => s.name === "Install the deploy key",
+        ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+      },
+      /environment sdk-publish-go declares no secret MIRROR_DEPLOY_KEY/,
+    ],
+    [
+      "a secret in a job outside an environment",
+      (w) => {
+        w[P].jobs.setup.steps.find((s) => s.id === "resolve").env.UNIT =
+          "${{ secrets.GO_TAG_DEPLOY_KEY }}";
+      },
+      /a job outside an environment declares no secret GO_TAG_DEPLOY_KEY/,
+    ],
+    [
+      "a variable nobody recorded",
+      (w) => {
+        w[P].jobs["publish-nuget"].steps.find((s) => s.uses?.startsWith("NuGet/login")).with.user =
+          "${{ vars.OTHER }}";
+      },
+      /RELEASE_VARS records no variable OTHER/,
+    ],
+    [
+      "a matrix reference",
+      (w) => {
+        w[P].jobs["pack-npm"].env.UNIT_VERSION = "${{ matrix.version }}";
+      },
+      /the release workflows use no matrix/,
+    ],
+    [
+      "the workflow env reading a job's output",
+      (w) => {
+        w[P].env.EXTRA = "${{ needs.setup.outputs.path }}";
+      },
+      /the workflow's env cannot read the needs context/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
   });
 });
