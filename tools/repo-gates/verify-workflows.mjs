@@ -1749,7 +1749,16 @@ export const WRITE_PERMISSIONS = {
  */
 export function continueOnErrorFindings(workflows) {
   const out = [];
-  for (const file of SURFACE_WORKFLOWS)
+  // The release workflows, and any other holding a credentialed job (round
+  // 11: a write-token job in a new workflow could fail green).
+  const files = Object.keys(workflows).filter(
+    (file) =>
+      SURFACE_WORKFLOWS.includes(file) ||
+      Object.entries(workflows[file]?.jobs ?? {}).some(([id, job]) =>
+        isCredentialed(file, id, job, workflows[file]),
+      ),
+  );
+  for (const file of files)
     for (const [jobId, job] of Object.entries(workflows[file]?.jobs ?? {})) {
       // A job that may fail green (round 10: build's, whose guard and
       // SHA256SUMS decide what release and upload publish).
@@ -2836,7 +2845,8 @@ const DAGGER_FN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export function daggerFnFindings(manifest) {
   const out = [];
   for (const s of Array.isArray(manifest?.sdks) ? manifest.sdks : [])
-    if (s?.daggerFn !== undefined && !DAGGER_FN.test(String(s.daggerFn)))
+    // null is the manifest's "no Dagger suite" (exempt and native SDKs).
+    if (s?.daggerFn != null && (typeof s.daggerFn !== "string" || !DAGGER_FN.test(s.daggerFn)))
       out.push({
         file: "dagger/sdk-manifest.json",
         job: String(s?.name ?? "?"),

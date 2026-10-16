@@ -799,9 +799,10 @@ exit 0`;
       expect(argv).toEqual([]);
     });
     it("fails on a present SHA256SUMS that is not this build's", () => {
-      const { r } = gh({ remote: { SHA256SUMS: "0  confeature-x86_64\n" } });
+      const { r, argv } = gh({ remote: { SHA256SUMS: "0  confeature-x86_64\n" } });
       expect(r.status).toBe(1);
       expect(r.stderr).toMatch(/the release's SHA256SUMS is not this build's/);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
     });
     it("fails before any gh call on a binary SHA256SUMS does not match", () => {
       const { r, argv } = gh({ files: BIN, summed: { ...BIN, "confeature-x86_64": "other" } });
@@ -818,7 +819,10 @@ exit 0`;
     it("stops before any upload when the release cannot be created", () => {
       const { r, argv } = gh({ test: { GH_CREATE_FAIL: "1" } });
       expect(r.status).not.toBe(0);
-      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+      expect(argv).toEqual([
+        "gh release view cli-v1.2.3",
+        "gh release create cli-v1.2.3 --title Confeature CLI 1.2.3 --generate-notes --verify-tag",
+      ]);
     });
     it.each(["cli-v1.2", "cli-v1.2.3-rc1", "cli-v1.2.3x", "sdk-v1.2.3", "cli-v.1.2.3"])(
       "exits 2 on the tag %s",

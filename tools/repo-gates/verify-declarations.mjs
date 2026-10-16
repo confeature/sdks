@@ -578,7 +578,12 @@ export function runsExecutable(text, needle) {
   // anchor, `echo neutralised <path>` and `echo "see <path> for why"` both
   // counted as reaching the executable — the same mistake the home bodies
   // were already protected from, repeated one function along.
-  return clean.split(/&&|\n/).some((seg0) => {
+  // A command on a later line (round 11): a package.json body runs under
+  // `sh -c` without -e, so `bash <path>\ntrue` exits 0 when the gate fails.
+  // The executable must be on the last line that holds a command.
+  const lines = clean.split("\n").filter((l) => l.trim() !== "");
+  const last = lines.length === 0 ? "" : lines[lines.length - 1];
+  return last.split("&&").some((seg0) => {
     const seg = seg0.trim();
     const parts = seg.split(/\s+/);
     if (!/^(?:node|tsx|deno|bash|sh|pnpm|npm|yarn|npx)$/.test(parts[0])) return false;
@@ -595,11 +600,36 @@ export function runsExecutable(text, needle) {
     if (needle.startsWith("-")) {
       return new RegExp(`(?:^|\\s)${escapeRe(needle)}(?![\\w/@.-])`).test(seg);
     }
-    const operand = parts.slice(1).find((a) => !a.startsWith("-"));
-    if (operand === undefined) return false;
-    return operand.replace(/^['"]|['"]$/g, "") === needle;
+    // The words before the operand (round 11): `bash -n <path>` parses it
+    // without running it, and `bash --version`, `node --check`, `node -e`,
+    // `node -p`, `sh -c` run something else, so bash and sh take no flag at
+    // all, node only RUNNER_FLAGS's, and deno only `run` and its own.
+    const runner = parts[0];
+    let rest = parts.slice(1);
+    if (runner === "deno") {
+      if (rest[0] !== "run") return false;
+      rest = rest.slice(1);
+    }
+    const at = rest.findIndex((a) => !a.startsWith("-"));
+    if (at === -1) return false;
+    const allowed = RUNNER_FLAGS[runner];
+    if (allowed !== undefined && !rest.slice(0, at).every((f) => allowed.includes(f))) return false;
+    return rest[at].replace(/^['"]|['"]$/g, "") === needle;
   });
 }
+
+/**
+ * The flags a runner may carry before the executable it runs (round 11):
+ * none for a shell; for node and deno, only those that still run the file.
+ * The package managers' own flags (`pnpm --filter`) are judged elsewhere.
+ */
+const RUNNER_FLAGS = {
+  bash: [],
+  sh: [],
+  node: ["--no-warnings", "--enable-source-maps"],
+  tsx: [],
+  deno: ["-A", "--allow-all", "-q", "--quiet"],
+};
 
 export function scriptReachesExecutable(root, pkg, gate, executable) {
   const body = pkg.scripts?.[gate];

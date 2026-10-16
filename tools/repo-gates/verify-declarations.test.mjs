@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  runsExecutable,
   EXCLUDED_TREES,
   invokesGate,
   parseSteps,
@@ -1510,4 +1511,37 @@ describe("perJob: every job that reaches the guarded step runs the gate first, i
       what("name: ship\njobs:\n  x:\n    steps:\n      - run: pnpm run verify:thing\n"),
     ).toMatch(/has no step named "Pack the release artifact"/);
   });
+});
+
+describe("runsExecutable: the runner runs the file, and its failure is the step's (round 11)", () => {
+  const P = "apps/cli/scripts/check-on-main.sh";
+  it.each([
+    `bash ${P}`,
+    `sh ${P}`,
+    `node ${P}`,
+    `node --no-warnings ${P}`,
+    `deno run -A ${P}`,
+    `true\nbash ${P}`,
+  ])("counts %j", (text) => expect(runsExecutable(text, P)).toBe(true));
+  it.each([
+    ...["-n", "--check", "--version", "--help", "-c true", "-e ''", "-p 1"].flatMap((f) => [
+      `bash ${f} ${P}`,
+      `sh ${f} ${P}`,
+      `node ${f} ${P}`,
+    ]),
+    `deno ${P}`,
+    `deno run --check ${P}`,
+    `deno eval ${P}`,
+    `bash ${P} &`,
+    `bash ${P} | cat`,
+    `bash ${P} || true`,
+    `bash ${P}; true`,
+    `bash ${P} || :`,
+    `(bash ${P}) || true`,
+    `bash ${P} 2>/dev/null || exit 0`,
+    `timeout 1 bash ${P}`,
+    `bash ${P} && true || true`,
+    `bash ${P}\ntrue`,
+    `bash ${P} ; exit 0`,
+  ])("refuses %j", (text) => expect(runsExecutable(text, P)).toBe(false));
 });

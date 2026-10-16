@@ -2153,10 +2153,16 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
     ["M1d a leading dash (a flag)", "-x"],
     ["M1e an upper-case start", "Go-test"],
     ["M1f a trailing dash", "go-"],
+    ["M1g a number, not a string", 42],
+    ["M1h a list", ["go-test"]],
   ];
-  it.each(fnRows)("refuses %s", (_label, fn) => {
+  it.each(ROWS.rows(fnRows))("refuses %s", (label, fn) => {
     const m = structuredClone(manifest);
     m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = fn;
+    const got = allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
+      (f) => `${f.file}: ${f.job}: ${f.why}`,
+    );
+    expectFindings(label, got);
     expect(daggerFnFindings(m).map((f) => f.why)).toEqual([
       `daggerFn ${JSON.stringify(fn)} is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)`,
     ]);
@@ -2417,5 +2423,44 @@ describe("a frozen job's finding names the step (round 11)", () => {
         /^cli-release\.yml: release: step 1 \(Checkout \(release-github\.sh\)\) is/,
       ),
     );
+  });
+});
+
+describe("continue-on-error in any workflow holding a credentialed job (round 11)", () => {
+  it.each(
+    ROWS.rows([
+      [
+        "COE a new workflow's write-token job with a continue-on-error step",
+        (w) =>
+          void (w["new.yml"] = {
+            on: { push: {} },
+            permissions: { contents: "read" },
+            jobs: {
+              x: {
+                "runs-on": "ubuntu-latest",
+                permissions: { contents: "write" },
+                steps: [{ name: "push", run: "true", "continue-on-error": true }],
+              },
+            },
+          }),
+        /new\.yml: x: step push sets continue-on-error:/,
+      ],
+      [
+        "COE contract-live: a secret makes a job credentialed, its continue-on-error refused",
+        (w) => {
+          const job = Object.values(w["contract-live.yml"].jobs)[0];
+          job.env = { ...(job.env ?? {}), T: "${{ secrets.X }}" };
+          job["continue-on-error"] = true;
+        },
+        /contract-live\.yml: \w+: sets continue-on-error: \(its failure would be reported green\)/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
   });
 });

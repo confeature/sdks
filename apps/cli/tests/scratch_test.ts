@@ -13,3 +13,18 @@ Deno.test("scratchDir is removed, with its contents, when its binding leaves sco
   }
   assertThrows(() => Deno.statSync(path), Deno.errors.NotFound);
 });
+
+Deno.test("scratchDir is removed when the body throws", () => {
+  let path = "";
+  assertThrows(
+    () => {
+      using d = scratchDir("scratch-test-");
+      path = d.path;
+      Deno.writeTextFileSync(`${path}/f`, "x");
+      throw new Error("the test failed");
+    },
+    Error,
+    "the test failed",
+  );
+  assertThrows(() => Deno.statSync(path), Deno.errors.NotFound);
+});

