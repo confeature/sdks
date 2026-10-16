@@ -45,7 +45,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@confeature/sdk-browser-js": "workspace:*"
+    "@confeature/sdk-browser-js": "workspace:^"
   },
   "confeature": {
     "owner": "sdk-cloudflare-worker"

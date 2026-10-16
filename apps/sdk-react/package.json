@@ -36,7 +36,7 @@
     "postbuild": "node ./scripts/check-bundle-size.mjs"
   },
   "dependencies": {
-    "@confeature/sdk-browser-js": "workspace:*"
+    "@confeature/sdk-browser-js": "workspace:^"
   },
   "devDependencies": {
     "@confeature/test-fixtures-sdk-parity": "workspace:*",

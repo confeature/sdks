@@ -97,13 +97,13 @@ importers:
       zone.js:
         specifier: ~0.14.10
         version: 0.14.10
+    publishDirectory: dist
 
   apps/sdk-browser-js:
-    dependencies:
+    devDependencies:
       '@confeature/sdk-shared':
         specifier: workspace:*
         version: link:../../packages/sdk-shared
-    devDependencies:
       '@confeature/test-fixtures-sdk-parity':
         specifier: workspace:*
         version: link:../../packages/test-fixtures-sdk-parity
@@ -130,11 +130,10 @@ importers:
         version: '@voidzero-dev/vite-plus-test@0.1.21(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(esbuild@0.28.1)(happy-dom@15.11.7)(jiti@2.7.0)(jsdom@25.0.1)(less@4.6.4)(sass@1.99.0)(terser@5.31.6)(tsx@4.21.0)(typescript@6.0.3)(vite@7.3.3(@types/node@25.7.0)(jiti@2.7.0)(less@4.6.4)(lightningcss@1.32.0)(sass@1.99.0)(terser@5.31.6)(tsx@4.21.0)(yaml@2.9.0))(yaml@2.9.0)'
 
   apps/sdk-bun:
-    dependencies:
+    devDependencies:
       '@confeature/sdk-shared':
         specifier: workspace:*
         version: link:../../packages/sdk-shared
-    devDependencies:
       '@confeature/test-fixtures-sdk-parity':
         specifier: workspace:*
         version: link:../../packages/test-fixtures-sdk-parity
@@ -182,11 +181,10 @@ importers:
         version: '@voidzero-dev/vite-plus-test@0.1.21(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(esbuild@0.28.1)(happy-dom@15.11.7)(jiti@2.7.0)(jsdom@25.0.1)(less@4.6.4)(sass@1.99.0)(terser@5.31.6)(tsx@4.21.0)(typescript@6.0.3)(vite@7.3.3(@types/node@25.7.0)(jiti@2.7.0)(less@4.6.4)(lightningcss@1.32.0)(sass@1.99.0)(terser@5.31.6)(tsx@4.21.0)(yaml@2.9.0))(yaml@2.9.0)'
 
   apps/sdk-deno:
-    dependencies:
+    devDependencies:
       '@confeature/sdk-shared':
         specifier: workspace:*
         version: link:../../packages/sdk-shared
-    devDependencies:
       '@confeature/test-fixtures-sdk-parity':
         specifier: workspace:*
         version: link:../../packages/test-fixtures-sdk-parity
@@ -212,7 +210,7 @@ importers:
   apps/sdk-node:
     dependencies:
       '@confeature/sdk-shared':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../packages/sdk-shared
     devDependencies:
       '@confeature/test-fixtures-sdk-parity':
@@ -243,7 +241,7 @@ importers:
   apps/sdk-react:
     dependencies:
       '@confeature/sdk-browser-js':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../sdk-browser-js
     devDependencies:
       '@confeature/test-fixtures-sdk-parity':

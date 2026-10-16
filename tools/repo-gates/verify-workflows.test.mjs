@@ -53,7 +53,7 @@ const GOOD = `  pack-npm:
         with:
           node-version: \${{ env.NODE_VERSION }}
       - run: npm install --global --ignore-scripts "npm@\${NPM_VERSION}"
-      - run: npm publish "release/$ARTIFACT"
+      - run: npm publish "./release/$ARTIFACT"
 `;
 const flow = (jobs, head = HEAD) => parseYaml(`${head}jobs:\n${jobs}`);
 const run = (jobs, { s = settings(), extra = {}, head = HEAD } = {}) =>
@@ -67,7 +67,7 @@ const swap = (from, to) => {
   if (!GOOD.includes(from)) throw new Error(`fixture lacks ${from}`);
   return GOOD.replace(from, to);
 };
-const PUBLISH_STEP = '      - run: npm publish "release/$ARTIFACT"';
+const PUBLISH_STEP = '      - run: npm publish "./release/$ARTIFACT"';
 const INSTALL_STEP = "      - run: pnpm install --frozen-lockfile";
 
 describe("the real repository", () => {
@@ -284,6 +284,24 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ));
   it("9 npx in a pack job", () =>
     fires(run(swap("pnpm install --frozen-lockfile", "npx something")), /through npx/));
+  it("10 a relative tarball path without ./ (npm reads it as a GitHub repository)", () =>
+    fires(
+      run(
+        swap(
+          'npm publish "./release/$ARTIFACT"',
+          'npm publish --access public "release/$ARTIFACT"',
+        ),
+      ),
+      /npm publish release\/\$ARTIFACT: a path without/,
+    ));
+  it.each([
+    '"$RUNNER_TEMP"/release/*.tgz',
+    "/abs/x.tgz",
+    '"./x.tgz"',
+    '--dry-run --access public "./x.tgz"',
+  ])("10 accepts npm publish %s", (arg) =>
+    expect(run(swap('npm publish "./release/$ARTIFACT"', `npm publish ${arg}`))).toEqual([]),
+  );
   it("9 a literal node-version in a pack job", () =>
     fires(
       run(GOOD.replaceAll("node-version: ${{ env.NODE_VERSION }}", "node-version: 22")),

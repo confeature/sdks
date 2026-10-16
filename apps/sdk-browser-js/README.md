@@ -22,7 +22,7 @@ yarn add @confeature/sdk-browser-js
 ### CDN `<script>` tag
 
 ```html
-<script src="https://unpkg.com/@confeature/sdk-browser-js@latest/dist/confeature.iife.js"></script>
+<script src="https://unpkg.com/@confeature/sdk-browser-js@latest/dist/index.iife.js"></script>
 <script>
   const client = new Confeature.ConfeatureClient("YOUR_SDK_KEY");
   const isEnabled = client.getValue("flag-a", false);

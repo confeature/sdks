@@ -35,10 +35,8 @@
     "check": "vp check",
     "postbuild": "node ./scripts/check-bundle-size.mjs"
   },
-  "dependencies": {
-    "@confeature/sdk-shared": "workspace:*"
-  },
   "devDependencies": {
+    "@confeature/sdk-shared": "workspace:*",
     "@confeature/test-fixtures-sdk-parity": "workspace:*",
     "@types/bun": "^1.1.0",
     "@typescript/native-preview": "catalog:",

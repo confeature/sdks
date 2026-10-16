@@ -19,6 +19,7 @@
     "verify:json-keys": "node tools/repo-gates/verify-no-dup-json-keys.mjs package.json",
     "verify:gate-declarations": "node tools/repo-gates/verify-declarations.mjs",
     "verify:workflows": "node tools/repo-gates/verify-workflows.mjs",
+    "check:npm-tarball": "node tools/sdk-pack/check-npm-tarball.mjs",
     "verify:codeowners": "node tools/repo-gates/verify-codeowners.mjs",
     "verify:manifest-author": "node tools/manifest-author.mjs",
     "verify:sdk-extraction": "node tools/verify-sdk-extraction-manifest.mjs",

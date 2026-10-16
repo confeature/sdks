@@ -102,6 +102,19 @@ export const DECLARED_GATES = {
       { file: "apps/sdk-react/package.json", script: "postbuild", direct: true },
     ],
   },
+  "check:npm-tarball": {
+    // The npm tarball is the unit the resolver accepted, carries no workspace
+    // range and a LICENSE, and contains every entry point its manifest names
+    // (#899: sdk-angular packed a manifest with none). It runs in the pack job,
+    // before the dry run and long before the upload that cannot be undone.
+    script: "tools/sdk-pack/check-npm-tarball.mjs",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "npm publish --dry-run (no credentials)",
+      },
+    ],
+  },
   "dagger-precheck": {
     // The precondition in front of every containerised suite: it fails fast
     // when the Dagger CLI is missing or the Docker daemon is unreachable, so a

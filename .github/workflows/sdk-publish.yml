@@ -243,23 +243,12 @@ jobs:
       - name: Pack the release artifact
         run: pnpm --filter "$UNIT_COORDINATES" pack --pack-destination "$RUNNER_TEMP/release"
 
-      # The artifact's own manifest must name what the resolver accepted.
+      # The artifact must be the unit the resolver accepted, and usable: no
+      # workspace range, a LICENSE, and every entry point it names present.
       - name: Check the artifact against the resolved unit
-        run: |
-          tgz="$(find "$RUNNER_TEMP/release" -maxdepth 1 -name '*.tgz')"
-          [ "$(printf '%s\n' "$tgz" | wc -l)" -eq 1 ] && [ -n "$tgz" ] ||
-            { echo "::error::expected exactly one tarball in $RUNNER_TEMP/release"; exit 1; }
-          tar -xOzf "$tgz" package/package.json > "$RUNNER_TEMP/packed.json"
-          node -e '
-            const m = require(process.argv[1]);
-            if (m.name !== process.env.UNIT_COORDINATES || m.version !== process.env.UNIT_VERSION) {
-              console.error(`::error::the tarball is ${m.name}@${m.version}, not ${process.env.UNIT_COORDINATES}@${process.env.UNIT_VERSION}`);
-              process.exit(1);
-            }
-            const deps = { ...m.dependencies, ...m.peerDependencies, ...m.optionalDependencies };
-            const left = Object.entries(deps).filter(([, r]) => String(r).startsWith("workspace:"));
-            if (left.length) { console.error(`::error::unrewritten workspace ranges: ${left.map(([n]) => n).join(", ")}`); process.exit(1); }
-          ' "$RUNNER_TEMP/packed.json"
+        # Exactly one tarball: two would pass four arguments, none a literal
+        # glob, and the check refuses both (usage error, unreadable input).
+        run: pnpm run check:npm-tarball "$RUNNER_TEMP"/release/*.tgz "$UNIT_COORDINATES" "$UNIT_VERSION"
 
       - name: Install the pinned npm
         run: npm install --global --ignore-scripts "npm@${NPM_VERSION}"
@@ -327,7 +316,7 @@ jobs:
       # Trusted publishing: npm exchanges this job's OIDC token. No token is
       # stored anywhere, and every package is set to disallow tokens.
       - name: Upload
-        run: npm publish --access public --provenance --ignore-scripts "release/$ARTIFACT"
+        run: npm publish --access public --provenance --ignore-scripts "./release/$ARTIFACT"
 
   # ------------------------------------------------------------ conclude ----
 

@@ -49,6 +49,10 @@
  *      gives `setup-node` an exact `node-version` — written once per workflow
  *      in its top-level `env:` (`NPM_VERSION`, `NODE_VERSION`) and referenced
  *      from there — and never runs a tool through `npx`.
+ *  10. EXPLICIT TARBALL PATHS. An `npm publish` argument holding a `/` starts
+ *      with `./`, `/` or a `$` variable: npm reads `release/x.tgz` as the
+ *      GitHub repository `release/x.tgz`, so that publish fails after the tag
+ *      is pushed (#899, caught by a local dry run).
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -124,6 +128,15 @@ function runRules(file, where, run, { isPublish, isPackOrPublish, pins, add }) {
   if (isPackOrPublish) {
     if (/\bnpx\b/.test(run)) add(file, where, "runs a tool through npx (unpinned)");
     if (/\beval\b/.test(run)) add(file, where, "a pack or publish job evals a string");
+    for (const line of lines.filter((l) => /\bnpm publish\b/.test(l)))
+      for (const arg of line
+        .split(/\bnpm publish\b/)[1]
+        .trim()
+        .split(/\s+/)) {
+        const a = arg.replace(/^["']|["']$/g, "");
+        if (a.includes("/") && !a.startsWith("-") && !/^(\.\/|\/|\$)/.test(a))
+          add(file, where, `npm publish ${a}: a path without ./ is read as a GitHub repository`);
+      }
     for (const m of run.matchAll(/\bnpm@("?)([^\s"]+)\1/g))
       if (!/^\$\{?NPM_VERSION\}?$/.test(m[2]) || pins.NPM_VERSION === undefined)
         add(file, where, `installs npm@${m[2]}, not the workflow's exact NPM_VERSION`);
