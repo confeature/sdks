@@ -571,6 +571,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -911,6 +913,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

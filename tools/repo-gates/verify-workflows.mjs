@@ -85,6 +85,9 @@
  *      (`pnpm run verify` and the CLI's deno suite) on every push to main and
  *      every pull request, unfiltered, under plain bash, with no step env,
  *      working-directory or continue-on-error, in jobs that need nothing.
+ *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
+ *      only variables its step's, job's or workflow's env: defines, it assigns
+ *      itself, or RUNNER_DEFAULTS lists.
  *  14. THE RULES GATE THE RELEASES. sdk-publish.yml and cli-release.yml run
  *      these rules over the tagged commit in a first job, workflow-rules,
  *      which nothing can skip and every other job transitively needs.
@@ -547,8 +550,46 @@ function credentialedRun(file, where, run, { jobId, remotes, add }) {
   }
 }
 
+/**
+ * The runner's own variables a pack or credentialed run block may read
+ * without defining them: an explicit, short list (rule 15). In a credentialed
+ * job rule 3 refuses the runner-file ones by name anyway.
+ */
+export const RUNNER_DEFAULTS = new Set([
+  "GITHUB_OUTPUT",
+  "GITHUB_STEP_SUMMARY",
+  "GITHUB_WORKSPACE",
+  "GITHUB_SHA",
+  "GITHUB_RUN_ID",
+  "GITHUB_RUN_ATTEMPT",
+  "RUNNER_TEMP",
+]);
+
+/**
+ * Rule 15 (#794 review, round 4): the variables a run block reads but neither
+ * its step's, its job's or its workflow's `env:` defines, nor the block itself
+ * assigns (`NAME=`, `local`/`export NAME=`, `read … NAME`, `for NAME in`), nor
+ * the runner provides. publish-crates and publish-pubdev read `${UNIT_PATH}`
+ * that nothing defined: cargo would have been handed /Cargo.toml after the
+ * OIDC exchange, burning the version.
+ */
+export function undefinedVariables(run, defined) {
+  const assigned = new Set(
+    [...run.matchAll(/(?:^|[\s;&|(])(?:local\s+|export\s+)?([A-Za-z_]\w*)\+?=/g)].map((m) => m[1]),
+  );
+  for (const m of run.matchAll(
+    /\bread\s+(?:-r\s+)?((?:[A-Za-z_]\w*[ \t]*)+)|\bfor\s+([A-Za-z_]\w*)\s+in\b/g,
+  ))
+    for (const n of (m[1] ?? m[2]).trim().split(/\s+/)) assigned.add(n);
+  const used = new Set([...run.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
+  return [...used].filter((n) => !defined.has(n) && !assigned.has(n) && !RUNNER_DEFAULTS.has(n));
+}
+
 function runRules(file, where, run, ctx) {
   const { credentialed, isPackOrPublish, pins, add } = ctx;
+  if (isPackOrPublish)
+    for (const n of undefinedVariables(run, ctx.defined))
+      add(file, where, `reads $${n}, which no env: of its step, job or workflow defines`);
   if (run.includes("${{"))
     add(file, where, "a run: block interpolates ${{ }} (pass it through env:)");
   if (credentialed) credentialedRun(file, where, run, ctx);
@@ -799,7 +840,15 @@ function jobRules(args) {
   if (typeof job?.uses === "string") callRules(file, jobId, job, ctx);
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;
-    if (typeof step?.run === "string") runRules(file, where, step.run, ctx);
+    if (typeof step?.run === "string")
+      runRules(file, where, step.run, {
+        ...ctx,
+        defined: new Set([
+          ...Object.keys(doc?.env ?? {}),
+          ...Object.keys(job?.env ?? {}),
+          ...Object.keys(step?.env ?? {}),
+        ]),
+      });
     if (typeof step?.uses === "string") usesRules(file, where, step, ctx);
   }
 }

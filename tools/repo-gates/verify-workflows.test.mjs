@@ -42,6 +42,18 @@ const HEAD = `on:
 env:
   NODE_VERSION: "22.23.3"
   NPM_VERSION: "11.20.0"
+  # What the fixtures' run blocks read (rule 15), as the real jobs define it.
+  ARTIFACT: x.tgz
+  EXPECTED_SHA256: "0"
+  EXPECTED_SUMS: "0"
+  DEPLOY_KEY: k
+  RELEASE_TAG: apps/sdk-go/v1.0.0
+  MIRROR_TAG: v1.0.0
+  UNIT_COORDINATES: x
+  UNIT_VERSION: 1.0.0
+  UNIT_PATH: apps/x
+  RUST_VERSION: "1.88.0"
+  NUGET_API_KEY: k
 `;
 const GOOD = `  pack-npm:
     steps:
@@ -349,7 +361,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "rake release",
   ])("3 a publish job running %s", (cmd) => fires(run(swap(UPLOAD, cmd)), /a credentialed job/));
   it.each([
-    'dotnet nuget push "./release/x.nupkg" --api-key "$K" --source https://api.nuget.org/v3/index.json',
+    'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
   ])("3 accepts the registry client upload %s", (cmd) =>
     expect(run(swap(UPLOAD, cmd))).toEqual([]),
@@ -508,10 +520,10 @@ describe("each rule fires on a fixture that breaks only it", () => {
       run(GOOD, {
         head: HEAD.replace(
           'NPM_VERSION: "11.20.0"\n',
-          'NPM_VERSION: "11.20.0"\n  RUST_VERSION: "1.88"\n',
+          'NPM_VERSION: "11.20.0"\n  UV_VERSION: "1.88"\n',
         ),
       }),
-      /env RUST_VERSION is 1.88, not an exact version/,
+      /env UV_VERSION is 1.88, not an exact version/,
     ));
   it("9 a literal node-version in a pack job", () =>
     fires(
@@ -524,6 +536,8 @@ describe("each rule fires on a fixture that breaks only it", () => {
 const CLI = `on:
   push:
     tags: ["cli-v*"]
+env:
+  TAG: cli-v1.0.0
 jobs:
   upload:
     runs-on: ubuntu-latest
@@ -1276,4 +1290,41 @@ describe("14 every release job waits on workflow-rules (#794 review, round 3)", 
     expect(both(GATE, `${GATE}  release:\n    steps: []\n`)).toEqual([
       "cli-release.yml release: does not wait on workflow-rules",
     ]));
+});
+
+describe("15 a run block reads only variables something defines (#794 review, round 4)", () => {
+  it("would have caught publish-crates and publish-pubdev reading an undefined UNIT_PATH", () => {
+    const head = HEAD.replace("  UNIT_PATH: apps/x\n", "");
+    const crates = swap("  publish-npm:\n", "  publish-crates:\n").replace(
+      PUBLISH_STEP,
+      '      - run: cargo "+${RUST_VERSION}" publish --no-verify --manifest-path "${UNIT_PATH}/Cargo.toml"',
+    );
+    fires(
+      run(crates, { head }),
+      /reads \$UNIT_PATH, which no env: of its step, job or workflow defines/,
+    );
+  });
+  it("accepts a variable the step, the job or the workflow defines", () => {
+    const head = HEAD.replace("  UNIT_PATH: apps/x\n", "");
+    const step = '      - env:\n          UNIT_PATH: apps/x\n        run: echo "$UNIT_PATH"';
+    expect(run(swap(PUBLISH_STEP, step), { head })).toEqual([]);
+    const job = swap(
+      "    environment: sdk-publish-npm\n",
+      "    environment: sdk-publish-npm\n    env:\n      UNIT_PATH: apps/x\n",
+    ).replace(PUBLISH_STEP, '      - run: echo "$UNIT_PATH"');
+    expect(run(job, { head })).toEqual([]);
+  });
+  it("in a pack job, a variable the block assigns, reads or loops over is defined", () =>
+    expect(
+      run(
+        swap(
+          INSTALL_STEP,
+          '      - run: |\n          f="$RUNNER_TEMP/x"\n          for d in a b; do echo "$d"; done\n          read -r line < "$f"\n          echo "$f $line"',
+        ),
+      ),
+    ).toEqual([]));
+  it("refuses an undefined variable in a pack job, and the runner list is explicit", () => {
+    fires(run(swap(INSTALL_STEP, '      - run: echo "$UNSET_THING"')), /reads \$UNSET_THING/);
+    fires(run(swap(INSTALL_STEP, '      - run: echo "$RUNNER_OS"')), /reads \$RUNNER_OS/);
+  });
 });
