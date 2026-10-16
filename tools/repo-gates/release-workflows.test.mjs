@@ -18,6 +18,8 @@ import {
   CREDENTIAL_ENV,
   isCredentialed,
   writesOf,
+  FROZEN_JOBS,
+  FROZEN_WORKFLOW_KEYS,
   daggerFnFindings,
   referenceProblem,
   ENVIRONMENT_COMMANDS,
@@ -2170,5 +2172,152 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
         (f) => f.why,
       ),
     ).toContainEqual(expect.stringMatching(/daggerFn "x;y" is not one Dagger function name/));
+  });
+});
+
+describe("a frozen job is frozen whole, with its workflow's env and defaults (round 11, F1)", () => {
+  const G = "release-gate.yml";
+  const T = (w) => w[G].jobs.test;
+  const J = (w, j) => w[C].jobs[j];
+  const KEYS = (job) => new RegExp(`${job}: the job's keys are .*, FROZEN_JOB_KEYS records`);
+  const WF = (file) =>
+    new RegExp(
+      `${file.replace(".", "\\.")}: -: the workflow's env/defaults are .*, FROZEN_WORKFLOW_KEYS records`,
+    );
+  const SHELL = "bash -c 'source ./evil.sh; bash -e {0}'";
+  it.each(
+    ROWS.rows([
+      ["X7 test: job env BASH_ENV", (w) => void (T(w).env = { BASH_ENV: "x.sh" }), KEYS("test")],
+      [
+        "X8 test: job defaults.run.working-directory",
+        (w) => void (T(w).defaults = { run: { "working-directory": "fake" } }),
+        KEYS("test"),
+      ],
+      [
+        "X10 test: job defaults.run.shell",
+        (w) => void (T(w).defaults = { run: { shell: SHELL } }),
+        KEYS("test"),
+      ],
+      [
+        "X11 test: a container",
+        (w) => void (T(w).container = { image: "attacker/img:latest" }),
+        KEYS("test"),
+      ],
+      [
+        "X12 test: runs-on self-hosted",
+        (w) => void (T(w)["runs-on"] = "self-hosted"),
+        KEYS("test"),
+      ],
+      [
+        "X12b test: services",
+        (w) => void (T(w).services = { db: { image: "postgres" } }),
+        KEYS("test"),
+      ],
+      ["X12c test: an if:", (w) => void (T(w).if = "always()"), KEYS("test")],
+      [
+        "X12d test: a wider matrix",
+        (w) => void (T(w).strategy.matrix = '{"sdk":[{"name":"x","daggerFn":"y"}]}'),
+        KEYS("test"),
+      ],
+      [
+        "X13 release-gate: workflow defaults.run.shell",
+        (w) => void (w[G].defaults = { run: { shell: SHELL } }),
+        WF(G),
+      ],
+      [
+        "X14 release-gate: workflow env BASH_ENV",
+        (w) => void (w[G].env = { BASH_ENV: "./evil.sh" }),
+        WF(G),
+      ],
+      [
+        "W1 cli-release: workflow env BASH_ENV",
+        (w) => void (w[C].env.BASH_ENV = "apps/cli/scripts/x.sh"),
+        WF(C),
+      ],
+      [
+        "W2 release: job env BASH_ENV",
+        (w) => void (J(w, "release").env = { BASH_ENV: "apps/cli/scripts/x.sh" }),
+        KEYS("release"),
+      ],
+      [
+        "W3 upload: job env BASH_ENV",
+        (w) => void (J(w, "upload").env = { BASH_ENV: "apps/cli/scripts/x.sh" }),
+        KEYS("upload"),
+      ],
+      [
+        "W4 build: job env BASH_ENV",
+        (w) => void (J(w, "build").env = { BASH_ENV: "apps/cli/scripts/x.sh" }),
+        KEYS("build"),
+      ],
+      [
+        "W5 build: job defaults.run.working-directory",
+        (w) => void (J(w, "build").defaults = { run: { "working-directory": "apps/cli/fake" } }),
+        KEYS("build"),
+      ],
+      [
+        "W6 release: job defaults.run.working-directory",
+        (w) => void (J(w, "release").defaults = { run: { "working-directory": "apps/cli/fake" } }),
+        KEYS("release"),
+      ],
+      [
+        "W7 release: job defaults.run.shell",
+        (w) => void (J(w, "release").defaults = { run: { shell: SHELL } }),
+        KEYS("release"),
+      ],
+      [
+        "W8 cli-release: workflow defaults.run.shell",
+        (w) => void (w[C].defaults = { run: { shell: SHELL } }),
+        WF(C),
+      ],
+      [
+        "W9 cli-release: workflow defaults.run.working-directory",
+        (w) => void (w[C].defaults = { run: { "working-directory": "apps/cli/fake" } }),
+        WF(C),
+      ],
+      [
+        "W10 build: an unpinned container",
+        (w) => void (J(w, "build").container = { image: "attacker/img:latest" }),
+        KEYS("build"),
+      ],
+      [
+        "W11 build: runs-on self-hosted",
+        (w) => void (J(w, "build")["runs-on"] = "self-hosted"),
+        KEYS("build"),
+      ],
+      [
+        "W12 build: job env GIT_DIR",
+        (w) => void (J(w, "build").env = { GIT_DIR: "apps/cli/fake/.git" }),
+        KEYS("build"),
+      ],
+      [
+        "W12b build: another output",
+        (w) => void (J(w, "build").outputs.extra = "${{ steps.sums.outputs.digest }}"),
+        KEYS("build"),
+      ],
+      ["W12c build: needs dropped", (w) => void delete J(w, "build").needs, KEYS("build")],
+      [
+        "W13 release: job env GIT_DIR",
+        (w) => void (J(w, "release").env = { GIT_DIR: "apps/cli/fake/.git" }),
+        KEYS("release"),
+      ],
+      [
+        "W14 upload: another environment",
+        (w) => void (J(w, "upload").environment = "sdk-publish-npm"),
+        KEYS("upload"),
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it("records a key set for every FROZEN_JOBS job and env/defaults for each of their workflows", () => {
+    for (const key of FROZEN_JOBS) {
+      const [file] = key.split("#");
+      expect(Object.keys(FROZEN_WORKFLOW_KEYS)).toContain(file);
+    }
   });
 });

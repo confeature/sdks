@@ -327,19 +327,60 @@ const onMain = () =>
   );
 
 /**
- * The jobs whose EVERY step, run steps included, is frozen (round 10), not
- * only their actions: cli-release's build (its on-main guard and the
- * SHA256SUMS step decide what is released, yet it holds no token, so no
- * credential rule reads it), release and upload (each re-runs the guard
- * first), and release-gate's test (WRITE_TOKEN_EXEMPT: rules 3 and 15 skip
- * it, so a step added before its github-script could reach the token).
+ * The jobs frozen whole (rounds 10, 11): every step, run steps included, in
+ * ACTION_SURFACE, and every other key of the job here, exactly (runs-on,
+ * container, services, env, defaults, if, needs, strategy,
+ * continue-on-error, timeout-minutes, permissions, environment, outputs…).
+ * cli-release's build (its on-main guard and the SHA256SUMS step decide what
+ * is released, yet it holds no token, so no credential rule reads it),
+ * release and upload (each re-runs the guard first), and release-gate's test
+ * (WRITE_TOKEN_EXEMPT: rules 3 and 15 skip it). Round 11: freezing only the
+ * steps let a job-level `env: BASH_ENV`, `defaults.run.shell`, `container:`
+ * or `runs-on: self-hosted` run other code before every frozen step.
  */
-export const FROZEN_JOBS = new Set([
-  `${CLI_WORKFLOW}#build`,
-  `${CLI_WORKFLOW}#release`,
-  `${CLI_WORKFLOW}#upload`,
-  "release-gate.yml#test",
-]);
+export const FROZEN_JOB_KEYS = {
+  [`${CLI_WORKFLOW}#build`]: {
+    name: "build ${{ github.ref_name }}",
+    needs: "workflow-rules",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 20,
+    permissions: { contents: "read" },
+    outputs: { "sums-digest": "${{ steps.sums.outputs.digest }}" },
+  },
+  [`${CLI_WORKFLOW}#release`]: {
+    name: "release ${{ github.ref_name }}",
+    needs: "build",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 10,
+    permissions: { contents: "write" },
+  },
+  [`${CLI_WORKFLOW}#upload`]: {
+    name: "upload ${{ github.ref_name }} to R2",
+    needs: ["build", "release"],
+    "runs-on": "ubuntu-latest",
+    environment: "cli-release",
+    "timeout-minutes": 15,
+    permissions: { contents: "read" },
+  },
+  "release-gate.yml#test": {
+    name: "test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})",
+    needs: "setup",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 30,
+    permissions: { contents: "read", issues: "write" },
+    strategy: { "fail-fast": false, matrix: "${{ fromJSON(needs.setup.outputs.matrix) }}" },
+  },
+};
+export const FROZEN_JOBS = new Set(Object.keys(FROZEN_JOB_KEYS));
+/**
+ * The workflow-level keys every job of a FROZEN_JOBS workflow inherits
+ * (round 11): its env: (BASH_ENV, GIT_DIR, … would reach every frozen step)
+ * and its defaults: (a run shell or working-directory), exactly.
+ */
+export const FROZEN_WORKFLOW_KEYS = {
+  [CLI_WORKFLOW]: { env: { NODE_VERSION: "22.23.3" } },
+  "release-gate.yml": {},
+};
 
 export const ACTION_SURFACE = {
   [PUBLISH_WORKFLOW]: {
@@ -629,6 +670,31 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
           add(
             `action ${i + 1} is ${canonical(got[i] ?? null)}, ACTION_SURFACE records ${canonical(want[i] ?? null)}`,
           );
+    }
+    for (const jobId of Object.keys(jobs)) {
+      const key = `${file}#${jobId}`;
+      if (!Object.hasOwn(FROZEN_JOB_KEYS, key)) continue;
+      const keys = Object.fromEntries(
+        Object.entries(jobs[jobId] ?? {}).filter(([k]) => k !== "steps"),
+      );
+      if (canonical(keys) !== canonical(FROZEN_JOB_KEYS[key]))
+        out.push({
+          file,
+          job: jobId,
+          why: `the job's keys are ${canonical(keys)}, FROZEN_JOB_KEYS records ${canonical(FROZEN_JOB_KEYS[key])}`,
+        });
+    }
+    if (Object.hasOwn(FROZEN_WORKFLOW_KEYS, file)) {
+      const doc = workflows[file] ?? {};
+      const got = Object.fromEntries(
+        ["env", "defaults"].filter((k) => doc[k] !== undefined).map((k) => [k, doc[k]]),
+      );
+      if (canonical(got) !== canonical(FROZEN_WORKFLOW_KEYS[file]))
+        out.push({
+          file,
+          job: "-",
+          why: `the workflow's env/defaults are ${canonical(got)}, FROZEN_WORKFLOW_KEYS records ${canonical(FROZEN_WORKFLOW_KEYS[file])}`,
+        });
     }
     for (const jobId of Object.keys(recorded))
       if (jobs[jobId] === undefined)

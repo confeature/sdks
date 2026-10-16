@@ -102,7 +102,8 @@
   ],
   "T2 cli upload: a job-level TAG": [
     "cli-release.yml: upload: a credentialed job's env: TAG is cli-v0.0.1, not its pinned expression",
-    "cli-release.yml: upload: a credentialed job's step Upload v<ver>/ to R2 redefines the job's TAG"
+    "cli-release.yml: upload: a credentialed job's step Upload v<ver>/ to R2 redefines the job's TAG",
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"TAG\":\"cli-v0.0.1\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "N10 a TAG from the event's commit message": [
     "cli-release.yml: upload: a credentialed job's env: TAG is ${{ github.event.head_commit.message }}, not its pinned expression",
@@ -601,11 +602,13 @@
     "cli-release.yml: upload: a credentialed job's environment: is a literal name (its url: would carry an expression out)",
     "cli-release.yml: upload: action 5 is {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}, ACTION_SURFACE records {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}",
     "cli-release.yml: upload: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
-    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it"
+    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it",
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":{\"name\":\"cli-release\",\"url\":\"https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}\"},\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "A11/E1 a credential moved to the job env": [
     "cli-release.yml: upload: action 5 is {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}, ACTION_SURFACE records {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}",
-    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it"
+    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it",
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "a credential set on a step whose run: does not read it": [
     "sdk-publish.yml: publish-go: step Upload sets the credential DEPLOY_KEY but its run: does not read it"
@@ -1099,13 +1102,16 @@
     "cli-release.yml: upload: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":0,\"persist-credentials\":false}}"
   ],
   "B5 build: job-level continue-on-error": [
-    "cli-release.yml: build: sets continue-on-error: (its failure would be reported green)"
+    "cli-release.yml: build: sets continue-on-error: (its failure would be reported green)",
+    "cli-release.yml: build: the job's keys are {\"continue-on-error\":true,\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
   ],
   "B5b release: job-level continue-on-error": [
-    "cli-release.yml: release: sets continue-on-error: (its failure would be reported green)"
+    "cli-release.yml: release: sets continue-on-error: (its failure would be reported green)",
+    "cli-release.yml: release: the job's keys are {\"continue-on-error\":true,\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
   ],
   "B5c release-gate test: job-level continue-on-error": [
-    "release-gate.yml: test: sets continue-on-error: (its failure would be reported green)"
+    "release-gate.yml: test: sets continue-on-error: (its failure would be reported green)",
+    "release-gate.yml: test: the job's keys are {\"continue-on-error\":true,\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
   ],
   "B7 build: the SHA256SUMS step rewritten": [
     "cli-release.yml: build: action 6 is {\"id\":\"sums\",\"name\":\"Generate SHA256SUMS\",\"run\":{\"sha256\":\"622fea4784496a7fad8803084b270b48077248c05d533d96d106ff5f2d68c5f6\"},\"working-directory\":\"apps/cli/dist\"}, ACTION_SURFACE records {\"id\":\"sums\",\"name\":\"Generate SHA256SUMS\",\"run\":{\"sha256\":\"be84fd5aaae520e9a8f11f8de7433117cf764a0ce59bd6caec5df39ee4ee6c6a\"},\"working-directory\":\"apps/cli/dist\"}"
@@ -1152,14 +1158,17 @@
     "release-gate.yml: test: runs 6 actions, ACTION_SURFACE records 5"
   ],
   "E8 test: a job env from github.token": [
-    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)"
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"GH\":\"${{ github.token }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
   ],
   "E8b test: a job env from a secret": [
     "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
-    "release-gate.yml: test: reads the secrets context outside an environment"
+    "release-gate.yml: test: reads the secrets context outside an environment",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"GH\":\"${{ secrets.FOO }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
   ],
   "E9 release-gate: a workflow env from github.token": [
-    "release-gate.yml: -: names github.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow (its token reaches its frozen github-script step only)"
+    "release-gate.yml: -: names github.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow (its token reaches its frozen github-script step only)",
+    "release-gate.yml: -: the workflow's env/defaults are {\"env\":{\"GH\":\"${{ github.token }}\"}}, FROZEN_WORKFLOW_KEYS records {}"
   ],
   "R1 verify.yml: every permissions: removed": [
     "verify.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
@@ -1175,5 +1184,109 @@
   ],
   "R8b a new workflow with no permissions:": [
     "new.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
+  ],
+  "X7 test: job env BASH_ENV": [
+    "release-gate.yml: test: the job's keys are {\"env\":{\"BASH_ENV\":\"x.sh\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X8 test: job defaults.run.working-directory": [
+    "release-gate.yml: test: the job's keys are {\"defaults\":{\"run\":{\"working-directory\":\"fake\"}},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X10 test: job defaults.run.shell": [
+    "release-gate.yml: test: the job's keys are {\"defaults\":{\"run\":{\"shell\":\"bash -c 'source ./evil.sh; bash -e {0}'\"}},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X11 test: a container": [
+    "release-gate.yml: test: the job's keys are {\"container\":{\"image\":\"attacker/img:latest\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X12 test: runs-on self-hosted": [
+    "release-gate.yml: test: the job's keys are {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"self-hosted\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X12b test: services": [
+    "release-gate.yml: test: the job's keys are {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"services\":{\"db\":{\"image\":\"postgres\"}},\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X12c test: an if:": [
+    "release-gate.yml: test: the job's keys are {\"if\":\"always()\",\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X12d test: a wider matrix": [
+    "release-gate.yml: test: the job's keys are {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"{\\\"sdk\\\":[{\\\"name\\\":\\\"x\\\",\\\"daggerFn\\\":\\\"y\\\"}]}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X13 release-gate: workflow defaults.run.shell": [
+    "release-gate.yml: -: the workflow's env/defaults are {\"defaults\":{\"run\":{\"shell\":\"bash -c 'source ./evil.sh; bash -e {0}'\"}}}, FROZEN_WORKFLOW_KEYS records {}"
+  ],
+  "X14 release-gate: workflow env BASH_ENV": [
+    "release-gate.yml: -: the workflow's env/defaults are {\"env\":{\"BASH_ENV\":\"./evil.sh\"}}, FROZEN_WORKFLOW_KEYS records {}"
+  ],
+  "W1 cli-release: workflow env BASH_ENV": [
+    "cli-release.yml: -: the workflow's env/defaults are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\",\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: promote: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: release: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: upload: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow"
+  ],
+  "W2 release: job env BASH_ENV": [
+    "cli-release.yml: release: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: release: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "W3 upload: job env BASH_ENV": [
+    "cli-release.yml: upload: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+  ],
+  "W4 build: job env BASH_ENV": [
+    "cli-release.yml: build: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W5 build: job defaults.run.working-directory": [
+    "cli-release.yml: build: the job's keys are {\"defaults\":{\"run\":{\"working-directory\":\"apps/cli/fake\"}},\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W6 release: job defaults.run.working-directory": [
+    "cli-release.yml: release: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "cli-release.yml: release: the job's keys are {\"defaults\":{\"run\":{\"working-directory\":\"apps/cli/fake\"}},\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "W7 release: job defaults.run.shell": [
+    "cli-release.yml: release: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
+    "cli-release.yml: release: the job's keys are {\"defaults\":{\"run\":{\"shell\":\"bash -c 'source ./evil.sh; bash -e {0}'\"}},\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "W8 cli-release: workflow defaults.run.shell": [
+    "cli-release.yml: -: the workflow's env/defaults are {\"defaults\":{\"run\":{\"shell\":\"bash -c 'source ./evil.sh; bash -e {0}'\"}},\"env\":{\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: promote: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
+    "cli-release.yml: release: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
+    "cli-release.yml: upload: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')"
+  ],
+  "W9 cli-release: workflow defaults.run.working-directory": [
+    "cli-release.yml: -: the workflow's env/defaults are {\"defaults\":{\"run\":{\"working-directory\":\"apps/cli/fake\"}},\"env\":{\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: promote: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "cli-release.yml: release: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "cli-release.yml: upload: a credentialed job sets working-directory: (an exception would resolve another script)"
+  ],
+  "W10 build: an unpinned container": [
+    "cli-release.yml: build: the job's keys are {\"container\":{\"image\":\"attacker/img:latest\"},\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W11 build: runs-on self-hosted": [
+    "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"self-hosted\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W12 build: job env GIT_DIR": [
+    "cli-release.yml: build: the job's keys are {\"env\":{\"GIT_DIR\":\"apps/cli/fake/.git\"},\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W12b build: another output": [
+    "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"extra\":\"${{ steps.sums.outputs.digest }}\",\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "W12c build: needs dropped": [
+    "cli-release.yml: build: does not wait on workflow-rules",
+    "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}",
+    "cli-release.yml: promote: does not wait on workflow-rules",
+    "cli-release.yml: release: does not wait on workflow-rules",
+    "cli-release.yml: upload: does not wait on workflow-rules",
+    "cli-release.yml: verify-latest: does not wait on workflow-rules",
+    "cli-release.yml: verify-pinned: does not wait on workflow-rules"
+  ],
+  "W13 release: job env GIT_DIR": [
+    "cli-release.yml: release: a credentialed job's env: it sets GIT_DIR, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: release: the job's keys are {\"env\":{\"GIT_DIR\":\"apps/cli/fake/.git\"},\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "W14 upload: another environment": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.CLOUDFLARE_ACCOUNT_ID: environment sdk-publish-npm declares no secret CLOUDFLARE_ACCOUNT_ID",
+    "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_ACCESS_KEY_ID: environment sdk-publish-npm declares no secret R2_ACCESS_KEY_ID",
+    "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_SECRET_ACCESS_KEY: environment sdk-publish-npm declares no secret R2_SECRET_ACCESS_KEY",
+    "cli-release.yml: upload: reads secret CLOUDFLARE_ACCOUNT_ID, which environment sdk-publish-npm does not declare",
+    "cli-release.yml: upload: reads secret R2_ACCESS_KEY_ID, which environment sdk-publish-npm does not declare",
+    "cli-release.yml: upload: reads secret R2_SECRET_ACCESS_KEY, which environment sdk-publish-npm does not declare",
+    "cli-release.yml: upload: the job's keys are {\"environment\":\"sdk-publish-npm\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ]
 }
