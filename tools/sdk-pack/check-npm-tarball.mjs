@@ -27,6 +27,7 @@
 
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 const DEP_FIELDS = ["dependencies", "peerDependencies", "optionalDependencies"];
 const PATH_FIELDS = ["main", "module", "types", "typings", "browser", "unpkg", "jsdelivr", "bin"];
@@ -108,4 +109,5 @@ export function main(argv) {
   return problems.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) process.exit(main(process.argv.slice(2)));
+if (isEntry(process.argv[1], fileURLToPath(import.meta.url)))
+  process.exit(main(process.argv.slice(2)));

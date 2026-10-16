@@ -21,7 +21,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   EXCLUDED_TREES,
   invokesGate,
-  isEntry,
   parseSteps,
   stripShellComments,
   verifyGateDeclarations,
@@ -864,22 +863,6 @@ jobs:
     ).toMatch(/runs even when its gate fails/);
   });
 
-  it("is the entry point under --preserve-symlinks, where only ONE side would be realpathed", () => {
-    // Under --preserve-symlinks Node does not resolve the main entry, so argv[1]
-    // and this module's own URL can BOTH be symlinked paths. Only realpathing
-    // both sides makes them compare equal. A subprocess cannot test this here:
-    // a link outside the package cannot resolve the guard's own imports, so
-    // it crashes, and a crash prints something too. The comparison is tested
-    // directly, with the filesystem injected.
-    // MUTATION: compare real(argv1) against a bare `here` and this is false.
-    const real = (p) =>
-      p === "/links/guard.mjs" || p === "/sym/repo/guard.mjs" ? "/real/guard.mjs" : p;
-    expect(isEntry("/links/guard.mjs", "/sym/repo/guard.mjs", { real, warn: () => {} })).toBe(true);
-    expect(isEntry("/links/other.mjs", "/sym/repo/guard.mjs", { real, warn: () => {} })).toBe(
-      false,
-    );
-  });
-
   it("accepts a shell that is STRICTER than the default", () => {
     // The allowlist required whitespace after the `e`, so `bash -euo pipefail`
     // — strictly safer than the default — was reported as unable to fail.
@@ -1407,35 +1390,6 @@ jobs:
 `,
     });
     expect(about().join()).toMatch(/cannot fail the job \(if:\)/);
-  });
-});
-
-const HERE_FOR_ENTRY = fileURLToPath(new URL("verify-declarations.mjs", import.meta.url));
-
-describe("the entry-point check never decides in silence", () => {
-  // If realpath throws, the old check returned false and the guard exited 0
-  // having checked nothing. It now falls back to the unresolved paths, and
-  // says so on stderr.
-  const throwing = () => {
-    throw new Error("EACCES");
-  };
-
-  it("a realpath failure falls back to comparing resolved paths", () => {
-    const warned = [];
-    expect(
-      isEntry(HERE_FOR_ENTRY, HERE_FOR_ENTRY, { real: throwing, warn: (m) => warned.push(m) }),
-    ).toBe(true);
-    expect(warned).toHaveLength(1);
-  });
-
-  it("the fallback still tells another script apart", () => {
-    expect(isEntry("/elsewhere.mjs", HERE_FOR_ENTRY, { real: throwing, warn: () => {} })).toBe(
-      false,
-    );
-  });
-
-  it("no argv[1] (an importer) is not the entry point", () => {
-    expect(isEntry(undefined, HERE_FOR_ENTRY, { real: throwing })).toBe(false);
   });
 });
 

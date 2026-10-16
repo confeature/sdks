@@ -74,6 +74,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { isEntry } from "../lib/is-entry.mjs";
 
 export const SETTINGS = "tools/repo-gates/release-settings.json";
 export const MANIFEST = "dagger/sdk-manifest.json";
@@ -406,5 +407,4 @@ function main() {
   return out.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  process.exitCode = main();
+if (isEntry(process.argv[1], fileURLToPath(import.meta.url))) process.exitCode = main();

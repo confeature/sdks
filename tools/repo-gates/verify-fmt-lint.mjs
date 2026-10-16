@@ -44,9 +44,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { realpathSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 const HERE = fileURLToPath(import.meta.url);
 const ROOT = resolve(dirname(HERE), "..", "..");
@@ -130,15 +131,4 @@ export function run(overrides = {}) {
   return 0;
 }
 
-/** Whether this file is the process entry point, symlinks resolved on both sides. */
-function isEntry(argv1) {
-  if (argv1 === undefined) return false;
-  try {
-    return realpathSync(argv1) === realpathSync(HERE);
-  } catch {
-    console.error("verify:fmt-lint: realpath failed; comparing the paths unresolved");
-    return resolve(argv1) === resolve(HERE);
-  }
-}
-
-if (isEntry(process.argv[1])) process.exit(run());
+if (isEntry(process.argv[1], HERE)) process.exit(run());

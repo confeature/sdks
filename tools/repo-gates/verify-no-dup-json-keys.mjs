@@ -13,9 +13,9 @@
 // Usage: node tools/repo-gates/verify-no-dup-json-keys.mjs <file> [<file> ...]
 // Exit codes: 0 = clean, 1 = duplicate(s) found, 2 = malformed JSON / I/O.
 
-import { readFileSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 /**
  * @param {string} json
@@ -157,15 +157,4 @@ export function main(files) {
 
 const HERE = fileURLToPath(import.meta.url);
 
-/** Whether this file is the process entry point, symlinks resolved on both sides. */
-function isEntry(argv1) {
-  if (argv1 === undefined) return false;
-  try {
-    return realpathSync(argv1) === realpathSync(HERE);
-  } catch {
-    console.error("verify-no-dup-json-keys: realpath failed; comparing the paths unresolved");
-    return resolve(argv1) === resolve(HERE);
-  }
-}
-
-if (isEntry(process.argv[1])) process.exit(main(process.argv.slice(2)));
+if (isEntry(process.argv[1], HERE)) process.exit(main(process.argv.slice(2)));

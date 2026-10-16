@@ -41,6 +41,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 export const MANIFEST = "dagger/sdk-manifest.json";
 
@@ -312,5 +313,4 @@ async function main() {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  process.exitCode = await main();
+if (isEntry(process.argv[1], fileURLToPath(import.meta.url))) process.exitCode = await main();

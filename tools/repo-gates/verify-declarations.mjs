@@ -43,11 +43,12 @@
  *   1 — at least one violation, each printed with the edit that fixes it.
  */
 
-import { readFileSync, readdirSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 const HERE = fileURLToPath(import.meta.url);
 const ROOT = resolve(dirname(HERE), "..", "..");
@@ -1300,36 +1301,9 @@ function main() {
   return 1;
 }
 
-// realpathSync on BOTH sides. Node realpaths the ESM main entry, but
-// resolve() does not follow symlinks — so any symlinked component in the
-// invocation path made these differ, main() was never called, and this
-// guard exited 0 having checked nothing. A symlinked ~/Sites is enough.
-// That is the "green while enforcing nothing" failure, inside the file
-// written to prevent it.
-// An earlier comment claimed both sides were realpathed while only one was —
-// `HERE` was resolved merely because Node does it by default, so
-// `--preserve-symlinks` made the two disagree and the guard exited 0 in
-// silence. Both are realpathed now. When realpath THROWS (argv[1] pointing at
-// something unstattable) the check neither crashes nor quietly answers "not
-// me": it compares the resolved paths and warns.
-/**
- * Whether `argv1` is this module. If realpath THROWS, returning false would
- * make the guard exit 0 having checked nothing; it falls back to comparing
- * resolved paths instead, and says so.
- */
-export function isEntry(
-  argv1,
-  here,
-  { real = realpathSync, warn = (m) => process.stderr.write(m) } = {},
-) {
-  if (argv1 === undefined) return false;
-  try {
-    return real(argv1) === real(here);
-  } catch {
-    warn("entry check: realpath failed; comparing the paths unresolved\n");
-    return resolve(argv1) === resolve(here);
-  }
-}
+// The entry check lives in tools/lib/is-entry.mjs, shared by every gate: this
+// file's copy was the only correct one, and three gates beside it exited 0
+// through a symlinked path having checked nothing (#794 review).
 if (isEntry(process.argv[1], HERE)) {
   process.exit(main());
 }

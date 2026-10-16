@@ -40,6 +40,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 const SUMS = ["md5", "sha1", "sha256", "sha512"];
 /** Clients fetch these two; the others Gradle writes are checked when present. */
@@ -238,5 +239,5 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1])
+if (isEntry(process.argv[1], fileURLToPath(import.meta.url)))
   process.exitCode = main(process.argv.slice(2));

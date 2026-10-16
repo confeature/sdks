@@ -20,9 +20,10 @@
  * `path:line:rule`, never with the owner that matched.
  */
 
-import { readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../lib/is-entry.mjs";
 
 /** The one organisation whose teams may own code here. */
 export const ORG = "confeature";
@@ -114,15 +115,4 @@ export function main(root = process.cwd()) {
   return 1;
 }
 
-/** Whether this file is the process entry point, symlinks resolved on both sides. */
-function isEntry(argv1) {
-  if (argv1 === undefined) return false;
-  try {
-    return realpathSync(argv1) === realpathSync(HERE);
-  } catch {
-    process.stderr.write("verify-codeowners: realpath failed; comparing the paths unresolved\n");
-    return resolve(argv1) === resolve(HERE);
-  }
-}
-
-if (isEntry(process.argv[1])) process.exit(main());
+if (isEntry(process.argv[1], HERE)) process.exit(main());

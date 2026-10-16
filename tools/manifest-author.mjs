@@ -35,9 +35,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "./lib/is-entry.mjs";
 
 /** The only value an identity field may hold. */
 export const AUTHOR = "MakerLabs";
@@ -530,15 +531,4 @@ export function main(
   return 1;
 }
 
-/** Whether this file is the process entry point, symlinks resolved on both sides. */
-function isEntry(argv1) {
-  if (argv1 === undefined) return false;
-  try {
-    return realpathSync(argv1) === realpathSync(HERE);
-  } catch {
-    process.stderr.write("manifest-author: realpath failed; comparing the paths unresolved\n");
-    return resolve(argv1) === resolve(HERE);
-  }
-}
-
-if (isEntry(process.argv[1])) process.exit(main(process.argv.slice(2)));
+if (isEntry(process.argv[1], HERE)) process.exit(main(process.argv.slice(2)));
