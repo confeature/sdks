@@ -186,7 +186,11 @@ function toolPath(tools, stubs = {}) {
  */
 function runBlock({ run, doc, jobId }, cwd, env, { test = {}, stubs = {}, tools = [] } = {}) {
   const job = doc.jobs[jobId];
-  const environment = typeof job.environment === "string" ? job.environment : job.environment?.name;
+  // A job credentialed by its token alone has its own table (`<file>#<job>`).
+  const flowFile = doc === CLI ? "cli-release.yml" : "sdk-publish.yml";
+  const environment =
+    (typeof job.environment === "string" ? job.environment : job.environment?.name) ??
+    `${flowFile}#${jobId}`;
   const PATH = toolPath([...(ENVIRONMENT_COMMANDS[environment] ?? []), ...tools], stubs);
   const file = join(scratch(), "step.sh");
   writeFileSync(file, run);
@@ -595,7 +599,7 @@ if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(d
         "secrets.R2_SECRET_ACCESS_KEY": "secret",
         "secrets.CLOUDFLARE_ACCOUNT_ID": "acct",
         "github.ref_name": "cli-v1.2.3",
-        ...(jobId === "upload" ? { "needs.release.outputs.sums-digest": "d" } : {}),
+        ...(jobId === "upload" ? { "needs.build.outputs.sums-digest": "d" } : {}),
       },
       // The inner `bash`, never the runner's (/bin/bash, by absolute path).
       stubs: {
@@ -608,53 +612,74 @@ if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(d
     expect(argv).toEqual([want]);
   });
 
-  describe("cli-release's GitHub mirror (the release job, GH_TOKEN)", () => {
+  describe("cli-release's GitHub mirror (the release job: contents: write, GH_TOKEN)", () => {
     // gh release view <tag> exits 1 until $GH_EXISTS is set; --json … prints $GH_ASSETS.
     const GH = `${RECORD("gh")}
 [ -n "$GH_TOKEN" ] || { echo "no GH_TOKEN" >&2; exit 4; }
+if [ "$1 $2" = "release create" ]; then : > "$GH_STATE"; fi
 if [ "$1 $2" = "release view" ]; then
-  [ -n "$GH_EXISTS" ] || exit 1
+  [ -n "$GH_EXISTS" ] || [ -f "$GH_STATE" ] || exit 1
   [ "$4" = "--json" ] && echo "\${GH_ASSETS:-0}"
 fi
 exit 0`;
-    const TABLE = { "github.token": "t", "github.ref_name": "cli-v1.2.3" };
+    const TABLE = {
+      "github.token": "t",
+      "github.ref_name": "cli-v1.2.3",
+      "needs.build.outputs.sums-digest": "d",
+    };
+    // release-github.sh runs these (its exception), besides gh.
+    const TOOLS = ["bash"];
     const ws = () =>
-      workspace({ "apps/cli/dist/confeature-x86_64": "b", "apps/cli/dist/SHA256SUMS": "s" });
-    const gh = (name, test, dir = ws()) =>
-      upload({ doc: CLI, jobId: "release", name, ws: dir, table: TABLE, stubs: { gh: GH }, test });
+      workspace({ "dist/confeature-x86_64": "b", "dist/SHA256SUMS": "s" }, [
+        "apps/cli/scripts/release-github.sh",
+      ]);
+    const gh = (test) =>
+      upload({
+        doc: CLI,
+        jobId: "release",
+        name: "Create the GitHub release and upload its assets (mirror)",
+        ws: ws(),
+        table: TABLE,
+        stubs: { gh: GH },
+        tools: TOOLS,
+        test: { GH_STATE: join(scratch(), "created"), ...test },
+      });
 
-    it("creates the release from the tag when it does not exist", () => {
-      const { r, argv } = gh("Create the GitHub release if it does not exist", {});
+    it("creates the release from the tag, then uploads the binaries and SHA256SUMS", () => {
+      const { r, argv } = gh({});
       expect(r.status, r.stderr).toBe(0);
       expect(argv).toEqual([
         "gh release view cli-v1.2.3",
         "gh release create cli-v1.2.3 --title Confeature CLI 1.2.3 --generate-notes --verify-tag",
+        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
+        "gh release upload cli-v1.2.3 dist/confeature-x86_64 dist/SHA256SUMS",
       ]);
     });
-    it("creates nothing when it exists", () => {
-      const { r, argv } = gh("Create the GitHub release if it does not exist", { GH_EXISTS: "1" });
-      expect(r.status, r.stderr).toBe(0);
-      expect(argv).toEqual(["gh release view cli-v1.2.3"]);
-    });
-    it("uploads the binaries and SHA256SUMS to a release with no assets", () => {
-      const { r, argv } = gh("Upload assets to the GitHub release (mirror)", {
-        GH_EXISTS: "1",
-        GH_ASSETS: "0",
-      });
+    it("on an existing release with no assets, uploads without creating", () => {
+      const { r, argv } = gh({ GH_EXISTS: "1", GH_ASSETS: "0" });
       expect(r.status, r.stderr).toBe(0);
       expect(argv).toEqual([
+        "gh release view cli-v1.2.3",
         "gh release view cli-v1.2.3 --json assets --jq .assets | length",
-        "gh release upload cli-v1.2.3 apps/cli/dist/confeature-x86_64 apps/cli/dist/SHA256SUMS",
+        "gh release upload cli-v1.2.3 dist/confeature-x86_64 dist/SHA256SUMS",
       ]);
     });
     it("replaces nothing on a release that already has assets", () => {
-      const { r, argv } = gh("Upload assets to the GitHub release (mirror)", {
-        GH_EXISTS: "1",
-        GH_ASSETS: "3",
-      });
+      const { r, argv } = gh({ GH_EXISTS: "1", GH_ASSETS: "3" });
       expect(r.status, r.stderr).toBe(0);
-      expect(argv).toEqual(["gh release view cli-v1.2.3 --json assets --jq .assets | length"]);
+      expect(argv).toEqual([
+        "gh release view cli-v1.2.3",
+        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
+      ]);
       expect(r.stdout).toContain("already carries 3 assets");
+    });
+    it("checks the build against the build job's digest first", () => {
+      const s = step(CLI, "release", "Check the build against the build job's digest");
+      const dir = ws();
+      const env = (digest) =>
+        resolveEnv(s, { ...TABLE, "needs.build.outputs.sums-digest": digest });
+      expect(runBlock(s, dir, env(sha256(join(dir, "dist/SHA256SUMS")))).status).toBe(0);
+      expect(runBlock(s, dir, env("0".repeat(64))).status).not.toBe(0);
     });
   });
 });
@@ -771,14 +796,14 @@ describe("the digest checks accept the pack job's artifact and refuse any other"
     expect(runBlock(s, bad.ws, env(bad.sums)).status).not.toBe(0);
   });
 
-  it("cli-release upload: SHA256SUMS against the release job's digest", () => {
-    const s = step(CLI, "upload", "Check the build against the release job's digest");
+  it("cli-release upload: SHA256SUMS against the build job's digest", () => {
+    const s = step(CLI, "upload", "Check the build against the build job's digest");
     const ws = scratch();
     mkdirSync(join(ws, "dist"));
     writeFileSync(join(ws, "dist/SHA256SUMS"), "abc  confeature-x\n");
     const env = (digest) =>
       resolveEnv(s, {
-        "needs.release.outputs.sums-digest": digest,
+        "needs.build.outputs.sums-digest": digest,
         "github.ref_name": "cli-v1.0.0",
       });
     expect(runBlock(s, ws, env(sha256(join(ws, "dist/SHA256SUMS")))).status).toBe(0);

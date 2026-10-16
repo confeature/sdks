@@ -68,7 +68,8 @@
   ],
   "an env name nothing defines": [
     "sdk-publish.yml: pack-npm step Setup Node.js: env.NODE_VER: no env: in scope defines NODE_VER",
-    "sdk-publish.yml: pack-npm step Setup Node.js: setup-node's node-version is ${{ env.NODE_VER }}, not the workflow's exact NODE_VERSION"
+    "sdk-publish.yml: pack-npm step Setup Node.js: setup-node's node-version is ${{ env.NODE_VER }}, not the workflow's exact NODE_VERSION",
+    "sdk-publish.yml: pack-npm: action 3 is {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VER }}\"}}, ACTION_SURFACE records {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\"}}"
   ],
   "an input the workflow does not declare": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): inputs.unitName: the workflow declares no input unitName"
@@ -78,8 +79,8 @@
     "sdk-publish.yml: publish-npm: needs.pack-pypi.result: publish-npm does not need pack-pypi"
   ],
   "cli-release: an output the release job does not declare": [
-    "cli-release.yml: upload step Check the build against the release job's digest: needs.release.outputs.digest: job release has no output digest",
-    "cli-release.yml: upload: a credentialed job's env: EXPECTED is ${{ needs.release.outputs.digest }}, not its pinned expression"
+    "cli-release.yml: upload step Check the build against the build job's digest: needs.build.outputs.digest: job build has no output digest",
+    "cli-release.yml: upload: a credentialed job's env: EXPECTED is ${{ needs.build.outputs.digest }}, not its pinned expression"
   ],
   "N2 a step-level UNIT_PATH on the cargo step": [
     "sdk-publish.yml: publish-crates: a credentialed job's env: UNIT_PATH is publish-tmp/evil, not its pinned expression",
@@ -415,8 +416,21 @@
     "sdk-publish.yml: publish-go: reads secret MIRROR_DEPLOY_KEY, which environment sdk-publish-go does not declare"
   ],
   "a secret in a job outside an environment": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: it reads the credential UNIT outside its recorded position",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: it reads the credential UNIT outside its recorded position",
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): secrets.GO_TAG_DEPLOY_KEY: a job outside an environment declares no secret GO_TAG_DEPLOY_KEY",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "a variable nobody recorded": [
     "sdk-publish.yml: publish-nuget step Exchange the OIDC token: vars.OTHER: RELEASE_VARS records no variable OTHER",
@@ -441,29 +455,108 @@
   ],
   "TOJSON(SECRETS) in upper case": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): TOJSON(SECRETS): toJSON, fromJSON, format and join are refused",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "SECRETS.X in upper case, outside an environment": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): SECRETS.GO_TAG_DEPLOY_KEY: write the context in lower case (GitHub folds case, this check reads it exactly)",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "GITHUB.TOKEN in upper case": [
-    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): GITHUB.TOKEN: write the context in lower case (GitHub folds case, this check reads it exactly)"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): GITHUB.TOKEN: write the context in lower case (GitHub folds case, this check reads it exactly)",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "a `}}` inside a string hiding toJSON(secrets)": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ('}}' && '') || toJSON(secrets): toJSON, fromJSON, format and join are refused",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "a '' escape inside the string": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ('it''s }}' && '') || toJSON(secrets): toJSON, fromJSON, format and join are refused",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
   ],
   "a non-ASCII letter (Cyrillic s) in a context name": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ѕecrets.X: a non-ASCII character in an expression"
   ],
   "an if: reading SECRETS outside an environment": [
     "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): SECRETS.X: write the context in lower case (GitHub folds case, this check reads it exactly)",
-    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs)'s if: contains(SECRETS.X, 'a') is not a recorded condition (skipped-vs-ran is public)"
   ],
   "a step if: leaking a bit of R2_SECRET_ACCESS_KEY": [
     "cli-release.yml: upload step Upload v<ver>/ to R2: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
@@ -475,7 +568,8 @@
   ],
   "continue-on-error from a secret": [
     "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_SECRET_ACCESS_KEY: a secret is read only in an env: value (an if:, a name or a with: would carry it out)",
-    "cli-release.yml: upload: step Upload v<ver>/ to R2's continue-on-error: holds an expression"
+    "cli-release.yml: upload: step Upload v<ver>/ to R2 sets continue-on-error: (a failed check would not stop the job)",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2 sets continue-on-error: in a release workflow"
   ],
   "timeout-minutes from a secret": [
     "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_SECRET_ACCESS_KEY: a secret is read only in an env: value (an if:, a name or a with: would carry it out)",
@@ -607,5 +701,300 @@
   ],
   "D2 a credential on a step that reads it only in a comment": [
     "sdk-publish.yml: publish-go: step Ask the Go proxy for the release sets the credential DEPLOY_KEY but its run: does not read it"
+  ],
+  "X1 release: a checkout of another repository": [
+    "cli-release.yml: release: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "X1b build: a checkout of another repository": [
+    "cli-release.yml: build: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":0,\"persist-credentials\":false,\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":0,\"persist-credentials\":false}}"
+  ],
+  "X2 release: a checkout of a pull request": [
+    "cli-release.yml: release: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"refs/pull/1/head\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "X3 release: github-script with the contents: write token": [
+    "cli-release.yml: release: action 3 is {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"056233b551e0313a12a2bb87b77b6a604ebde80e279a3b4a070243296eb2e5be\"}}}, ACTION_SURFACE records null",
+    "cli-release.yml: release: runs 3 actions, ACTION_SURFACE records 2"
+  ],
+  "X3b release: a checkout keeping the token": [
+    "cli-release.yml: release step Checkout (release-github.sh): a credentialed job's checkout keeps its credential (persist-credentials: false)",
+    "cli-release.yml: release step Checkout (release-github.sh): github.token: a credential is read only in an env: value",
+    "cli-release.yml: release: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":true,\"token\":\"${{ github.token }}\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "X4 build: setup-deno's version from the event": [
+    "cli-release.yml: build: action 2 is {\"uses\":\"denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282\",\"with\":{\"deno-version\":\"${{ github.event.head_commit.message }}\"}}, ACTION_SURFACE records {\"uses\":\"denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282\",\"with\":{\"deno-version\":\"2.8.2\"}}"
+  ],
+  "X5 release: a local action": [
+    "cli-release.yml: release step x: uses ./.github/actions/x: a pack or credentialed job runs no local or container action",
+    "cli-release.yml: release: action 3 is {\"uses\":\"./.github/actions/x\"}, ACTION_SURFACE records null",
+    "cli-release.yml: release: runs 3 actions, ACTION_SURFACE records 2"
+  ],
+  "X5b release: a container action": [
+    "cli-release.yml: release step x: uses docker://alpine:3: a pack or credentialed job runs no local or container action",
+    "cli-release.yml: release: action 3 is {\"uses\":\"docker://alpine:3\"}, ACTION_SURFACE records null",
+    "cli-release.yml: release: runs 3 actions, ACTION_SURFACE records 2"
+  ],
+  "X5c build: the artifact path widened": [
+    "cli-release.yml: build: action 3 is {\"uses\":\"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\",\"with\":{\"if-no-files-found\":\"error\",\"name\":\"cli-dist\",\"path\":\"apps/cli/dist/\\n/home/runner/work/\\n\",\"retention-days\":7}}, ACTION_SURFACE records {\"uses\":\"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\",\"with\":{\"if-no-files-found\":\"error\",\"name\":\"cli-dist\",\"path\":\"apps/cli/dist/confeature-*\\napps/cli/dist/SHA256SUMS\\n\",\"retention-days\":7}}"
+  ],
+  "X7 pack-npm: a checkout of another repository": [
+    "sdk-publish.yml: pack-npm: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "X8 pack-npm: a checkout of a pull request": [
+    "sdk-publish.yml: pack-npm: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"refs/pull/1/head\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "X8b pack-npm: setup-node's version from the event": [
+    "sdk-publish.yml: pack-npm step Setup Node.js: setup-node's node-version is ${{ github.event.head_commit.message }}, not the workflow's exact NODE_VERSION",
+    "sdk-publish.yml: pack-npm: action 3 is {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ github.event.head_commit.message }}\"}}, ACTION_SURFACE records {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\"}}"
+  ],
+  "setup: a checkout of a pull request": [
+    "sdk-publish.yml: setup: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":0,\"persist-credentials\":false,\"ref\":\"refs/pull/1/head\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":0,\"persist-credentials\":false}}"
+  ],
+  "X26 release: curl of GH_TOKEN in the gh step": [
+    "cli-release.yml: release step Create the GitHub release and upload its assets (mirror): a credentialed job runs `curl -d \"$GH_TOKEN\" https://a.example`: it reads the credential GH_TOKEN outside its recorded position"
+  ],
+  "X26b release: GH_TOKEN written to a file": [
+    "cli-release.yml: release step Create the GitHub release and upload its assets (mirror): a credentialed job runs `printf \"%s\" \"$GH_TOKEN\"`: it reads the credential GH_TOKEN outside its recorded position"
+  ],
+  "X27 release: GH_TOKEN on the digest step": [
+    "cli-release.yml: release: step Check the build against the build job's digest sets the credential GH_TOKEN but its run: does not read it"
+  ],
+  "X27b build: GH_TOKEN on the compile step makes it credentialed": [
+    "cli-release.yml: build step Compile all targets: a credentialed job runs `deno task compile`: deno is not a command a credentialed job runs",
+    "cli-release.yml: build step Generate SHA256SUMS: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-release.yml: build step Generate SHA256SUMS: a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+    "cli-release.yml: build step Refuse a tag that is not on main: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-release.yml: build step Refuse a tag that is not on main: reads $GITHUB_REF_NAME, which no env: of its step, job or workflow defines",
+    "cli-release.yml: build step Release summary: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-release.yml: build step Verify tag matches the declared CLI version: a credentialed job runs `deno run scripts/release-version-check.ts \"$TAG\"`: deno is not a command a credentialed job runs",
+    "cli-release.yml: build: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "cli-release.yml: build: a credentialed job's env: it sets SHA, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: build: a credentialed job's outputs: holds an expression",
+    "cli-release.yml: build: step Compile all targets sets the credential GH_TOKEN but its run: does not read it",
+    "cli-release.yml: build: step Refuse a tag that is not on main runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "cli-release.yml: build: step Refuse a tag that is not on main runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "X28 nuget: a digest check with continue-on-error": [
+    "sdk-publish.yml: publish-nuget: step Check the artifact against the pack job's digests sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-nuget: step Check the artifact against the pack job's digests sets continue-on-error: in a release workflow"
+  ],
+  "X28b npm: every run step with continue-on-error": [
+    "sdk-publish.yml: publish-npm: step Check the artifact against the pack job's digest sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-npm: step Check the artifact against the pack job's digest sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: publish-npm: step Install the pinned npm sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-npm: step Install the pinned npm sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: publish-npm: step Upload sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-npm: step Upload sets continue-on-error: in a release workflow"
+  ],
+  "X14 maven: the attestation with continue-on-error": [
+    "sdk-publish.yml: publish-maven: action 3 is {\"continue-on-error\":true,\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-checksums\":\"publish-tmp/subjects.sha256\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-checksums\":\"publish-tmp/subjects.sha256\"}}",
+    "sdk-publish.yml: publish-maven: step Attest every file (GitHub artifact attestation) sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-maven: step Attest every file (GitHub artifact attestation) sets continue-on-error: in a release workflow"
+  ],
+  "X31 build: setup-deno with an env": [
+    "cli-release.yml: build: action 2 is {\"env\":{\"DENO_CERT\":\"/tmp/x\"},\"uses\":\"denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282\",\"with\":{\"deno-version\":\"2.8.2\"}}, ACTION_SURFACE records {\"uses\":\"denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282\",\"with\":{\"deno-version\":\"2.8.2\"}}"
+  ],
+  "X33 workflow-rules: its steps with continue-on-error": [
+    "sdk-publish.yml: workflow-rules: step Install the rules' dependencies (no scripts) sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: workflow-rules: step Install the rules' dependencies (no scripts) sets continue-on-error:, so the rules can be skipped",
+    "sdk-publish.yml: workflow-rules: step The workflow rules (verify:workflows) sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: workflow-rules: step The workflow rules (verify:workflows) sets continue-on-error:, so the rules can be skipped"
+  ],
+  "X34 build: the on-main check with continue-on-error": [
+    "cli-release.yml: build: step Refuse a tag that is not on main sets continue-on-error: in a release workflow"
+  ],
+  "X35 publish-go: its guards with continue-on-error": [
+    "sdk-publish.yml: publish-go: step Ask the Go proxy for the release sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-go: step Ask the Go proxy for the release sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: publish-go: step Install the deploy key sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-go: step Install the deploy key sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: publish-go: step Remove the deploy key sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-go: step Remove the deploy key sets continue-on-error: in a release workflow",
+    "sdk-publish.yml: publish-go: step Upload sets continue-on-error: (a failed check would not stop the job)",
+    "sdk-publish.yml: publish-go: step Upload sets continue-on-error: in a release workflow"
+  ],
+  "17 two recorded steps swapped": [
+    "sdk-publish.yml: pack-npm: action 2 is {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\"}}, ACTION_SURFACE records {\"uses\":\"pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1\"}",
+    "sdk-publish.yml: pack-npm: action 3 is {\"uses\":\"pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1\"}, ACTION_SURFACE records {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\"}}"
+  ],
+  "17 a recorded with: key removed": [
+    "sdk-publish.yml: publish-pypi: action 2 is {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{}}, ACTION_SURFACE records {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\"}}"
+  ],
+  "17 another SHA at the same position": [
+    "sdk-publish.yml: publish-npm: action 1 is {\"uses\":\"actions/setup-node@0000000000000000000000000000000000000000\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\",\"registry-url\":\"https://registry.npmjs.org/\"}}, ACTION_SURFACE records {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\",\"registry-url\":\"https://registry.npmjs.org/\"}}"
+  ],
+  "17 a job ACTION_SURFACE does not record": [
+    "sdk-publish.yml: pack-extra: a job ACTION_SURFACE does not record",
+    "sdk-publish.yml: pack-extra: names registry extra, which has no publish unit"
+  ],
+  "17 release-gate: the follow-up script changed": [
+    "release-gate.yml: test: action 3 is {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"8e7469838e01acd9f96d423b3df1a0adebb7f1c22a15357e8d8529a094700654\"}}}, ACTION_SURFACE records {\"if\":\"failure()\",\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6\"}}}"
+  ],
+  "18 verify.yml granted contents: write": [
+    "verify.yml: verify step Build the workspace packages: a credentialed job runs `pnpm run build`: pnpm is not a command a credentialed job runs",
+    "verify.yml: verify step Install dependencies: a credentialed job runs `pnpm install --frozen-lockfile`: pnpm is not a command a credentialed job runs",
+    "verify.yml: verify step The CLI's tests: a credentialed job runs `deno task --cwd apps/cli test`: deno is not a command a credentialed job runs",
+    "verify.yml: verify step The public gate: a credentialed job runs `pnpm run verify`: pnpm is not a command a credentialed job runs",
+    "verify.yml: verify: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "verify.yml: verify: grants write on [contents], WRITE_PERMISSIONS records []"
+  ],
+  "18 contract-live.yml granted write-all": [
+    "contract-live.yml: -: grants id-token: write at the top level, to every job",
+    "contract-live.yml: -: grants write-all write at the workflow level (grant it to the one job that needs it)",
+    "contract-live.yml: report step Build conformance report: a credentialed job runs `node tools/test-harness-live-contract/scripts/live-coverage-report.mjs live-results dagger/sdk-manifest.json`: node is not a command a credentialed job runs",
+    "contract-live.yml: report step Checkout: a credentialed job's checkout keeps its credential (persist-credentials: false)",
+    "contract-live.yml: report step Download all results: a credentialed job downloads an artifact to release/ or dist/ only",
+    "contract-live.yml: report step Setup Node.js: setup-node's node-version is 22, not the workflow's exact NODE_VERSION",
+    "contract-live.yml: report: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "contract-live.yml: setup step Checkout: a credentialed job's checkout keeps its credential (persist-credentials: false)",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "contract-live.yml: setup step Discover live-capable SDKs (manifest liveSuite): a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "contract-live.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "contract-live.yml: setup: a credentialed job's outputs: holds an expression",
+    "contract-live.yml: test step Build harness + the shared engine: a credentialed job runs `pnpm vp run -F @confeature/sdk-shared -F @confeature/test-harness-live-contract build`: pnpm is not a command a credentialed job runs",
+    "contract-live.yml: test step Fail job on red suite: a credentialed job runs `echo \"::error::live wire-cases failed for ${SDK_NAME}\"`: echo is not a command environment contract-live.yml#test's job runs",
+    "contract-live.yml: test step Fail job on red suite: a credentialed job runs `exit 1`: exit is not a command environment contract-live.yml#test's job runs",
+    "contract-live.yml: test step Install dependencies: a credentialed job runs `pnpm install --frozen-lockfile`: pnpm is not a command a credentialed job runs",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a credentialed job's run: block has a glob character (* ? [ ])",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "contract-live.yml: test step Run ${{ matrix.sdk.name }} live wire-cases: a pack or publish job evals a string",
+    "contract-live.yml: test step Setup Node.js: setup-node's node-version is 22, not the workflow's exact NODE_VERSION",
+    "contract-live.yml: test step Setup uv (python toolchain): a pack or credentialed job restores a cache",
+    "contract-live.yml: test step Sync python project: a credentialed job runs `uv sync --frozen --extra dev`: uv is not a command a credentialed job runs",
+    "contract-live.yml: test step Write result artifact: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "contract-live.yml: test step Write result artifact: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "contract-live.yml: test step Write result artifact: a credentialed job's run: block has a here-document or here-string",
+    "contract-live.yml: test step Write result artifact: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "contract-live.yml: test step Write result artifact: a credentialed job's run: block has two redirections in a row",
+    "contract-live.yml: test: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "contract-live.yml: test: a credentialed job's env: it sets DURATION, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: test: a credentialed job's env: it sets OUTCOME, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: test: a credentialed job's env: it sets SDK_NAME, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: test: a credentialed job's env: it sets SDK_NAME, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: test: a credentialed job's env: it sets SDK_RUNNER, which CREDENTIALED_ENV does not allow",
+    "contract-live.yml: test: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "contract-live.yml: test: a credentialed job's strategy: holds an expression",
+    "contract-live.yml: test: step Fail job on red suite's if: steps.run.outcome != 'success' is not a recorded condition (skipped-vs-ran is public)",
+    "contract-live.yml: test: step Run ${{ matrix.sdk.name }} live wire-cases sets continue-on-error: (a failed check would not stop the job)",
+    "contract-live.yml: test: step Run ${{ matrix.sdk.name }} live wire-cases's name: holds an expression",
+    "contract-live.yml: test: step Setup uv (python toolchain)'s if: matrix.sdk.toolchain == 'uv' is not a recorded condition (skipped-vs-ran is public)",
+    "contract-live.yml: test: step Sync python project's if: matrix.sdk.toolchain == 'uv' is not a recorded condition (skipped-vs-ran is public)"
+  ],
+  "18 release-gate's issues: write moved to the workflow": [
+    "release-gate.yml: -: grants issues write at the workflow level (grant it to the one job that needs it)",
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "release-gate.yml: setup step Write coverage summary: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup: a credentialed job's env: RELEASE_TAG is ${{ github.event.release.tag_name }}, not its pinned expression",
+    "release-gate.yml: setup: a credentialed job's env: it sets COVERED, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets EXEMPT, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets PENDING, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets TOTAL, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "release-gate.yml: setup: a credentialed job's outputs: holds an expression"
+  ],
+  "18 a publish job asking for contents: write too": [
+    "sdk-publish.yml: publish-npm: grants write on [contents, id-token], WRITE_PERMISSIONS records [id-token]"
+  ],
+  "18 cli-windows-install-verify granted id-token": [
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a & (background job or descriptor redirection)",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a > with no target",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a descriptor redirection",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: reads $dest, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: reads $installArgs, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Install (first run) — checksum verified + binary installed: reads $log, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a & (background job or descriptor redirection)",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a > with no target",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a descriptor redirection",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Pre-promote - the checkout's latest path, against the current latest: reads $log, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: env INPUT_VERSION is ${{ inputs.version }}, not an exact version",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: reads $expect, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Resolve the expected version and the install mode: reads $v, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a & (background job or descriptor redirection)",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a > with no target",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a descriptor redirection",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $_, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $hits, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $installArgs, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $installDir, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Second run does NOT duplicate the user-PATH entry (#701 idempotency): reads $user, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: a credentialed job's run: block has a backtick command substitution",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step Summary: reads $lines, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a & (background job or descriptor redirection)",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a > with no target",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a descriptor redirection",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step The SERVED script, as users run it, under Windows PowerShell 5.1: reads $log, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): reads $ErrorActionPreference, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): reads $LASTEXITCODE, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): reads $env, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install step confeature --version resolves from a FRESH shell (user-PATH took effect): reads $out, which no env: of its step, job or workflow defines",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (powershell)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs a shell other than plain bash (pwsh)",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job runs on a Linux (ubuntu-*) runner only, whose default shell is bash",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets INPUT_EXPECT, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets INPUT_VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets PINNED, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets PINNED, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets PINNED, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "cli-windows-install-verify.yml: verify-windows-install: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "cli-windows-install-verify.yml: verify-windows-install: grants write on [id-token], WRITE_PERMISSIONS records []",
+    "cli-windows-install-verify.yml: verify-windows-install: requests id-token: write outside an environment",
+    "cli-windows-install-verify.yml: verify-windows-install: step Pre-promote - the checkout's latest path, against the current latest's if: steps.resolve.outputs.pinned == 'true' is not a recorded condition (skipped-vs-ran is public)",
+    "cli-windows-install-verify.yml: verify-windows-install: step The SERVED script, as users run it, under Windows PowerShell 5.1's if: steps.resolve.outputs.pinned != 'true' is not a recorded condition (skipped-vs-ran is public)"
   ]
 }

@@ -10,13 +10,16 @@
 #
 #   0. workflow-rules  tools/repo-gates/verify-workflows.mjs over this commit's
 #                      workflows, before any token or environment.
-#   1. release         the tag is on main, its version matches the CLI's, all
-#                      five targets compile, SHA256SUMS is written. The assets go
-#                      to the GitHub release (a mirror, never the documented
-#                      path) and to the next job as an artifact, with the
+#   1. build           a `contents: read` job: the tag is on main, its version
+#                      matches the CLI's, all five targets compile, SHA256SUMS
+#                      is written. The assets go on as an artifact, with the
 #                      SHA256SUMS digest as a job output.
+#   1b. release        the one `contents: write` job, which runs no build: it
+#                      checks the artifact against that digest and runs
+#                      release-github.sh, the GitHub release (a mirror, never
+#                      the documented path).
 #   2. upload          a `contents: read` job, separate from the write token and
-#                      the release's toolchain. It re-checks the artifact against
+#                      the build's toolchain. It re-checks the artifact against
 #                      that digest, then `publish-r2.sh upload` puts the immutable
 #                      v<ver>/ files.
 #   3. verify-pinned   Windows installs `-Version <ver>` from the real host, and
@@ -33,7 +36,8 @@
 # Principle VII: a release-time gate only, tag-triggered. It adds no per-PR job.
 #
 # Credentials:
-#   - `GITHUB_TOKEN` (`contents: write`, release job only) for the GitHub release.
+#   - `GITHUB_TOKEN` (`contents: write`, release job only) for the GitHub release,
+#     read by release-github.sh's gh only.
 #   - `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`: the S3 credentials of an R2
 #     Object Read & Write token on the one bucket (created by the operator; see
 #     the runbook), read ONLY by the upload and promote steps, in
@@ -101,13 +105,16 @@ jobs:
       - name: The workflow rules (verify:workflows)
         run: pnpm run verify:workflows
 
-  release:
-    name: release ${{ github.ref_name }}
+  # Builds, checks and hands on the release, with a read-only token: the
+  # compile runs repository code and its dependencies, so it holds nothing
+  # (round 9: it used to share a job with the contents: write token).
+  build:
+    name: build ${{ github.ref_name }}
     needs: workflow-rules
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write
+      contents: read
     outputs:
       sums-digest: ${{ steps.sums.outputs.digest }}
     steps:
@@ -153,34 +160,7 @@ jobs:
           cat SHA256SUMS
           echo "digest=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Create the GitHub release if it does not exist
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --title "Confeature CLI ${TAG#cli-v}" \
-              --generate-notes \
-              --verify-tag
-          fi
-
-      # No --clobber: a re-run must not replace the GitHub copy with a
-      # different compile than the one R2 serves. Assets already present are
-      # left untouched.
-      - name: Upload assets to the GitHub release (mirror)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          present="$(gh release view "$TAG" --json assets --jq '.assets | length')"
-          if [ "$present" -gt 0 ]; then
-            echo "GitHub release already carries $present assets — not replacing them"
-          else
-            gh release upload "$TAG" apps/cli/dist/confeature-* apps/cli/dist/SHA256SUMS
-          fi
-
-      - name: Hand the build to the upload job
+      - name: Hand the build to the release and upload jobs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cli-dist
@@ -204,9 +184,45 @@ jobs:
             echo "- R2: \`https://cli.confeature.io/v${TAG#cli-v}/\` (promoted to latest only after the pinned Windows verify)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The GitHub release (a mirror), the one job with a contents: write token:
+  # it runs no build, only the recorded release-github.sh on the build job's
+  # artifact, checked against that job's digest first.
+  release:
+    name: release ${{ github.ref_name }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (release-github.sh)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Receive the build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-dist
+          path: dist
+
+      - name: Check the build against the build job's digest
+        env:
+          EXPECTED: ${{ needs.build.outputs.sums-digest }}
+        run: printf '%s  %s\n' "$EXPECTED" dist/SHA256SUMS | sha256sum --check --strict
+
+      # No --clobber: a re-run must not replace the GitHub copy with a
+      # different compile than the one R2 serves (release-github.sh).
+      - name: Create the GitHub release and upload its assets (mirror)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: bash apps/cli/scripts/release-github.sh "$TAG" dist
+
   upload:
     name: upload ${{ github.ref_name }} to R2
-    needs: release
+    needs: [build, release]
     runs-on: ubuntu-latest
     # The R2 token is an ENVIRONMENT secret of `cli-release` (#794): this job
     # accepts `cli-v*` tags only (no approval click: operator ruling 2026-10-16;
@@ -231,10 +247,10 @@ jobs:
           path: dist
 
       # The artifact crossed a job boundary: its manifest must be the one the
-      # release job wrote. publish-r2.sh then checks every binary against it.
-      - name: Check the build against the release job's digest
+      # build job wrote. publish-r2.sh then checks every binary against it.
+      - name: Check the build against the build job's digest
         env:
-          EXPECTED: ${{ needs.release.outputs.sums-digest }}
+          EXPECTED: ${{ needs.build.outputs.sums-digest }}
         run: printf '%s  %s\n' "$EXPECTED" dist/SHA256SUMS | sha256sum --check --strict
 
       - name: Upload v<ver>/ to R2

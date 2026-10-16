@@ -91,8 +91,12 @@
  *  16. EVERY REFERENCE NAMES SOMETHING (round 5). In the two release
  *      workflows, each needs./steps./env./inputs. reference names a direct
  *      need and its output, an earlier step id, an env name in scope, an input.
- *  17. A FROZEN ACTION SURFACE (round 8). Every credentialed job's uses:
- *      steps, ids and with: inputs are exactly ACTION_SURFACE's.
+ *  17. A FROZEN ACTION SURFACE (rounds 8, 9). Every job of sdk-publish.yml,
+ *      cli-release.yml and release-gate.yml: its uses: steps (with their id,
+ *      if:, env:, continue-on-error, with:) or its called workflow are
+ *      exactly ACTION_SURFACE's.
+ *  18. RECORDED WRITE PERMISSIONS (round 9). Each write permission any
+ *      workflow grants is one WRITE_PERMISSIONS records, job by job.
  *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
  *      only variables its step's, job's or workflow's env: defines, it assigns
  *      itself, or RUNNER_DEFAULTS lists.
@@ -103,6 +107,7 @@
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
 
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -222,6 +227,8 @@ export const PUBLISH_EXCEPTIONS = {
   [CLI_WORKFLOW]: {
     upload: [/^bash apps\/cli\/scripts\/publish-r2\.sh upload "\$\{TAG#cli-v\}" dist$/],
     promote: [/^bash apps\/cli\/scripts\/publish-r2\.sh promote "\$\{TAG#cli-v\}"$/],
+    // The GitHub release (round 9): view, create, upload without --clobber.
+    release: [/^bash apps\/cli\/scripts\/release-github\.sh "\$TAG" dist$/],
   },
 };
 
@@ -238,131 +245,269 @@ export const PUBLISH_EXCEPTIONS = {
  * recorded one that is gone, is a finding. Derived once from the workflows
  * and reviewed; change it with the workflow, in the same commit.
  */
+/** Every action this repository's release workflows use, by name: a pin bump is one edit. */
+export const PIN = {
+  attest: "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
+  checkout: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+  cratesAuth: "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+  dagger: "dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77",
+  download: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+  githubScript: "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
+  nugetLogin: "NuGet/login@8d196754b4036150537f80ac539e15c2f1028841",
+  pnpm: "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
+  pypiPublish: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+  rubygemsAuth: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a",
+  setupDart: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
+  setupDeno: "denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282",
+  setupDotnet: "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
+  setupGo: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+  setupJava: "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
+  setupNode: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+  setupRuby: "ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a",
+  setupUv: "astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884",
+  upload: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+};
+
+/** One recorded step: its action, and its id, if:, env:, with: when it has them. */
+const step = (uses, extra = {}) => ({ uses, ...extra });
+/** A checkout of this commit only, keeping no credential: the common case. */
+const shallowCheckout = () =>
+  step(PIN.checkout, { with: { "fetch-depth": 1, "persist-credentials": false } });
+/** The same with full history (the on-main checks need origin/main's ancestry). */
+const fullCheckout = () =>
+  step(PIN.checkout, { with: { "fetch-depth": 0, "persist-credentials": false } });
+/** An artifact of this run, by its exact name, to its exact path. */
+const download = (name, path) => step(PIN.download, { with: { name, path } });
+/** setup-node at the workflow's NODE_VERSION. */
+const setupNode = () =>
+  step(PIN.setupNode, { with: { "node-version": "${{ env.NODE_VERSION }}" } });
+/** A job that calls a reusable workflow, with its exact inputs. */
+const call = (uses, inputs) => ({ call: uses, with: inputs });
+
 export const ACTION_SURFACE = {
   [PUBLISH_WORKFLOW]: {
+    "workflow-rules": [shallowCheckout(), step(PIN.pnpm), setupNode()],
+    setup: [fullCheckout()],
+    gate: [
+      shallowCheckout(),
+      step(PIN.dagger, {
+        with: {
+          version: "${{ steps.pin.outputs.version }}",
+          verb: "call",
+          module: "./dagger",
+          args: "${{ needs.setup.outputs.daggerFn }} --source=.",
+          "enable-github-summary": true,
+        },
+      }),
+    ],
+    "pack-npm": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.upload, {
+        with: {
+          name: "release-npm",
+          path: "${{ runner.temp }}/release/*.tgz",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
+    ],
     "publish-npm": [
-      {
-        uses: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+      step(PIN.setupNode, {
         with: {
           "node-version": "${{ env.NODE_VERSION }}",
           "registry-url": "https://registry.npmjs.org/",
         },
-      },
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-npm", path: "release" },
-      },
+      }),
+      download("release-npm", "release"),
+    ],
+    "pack-pypi": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupUv, { with: { version: "${{ env.UV_VERSION }}", "enable-cache": false } }),
+      step(PIN.upload, {
+        with: {
+          name: "release-pypi",
+          path: "${{ runner.temp }}/release/*",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
     ],
     "publish-pypi": [
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-pypi", path: "release" },
-      },
-      {
-        uses: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
-        with: { "packages-dir": "release/" },
-      },
+      download("release-pypi", "release"),
+      step(PIN.pypiPublish, { with: { "packages-dir": "release/" } }),
     ],
-    "publish-crates": [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
-      {
-        uses: "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
-        id: "auth",
-      },
+    "pack-crates": [shallowCheckout(), step(PIN.pnpm), setupNode()],
+    "publish-crates": [shallowCheckout(), step(PIN.cratesAuth, { id: "auth" })],
+    "pack-rubygems": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupRuby, { with: { "ruby-version": "${{ env.RUBY_VERSION }}" } }),
+      step(PIN.upload, {
+        with: {
+          name: "release-rubygems",
+          path: "${{ runner.temp }}/release/*.gem",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
     ],
-    "publish-rubygems": [
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-rubygems", path: "release" },
-      },
-      { uses: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a" },
+    "publish-rubygems": [download("release-rubygems", "release"), step(PIN.rubygemsAuth)],
+    "pack-nuget": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupDotnet, { with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" } }),
+      step(PIN.upload, {
+        with: {
+          name: "release-nuget",
+          path: "${{ runner.temp }}/release/*",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
     ],
     "publish-nuget": [
-      {
-        uses: "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
-        with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" },
-      },
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-nuget", path: "release" },
-      },
-      {
-        uses: "NuGet/login@8d196754b4036150537f80ac539e15c2f1028841",
-        id: "login",
-        with: { user: "${{ vars.NUGET_USER }}" },
-      },
+      step(PIN.setupDotnet, { with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" } }),
+      download("release-nuget", "release"),
+      step(PIN.nugetLogin, { id: "login", with: { user: "${{ vars.NUGET_USER }}" } }),
+    ],
+    "pack-pubdev": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupDart, { with: { sdk: "${{ env.DART_VERSION }}" } }),
     ],
     "publish-pubdev": [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
-      {
-        uses: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
-        with: { sdk: "${{ env.DART_VERSION }}" },
-      },
+      shallowCheckout(),
+      step(PIN.setupDart, { with: { sdk: "${{ env.DART_VERSION }}" } }),
     ],
-    "publish-go": [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
+    "pack-go": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupGo, { with: { "go-version": "${{ env.GO_VERSION }}", cache: false } }),
     ],
-    "publish-packagist": [
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-packagist", path: "release" },
-      },
+    "publish-go": [shallowCheckout()],
+    "pack-packagist": [
+      fullCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.upload, {
+        with: {
+          name: "release-packagist",
+          path: "${{ runner.temp }}/release/*.bundle",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
     ],
-    "publish-swiftpm": [
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-swiftpm", path: "release" },
-      },
+    "publish-packagist": [download("release-packagist", "release")],
+    "pack-swiftpm": [
+      fullCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.upload, {
+        with: {
+          name: "release-swiftpm",
+          path: "${{ runner.temp }}/release/*.bundle",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
+    ],
+    "publish-swiftpm": [download("release-swiftpm", "release")],
+    "pack-maven": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupJava, {
+        with: { distribution: "temurin", "java-version": "${{ env.JAVA_VERSION }}" },
+      }),
+      step(PIN.upload, {
+        with: {
+          name: "release-maven",
+          path: "${{ runner.temp }}/release/",
+          "if-no-files-found": "error",
+          "retention-days": 1,
+        },
+      }),
     ],
     "publish-maven": [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "release-maven", path: "release" },
-      },
-      {
-        uses: "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
-        with: { "subject-checksums": "publish-tmp/subjects.sha256" },
-      },
+      shallowCheckout(),
+      download("release-maven", "release"),
+      step(PIN.attest, { with: { "subject-checksums": "publish-tmp/subjects.sha256" } }),
     ],
+    conclude: [],
   },
   [CLI_WORKFLOW]: {
-    upload: [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
-      {
-        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-        with: { name: "cli-dist", path: "dist" },
-      },
+    "workflow-rules": [shallowCheckout(), step(PIN.pnpm), setupNode()],
+    build: [
+      fullCheckout(),
+      step(PIN.setupDeno, { with: { "deno-version": "2.8.2" } }),
+      step(PIN.upload, {
+        with: {
+          name: "cli-dist",
+          path: "apps/cli/dist/confeature-*\napps/cli/dist/SHA256SUMS\n",
+          "retention-days": 7,
+          "if-no-files-found": "error",
+        },
+      }),
     ],
-    promote: [
-      {
-        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        with: { "fetch-depth": 1, "persist-credentials": false },
-      },
+    release: [shallowCheckout(), download("cli-dist", "dist")],
+    upload: [shallowCheckout(), download("cli-dist", "dist")],
+    "verify-pinned": [
+      call("./.github/workflows/cli-windows-install-verify.yml", {
+        version: "${{ github.ref_name }}",
+      }),
+    ],
+    promote: [shallowCheckout()],
+    "verify-latest": [
+      call("./.github/workflows/cli-windows-install-verify.yml", {
+        version: "",
+        expect: "${{ github.ref_name }}",
+      }),
+    ],
+  },
+  "release-gate.yml": {
+    setup: [shallowCheckout()],
+    test: [
+      shallowCheckout(),
+      step(PIN.dagger, {
+        with: {
+          version: "${{ steps.pin.outputs.version }}",
+          verb: "call",
+          module: "./dagger",
+          args: "${{ matrix.sdk.daggerFn }} --source=.",
+          "enable-github-summary": true,
+        },
+      }),
+      step(PIN.githubScript, {
+        if: "failure()",
+        with: {
+          script: { sha256: "cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6" },
+        },
+      }),
     ],
   },
 };
 
-/** A step's surface: its action, its id, its inputs. */
+/**
+ * A step's surface: its action, and its id, if:, env:, continue-on-error and
+ * with: (a github-script `script:` by its sha256, so the table stays short).
+ */
 const surfaceOf = (s) => {
   const o = { uses: s.uses };
-  if (s.id !== undefined) o.id = s.id;
-  if (s.with !== undefined) o.with = s.with;
+  for (const k of ["id", "if", "env", "continue-on-error"]) if (s[k] !== undefined) o[k] = s[k];
+  if (s.with !== undefined) {
+    o.with = { ...s.with };
+    if (typeof o.with.script === "string")
+      o.with.script = { sha256: createHash("sha256").update(o.with.script).digest("hex") };
+  }
   return o;
 };
 /** Key-order-independent JSON, so `with:` compares by content. */
@@ -376,23 +521,28 @@ const canonical = (v) =>
           .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`)
           .join(",")}}`;
 
-/** Rule 17 over every credentialed job of the two release workflows. */
+/** The workflows rule 17 freezes, every job of each: the release workflows and release-gate. */
+export const SURFACE_WORKFLOWS = [PUBLISH_WORKFLOW, CLI_WORKFLOW, "release-gate.yml"];
+
+/** Rule 17 over every job of SURFACE_WORKFLOWS (round 9: not only the credentialed ones). */
 export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
   const out = [];
-  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
+  for (const file of SURFACE_WORKFLOWS) {
     const jobs = workflows[file]?.jobs ?? {};
     const recorded = surface[file] ?? {};
     for (const [jobId, job] of Object.entries(jobs)) {
-      if (job?.environment === undefined) continue;
       const add = (why) => out.push({ file, job: jobId, why });
       const want = recorded[jobId];
       if (want === undefined) {
-        add("a credentialed job ACTION_SURFACE does not record");
+        add("a job ACTION_SURFACE does not record");
         continue;
       }
-      const got = (Array.isArray(job.steps) ? job.steps : [])
-        .filter((s) => typeof s?.uses === "string")
-        .map(surfaceOf);
+      const got =
+        typeof job?.uses === "string"
+          ? [call(job.uses, job.with ?? {})]
+          : (Array.isArray(job?.steps) ? job.steps : [])
+              .filter((s) => typeof s?.uses === "string")
+              .map(surfaceOf);
       if (got.length !== want.length)
         add(`runs ${got.length} actions, ACTION_SURFACE records ${want.length}`);
       for (let i = 0; i < Math.max(got.length, want.length); i += 1)
@@ -402,11 +552,11 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
           );
     }
     for (const jobId of Object.keys(recorded))
-      if (jobs[jobId]?.environment === undefined)
+      if (jobs[jobId] === undefined)
         out.push({
           file,
           job: jobId,
-          why: "ACTION_SURFACE records a credentialed job the workflow does not have",
+          why: "ACTION_SURFACE records a job the workflow does not have",
         });
   }
   return out;
@@ -493,7 +643,9 @@ export const PINNED_ENV = {
   EXPECTED_SHA256: (j) => PACK(j, "sha256"),
   EXPECTED_SUMS: (j) => PACK(j, "sums"),
   SPLIT_SHA: (j) => PACK(j, "split"),
-  EXPECTED: () => EXPR("needs\\.release\\.outputs\\.sums-digest"),
+  EXPECTED: () => EXPR("needs\\.build\\.outputs\\.sums-digest"),
+  // The job token, for gh in cli-release's release job.
+  GH_TOKEN: () => EXPR("github\\.token"),
   // A job with no recorded deploy key matches nothing.
   DEPLOY_KEY: (j) => (Object.hasOwn(DEPLOY_KEY_SECRET, j) ? SECRET(DEPLOY_KEY_SECRET[j]) : /(?!)/),
   R2_ACCESS_KEY_ID: () => SECRET("R2_ACCESS_KEY_ID"),
@@ -523,6 +675,7 @@ export const CREDENTIAL_ENV = new Set([
   "CARGO_REGISTRY_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
   "DEPLOY_KEY",
+  "GH_TOKEN",
   "MAVEN_R2_ACCESS_KEY_ID",
   "MAVEN_R2_SECRET_ACCESS_KEY",
   "NUGET_API_KEY",
@@ -889,6 +1042,8 @@ export const ENVIRONMENT_COMMANDS = {
     "sort",
   ],
   "cli-release": ["printf", "sha256sum"],
+  // cli-release's GitHub release: a contents: write token, no environment.
+  "cli-release.yml#release": ["printf", "sha256sum"],
 };
 
 /**
@@ -1375,6 +1530,16 @@ function stepCredentialRules(file, jobId, job, add) {
     const where = s?.name ?? "?";
     for (const [k, v] of Object.entries(s ?? {})) {
       if (k === "env" || k === "with" || k === "run") continue;
+      // A step that may fail without failing the job (round 9: a digest
+      // check or a guard with continue-on-error lets the upload run anyway).
+      if (k === "continue-on-error") {
+        add(
+          file,
+          jobId,
+          `step ${where} sets continue-on-error: (a failed check would not stop the job)`,
+        );
+        continue;
+      }
       if (k === "if") {
         if (!RECORDED_STEP_IFS.includes(String(v)))
           add(
@@ -1417,6 +1582,112 @@ function credentialExposureRules(file, jobId, job, doc, add) {
   credentialScopeRule(file, jobId, job, doc, add);
   jobKeysRule(file, jobId, job, add);
   stepCredentialRules(file, jobId, job, add);
+}
+
+/**
+ * Rule 18 (round 9): the only write permissions any workflow grants, per
+ * job, exact. A write permission anywhere else (another job, another
+ * workflow, the workflow level, `write-all`) is a finding; verify.yml,
+ * contract-live.yml and cli-windows-install-verify.yml stay read-only.
+ */
+export const WRITE_PERMISSIONS = {
+  "cli-release.yml#release": ["contents"],
+  "release-gate.yml#test": ["issues"],
+  "sdk-publish.yml#publish-npm": ["id-token"],
+  "sdk-publish.yml#publish-pypi": ["id-token"],
+  "sdk-publish.yml#publish-crates": ["id-token"],
+  "sdk-publish.yml#publish-rubygems": ["id-token"],
+  "sdk-publish.yml#publish-nuget": ["id-token"],
+  "sdk-publish.yml#publish-pubdev": ["id-token"],
+  "sdk-publish.yml#publish-maven": ["attestations", "id-token"],
+};
+
+/**
+ * No step or job of the release workflows may fail without failing its job
+ * (round 9): a guard with continue-on-error (the on-main check, a digest
+ * check) would let the build, the pack or the upload after it run anyway.
+ */
+export function continueOnErrorFindings(workflows) {
+  const out = [];
+  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW])
+    for (const [jobId, job] of Object.entries(workflows[file]?.jobs ?? {}))
+      for (const s of Array.isArray(job?.steps) ? job.steps : [])
+        if (s?.["continue-on-error"] !== undefined)
+          out.push({
+            file,
+            job: jobId,
+            why: `step ${s?.name ?? "?"} sets continue-on-error: in a release workflow`,
+          });
+  return out;
+}
+
+/** Rule 18 over every workflow. */
+export function writePermissionFindings(workflows) {
+  const out = [];
+  const writes = (perms) =>
+    perms === "write-all"
+      ? ["write-all"]
+      : Object.entries(perms ?? {})
+          .filter(([, v]) => v === "write")
+          .map(([k]) => k)
+          .sort();
+  for (const [file, doc] of Object.entries(workflows)) {
+    if (writes(doc?.permissions).length > 0)
+      out.push({
+        file,
+        job: "-",
+        why: `grants ${writes(doc.permissions).join(", ")} write at the workflow level (grant it to the one job that needs it)`,
+      });
+    for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
+      const got = writes(job?.permissions);
+      const want = [...(WRITE_PERMISSIONS[`${file}#${jobId}`] ?? [])].sort();
+      if (got.join(",") !== want.join(","))
+        out.push({
+          file,
+          job: jobId,
+          why: `grants write on [${got.join(", ")}], WRITE_PERMISSIONS records [${want.join(", ")}]`,
+        });
+    }
+  }
+  return out;
+}
+
+/** The write permissions a job holds: its own, or the workflow's when it sets none. */
+export function writePermissions(job, doc) {
+  const perms = job?.permissions ?? doc?.permissions;
+  if (perms === "write-all") return ["*"];
+  if (perms === null || typeof perms !== "object") return [];
+  return Object.entries(perms)
+    .filter(([, v]) => v === "write")
+    .map(([k]) => k);
+}
+
+/**
+ * Jobs that hold a write token but are not credentialed for rule 3, each
+ * with why (round 9). release-gate.yml's test job runs the containerized SDK
+ * suites on a published release and may open a follow-up issue: its token is
+ * `issues: write` and `contents: read` only, so it can publish nothing, and
+ * the one step that uses it, actions/github-script, is frozen by rule 17.
+ * Rules 3 and 15 would forbid the suites it exists to run.
+ */
+export const WRITE_TOKEN_EXEMPT = {
+  "release-gate.yml#test":
+    "issues: write only; publishes nothing; its one token step is frozen by rule 17",
+};
+
+/**
+ * Whether a job is credentialed (round 9): it binds an environment, or holds
+ * any write permission (its own or the workflow's), or any of its
+ * expressions names github.token or secrets. cli-release's release job held
+ * `contents: write` and GH_TOKEN with no environment, so no rule read it.
+ */
+export function isCredentialed(file, jobId, job, doc) {
+  if (envName(job) !== undefined) return true;
+  if (Object.hasOwn(WRITE_TOKEN_EXEMPT, `${file}#${jobId}`)) return false;
+  if (writePermissions(job, doc).length > 0) return true;
+  return allExpressions(job).some((e) =>
+    /\b(?:github\s*\.\s*token|secrets)\b/i.test(withoutStrings(e)),
+  );
 }
 
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
@@ -1596,11 +1867,12 @@ function jobRules(args) {
   } = args;
   const env = envName(job);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
-  const credentialed = env !== undefined;
-  const declared = credentialed ? envs.get(env) : undefined;
-  if (credentialed && declared === undefined)
+  const credentialed = isCredentialed(file, jobId, job, doc);
+  const declared = env !== undefined ? envs.get(env) : undefined;
+  if (env !== undefined && declared === undefined)
     add(file, jobId, `binds environment "${env}", which ${SETTINGS} does not declare`);
-  if (credentialed && reusable) add(file, jobId, `a reusable workflow binds environment "${env}"`);
+  if (env !== undefined && reusable)
+    add(file, jobId, `a reusable workflow binds environment "${env}"`);
   if (job?.secrets === "inherit") add(file, jobId, "passes `secrets: inherit`");
   if (declared !== undefined) {
     const have = new Set((declared.secrets ?? []).map((x) => x?.name));
@@ -1611,9 +1883,10 @@ function jobRules(args) {
         add(file, jobId, `reads secret ${name}, which environment ${env} does not declare`);
     }
   }
-  if (!credentialed) {
-    if (grantsIdToken(job?.permissions))
-      add(file, jobId, "requests id-token: write outside an environment");
+  if (env === undefined && grantsIdToken(job?.permissions))
+    add(file, jobId, "requests id-token: write outside an environment");
+  // Rule 2: a secret only where an environment declares it.
+  if (env === undefined) {
     if (readsSecrets(job)) add(file, jobId, "reads the secrets context outside an environment");
   }
   // Rule 3 holds EVERY job bound to an environment, not only a registry's:
@@ -1631,7 +1904,9 @@ function jobRules(args) {
     downloads: steps
       .filter((s) => typeof s?.uses === "string" && s.uses.startsWith("actions/download-artifact@"))
       .map((s) => String(s?.with?.path ?? "")),
-    environment: envName(job),
+    // A job with an environment uses its environment's command table; one
+    // credentialed by a write token alone, its own (`<file>#<job>`).
+    environment: env ?? `${file}#${jobId}`,
     commands,
     goProxyPrefixes,
     add,
@@ -2288,6 +2563,8 @@ export function verifyWorkflows(root) {
     ...releaseGateFindings(workflows),
     ...referenceFindings(workflows, readScriptOutputs(), settings),
     ...surfaceFindings(workflows),
+    ...writePermissionFindings(workflows),
+    ...continueOnErrorFindings(workflows),
   ];
 }
 
