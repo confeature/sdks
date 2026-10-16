@@ -409,52 +409,73 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
     expect(existsSync(join(ws, "release/Confeature.Client.1.2.3.nupkg"))).toBe(true);
   });
 
-  it("the Maven upload runs maven-r2-upload.sh on release/, through the R2 endpoint, and reads the POM back", () => {
-    const v = "release/io/confeature/x/1.0.0/x-1.0.0";
-    const ws = workspace(
-      {
+  // The java and android units' live root module names no target (round 6:
+  // that stopped the upload with exit 1); x has no module at all.
+  it.each([
+    ["x", "1.0.0", null],
+    ["confeature-java-client", "0.1.0", "confeature-java-client-0.1.0.module"],
+    ["confeature-android-client", "0.1.0", "confeature-android-client-0.1.0.module"],
+  ])(
+    "the Maven upload of %s@%s runs maven-r2-upload.sh on release/, through the R2 endpoint, and reads the POM back",
+    (root, version, live) => {
+      const v = `release/io/confeature/${root}/${version}/${root}-${version}`;
+      const files = {
         [`${v}.jar`]: "j",
         [`${v}.pom`]: "p",
-        "release/io/confeature/x/maven-metadata.xml":
-          "<metadata><version>1.0.0</version></metadata>",
-      },
-      ["tools/sdk-pack/maven-r2-upload.sh"],
-    );
-    const store = scratch();
-    const { r, argv } = upload(
-      PUBLISH,
-      "publish-maven",
-      "Upload",
-      ws,
-      {
-        "needs.pack-maven.outputs.sums": "s",
-        "needs.setup.outputs.coordinates": "io.confeature:x",
-        "needs.setup.outputs.version": "1.0.0",
-        "secrets.MAVEN_R2_ACCESS_KEY_ID": "kid",
-        "secrets.MAVEN_R2_SECRET_ACCESS_KEY": "secret",
-        "secrets.CLOUDFLARE_ACCOUNT_ID": "acct",
-      },
-      {
-        aws: `${CLIENT("aws")}
+        [`release/io/confeature/${root}/maven-metadata.xml`]: `<metadata><version>${version}</version></metadata>`,
+      };
+      if (live !== null)
+        files[`${v}.module`] = readFileSync(
+          join(ROOT, "tools/repo-gates/fixtures/maven-live", live),
+          "utf8",
+        );
+      const ws = workspace(files, ["tools/sdk-pack/maven-r2-upload.sh"]);
+      const store = scratch();
+      const { r, argv } = upload(
+        PUBLISH,
+        "publish-maven",
+        "Upload",
+        ws,
+        {
+          "needs.pack-maven.outputs.sums": "s",
+          "needs.setup.outputs.coordinates": `io.confeature:${root}`,
+          "needs.setup.outputs.version": version,
+          "secrets.MAVEN_R2_ACCESS_KEY_ID": "kid",
+          "secrets.MAVEN_R2_SECRET_ACCESS_KEY": "secret",
+          "secrets.CLOUDFLARE_ACCOUNT_ID": "acct",
+        },
+        {
+          aws: `${CLIENT("aws")}
 key=""; body=""; out=""; verb="$4"; shift 4
 while [ $# -gt 0 ]; do case "$1" in --key) key="$2"; shift 2;; --body) body="$2"; shift 2;; --bucket|--content-type|--cache-control|--if-none-match) shift 2;; *) out="$1"; shift;; esac; done
 if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(dirname "$key")"; cp "$body" "$STORE/$key"; exit 0; fi
 [ -f "$STORE/$key" ] || { echo "An error occurred (NoSuchKey)" >&2; exit 254; }; cp "$STORE/$key" "$out"`,
-      },
-      { STORE: store, CURL_ALLOW: "https://maven.confeature.io/io/confeature/x/1.0.0/x-1.0.0.pom" },
-    );
-    expect(r.status, r.stdout + r.stderr).toBe(0);
-    const puts = argv.filter((a) => a.includes(" put-object "));
-    expect(puts.length).toBe(3);
-    for (const p of puts)
-      expect(p).toMatch(
-        /^aws s3api --endpoint-url https:\/\/acct\.r2\.cloudflarestorage\.com put-object --bucket confeature-maven --key io\/confeature\/x\//,
+        },
+        {
+          STORE: store,
+          CURL_ALLOW: `https://maven.confeature.io/io/confeature/${root}/${version}/${root}-${version}.pom`,
+        },
       );
-    expect(argv.at(-1)).toBe(
-      "curl --proto =https --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors https://maven.confeature.io/io/confeature/x/1.0.0/x-1.0.0.pom",
-    );
-    expect(readFileSync(join(store, "io/confeature/x/1.0.0/x-1.0.0.jar"), "utf8")).toBe("j");
-  });
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      const puts = argv.filter((a) => a.includes(" put-object "));
+      expect(puts.length).toBe(Object.keys(files).length);
+      for (const p of puts)
+        expect(p).toMatch(
+          new RegExp(
+            `^aws s3api --endpoint-url https://acct\\.r2\\.cloudflarestorage\\.com put-object --bucket confeature-maven --key io/confeature/${root}/`,
+          ),
+        );
+      expect(argv.at(-1)).toBe(
+        `curl --proto =https --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors https://maven.confeature.io/io/confeature/${root}/${version}/${root}-${version}.pom`,
+      );
+      expect(
+        readFileSync(
+          join(store, `io/confeature/${root}/${version}/${root}-${version}.jar`),
+          "utf8",
+        ),
+      ).toBe("j");
+    },
+  );
 
   it.each([
     ["upload", "Upload v<ver>/ to R2", "bash apps/cli/scripts/publish-r2.sh upload 1.2.3 dist"],

@@ -1,0 +1,144 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "io.confeature",
+    "module": "confeature-android-client",
+    "version": "0.1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.9"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "1.9.25"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "confeature-android-client-0.1.0.aar",
+          "url": "confeature-android-client-0.1.0.aar",
+          "size": 143339,
+          "sha512": "16256aea451608ce3cdd7f1bf0c229b01e571f83d1717c9cd58cff1789960dfa56e6bfe05e80abeec8a5ae5263437be06dfd45e062cc41015c09e5a36e88b45e",
+          "sha256": "33cdd7bf78ccae0c6027991ebf78dba8d4b82e6576678e6ea4f8b9f22e528866",
+          "sha1": "ecb5ace478dbc095dfae05873d26df5ea4b5dadf",
+          "md5": "10030d64ae856e9c66e4f357bb7f7662"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.8.2"
+          }
+        },
+        {
+          "group": "com.squareup.okhttp3",
+          "module": "okhttp",
+          "version": {
+            "requires": "4.12.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-core",
+          "version": {
+            "requires": "1.8.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-android",
+          "version": {
+            "requires": "1.8.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "1.9.25"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "confeature-android-client-0.1.0.aar",
+          "url": "confeature-android-client-0.1.0.aar",
+          "size": 143339,
+          "sha512": "16256aea451608ce3cdd7f1bf0c229b01e571f83d1717c9cd58cff1789960dfa56e6bfe05e80abeec8a5ae5263437be06dfd45e062cc41015c09e5a36e88b45e",
+          "sha256": "33cdd7bf78ccae0c6027991ebf78dba8d4b82e6576678e6ea4f8b9f22e528866",
+          "sha1": "ecb5ace478dbc095dfae05873d26df5ea4b5dadf",
+          "md5": "10030d64ae856e9c66e4f357bb7f7662"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseSourcePublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "confeature-android-client-0.1.0-sources.jar",
+          "url": "confeature-android-client-0.1.0-sources.jar",
+          "size": 66174,
+          "sha512": "a252dab503a782aede2c67f5f876b76be4167761665c3623ab5d12cf5d6379110d6f75be8199e0b5af67a87b2f5ab9253d49ee8ea3352041259be60d80eb30c6",
+          "sha256": "f94c560329470a7be6debe7aa4770db1c42225a8ca72bd083488296eb32bfa2f",
+          "sha1": "cf07cfb2dd1d298b7cbecdf32dd85883a768919f",
+          "md5": "a0de47477ff3c86989d818402350b362"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseJavaDocPublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "confeature-android-client-0.1.0-javadoc.jar",
+          "url": "confeature-android-client-0.1.0-javadoc.jar",
+          "size": 449597,
+          "sha512": "3f11d318ab72b81fc9ab267b30fa615fd3b64ca69709a2902db3df3a7c64fa0169f67a9aba214383e8ea7b46551569db8c24565b8e3eb9a827dda810a2431043",
+          "sha256": "be61e52d0f358d3538ce625bc61e4487fe104b8d71b20670fd91ba7284ebae54",
+          "sha1": "8b402b699b795559ac4159af1e4ead29d3aec90d",
+          "md5": "b354a5ce902f1fb70a9c8f1945cdb629"
+        }
+      ]
+    }
+  ]
+}

@@ -249,3 +249,77 @@ describe("maven-r2-upload.sh", () => {
     expect(read(dir, "calls")).toBe("");
   });
 });
+
+// The root .module files of the live 0.1.0 releases, fetched once, read-only,
+// from https://maven.confeature.io (round 6): the java and android roots name
+// no target (no "available-at"), the kotlin-mp root names its targets.
+const LIVE = join(ROOT, "tools/repo-gates/fixtures/maven-live");
+describe("maven-r2-upload.sh on the live 0.1.0 layouts", () => {
+  /** A release of `root` at 0.1.0 whose root .module is the live one, plus a jar/pom per `targets`. */
+  function liveRelease(root, targets = []) {
+    const dir = fixture();
+    rmSync(join(dir, "release"), { recursive: true, force: true });
+    for (const aid of [root, ...targets]) {
+      const v = `release/io/confeature/${aid}/0.1.0/${aid}-0.1.0`;
+      mkdirSync(dirname(join(dir, v)), { recursive: true });
+      writeFileSync(join(dir, `${v}.jar`), `jar ${aid}`);
+      writeFileSync(join(dir, `${v}.pom`), `pom ${aid}`);
+      writeFileSync(
+        join(dir, `${v}.module`),
+        aid === root ? readFileSync(join(LIVE, `${root}-0.1.0.module`), "utf8") : `module ${aid}`,
+      );
+      writeFileSync(
+        join(dir, `release/io/confeature/${aid}/maven-metadata.xml`),
+        "<metadata><version>0.1.0</version></metadata>",
+      );
+    }
+    return dir;
+  }
+  const at = (root) => ({ UNIT_COORDINATES: `io.confeature:${root}`, UNIT_VERSION: "0.1.0" });
+
+  it.each(["confeature-java-client", "confeature-android-client"])(
+    "%s: a root module naming no target uploads every file (it stopped the run, exit 1, before)",
+    (root) => {
+      const dir = liveRelease(root);
+      expect(readFileSync(join(LIVE, `${root}-0.1.0.module`), "utf8")).not.toContain(
+        "available-at",
+      );
+      const r = run(dir, at(root));
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      expect(read(dir, "puts").trim().split("\n")).toHaveLength(4);
+    },
+  );
+
+  it("a root module grep cannot read still stops the run before any put (grep's exit 2 is not 'no match')", () => {
+    const root = "confeature-java-client";
+    const dir = liveRelease(root);
+    chmodSync(join(dir, `release/io/confeature/${root}/0.1.0/${root}-0.1.0.module`), 0o000);
+    const r = run(dir, at(root));
+    expect(r.status).not.toBe(0);
+    expect(read(dir, "puts")).toBe("");
+  });
+
+  const KMP = "confeature-kotlin-client";
+  const TARGETS = [
+    ...new Set(
+      [
+        ...readFileSync(join(LIVE, `${KMP}-0.1.0.module`), "utf8").matchAll(
+          /"\.\.\/\.\.\/([^/"]+)\//g,
+        ),
+      ].map((m) => m[1]),
+    ),
+  ];
+  it("kotlin-mp: the root and every target its module names upload", () => {
+    expect(TARGETS.length).toBeGreaterThan(1);
+    const dir = liveRelease(KMP, TARGETS);
+    const r = run(dir, at(KMP));
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(read(dir, "puts").trim().split("\n")).toHaveLength(4 * (TARGETS.length + 1));
+  });
+  it("kotlin-mp: a sibling its module does not name is refused", () => {
+    const dir = liveRelease(KMP, [...TARGETS, `${KMP}-evil`]);
+    const r = run(dir, at(KMP));
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain(`${KMP}-evil/0.1.0/${KMP}-evil-0.1.0.jar is not under`);
+  });
+});

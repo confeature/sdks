@@ -104,7 +104,10 @@ module="$base/$root/$UNIT_VERSION/$root-$UNIT_VERSION.module"
 : > "$tmp/ids"
 echo "$root" >> "$tmp/ids"
 if [ -f "$module" ]; then
-  grep -o '"url" *: *"\.\./\.\./[^/"]*/' "$module" | sed 's|.*\.\./\.\./||; s|/$||' |
+  # A single-artifact unit's module (java, android) names no target: grep's
+  # "no match" (1) means none, under pipefail too; its real errors (2) stop us.
+  { grep -o '"url" *: *"\.\./\.\./[^/"]*/' "$module" || [ $? -eq 1 ]; } |
+    sed 's|.*\.\./\.\./||; s|/$||' |
     while IFS= read -r id; do
       case "$id" in "$root-"*) echo "$id" ;; esac
     done >> "$tmp/ids"

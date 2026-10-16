@@ -1,0 +1,132 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "io.confeature",
+    "module": "confeature-java-client",
+    "version": "0.1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.5.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.slf4j",
+          "module": "slf4j-api",
+          "version": {
+            "requires": "2.0.13"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "confeature-java-client-0.1.0.jar",
+          "url": "confeature-java-client-0.1.0.jar",
+          "size": 92617,
+          "sha512": "8748b8dd2336e906bbd35632b2a4005cc1e6b5f2982e4f279a7fa13d791951d8eafb785fcd6295a7883b877e709584a96b0c8496cf394c33bfee82b8ff959706",
+          "sha256": "d036235d58f69f85df8025c0d1ed4a4c4ff195640dc6ad34305dfb67dad9135d",
+          "sha1": "5e912155835a212d46cfd35af5ad963bd5476b08",
+          "md5": "aa74515814d45cd1b6c4fe7a4e0372b4"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "com.squareup.okhttp3",
+          "module": "okhttp",
+          "version": {
+            "requires": "4.12.0"
+          }
+        },
+        {
+          "group": "com.fasterxml.jackson.core",
+          "module": "jackson-databind",
+          "version": {
+            "requires": "2.17.2"
+          }
+        },
+        {
+          "group": "org.slf4j",
+          "module": "slf4j-api",
+          "version": {
+            "requires": "2.0.13"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "confeature-java-client-0.1.0.jar",
+          "url": "confeature-java-client-0.1.0.jar",
+          "size": 92617,
+          "sha512": "8748b8dd2336e906bbd35632b2a4005cc1e6b5f2982e4f279a7fa13d791951d8eafb785fcd6295a7883b877e709584a96b0c8496cf394c33bfee82b8ff959706",
+          "sha256": "d036235d58f69f85df8025c0d1ed4a4c4ff195640dc6ad34305dfb67dad9135d",
+          "sha1": "5e912155835a212d46cfd35af5ad963bd5476b08",
+          "md5": "aa74515814d45cd1b6c4fe7a4e0372b4"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "confeature-java-client-0.1.0-javadoc.jar",
+          "url": "confeature-java-client-0.1.0-javadoc.jar",
+          "size": 215456,
+          "sha512": "6c5cb37e9c23e1c6b4950bcc0de551c9a37a6d4b86e394ff2f461c102c199d9180e682acc52ccdde3703f940a4c8b3e46cdfcc81eb6169c086ed4fe3d4235ecd",
+          "sha256": "a4f32a9f0b2df120cb63772c0dd8a3b08b7bbac963283e5313a9930582ba2a5f",
+          "sha1": "5215de95e4859fd98541a96fdcf276da4fdafacd",
+          "md5": "b34db4790197c64f0c9859886a6019a3"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "confeature-java-client-0.1.0-sources.jar",
+          "url": "confeature-java-client-0.1.0-sources.jar",
+          "size": 68851,
+          "sha512": "4802c4644a1bf12896942029224259322ba4fa25880c3de05a4b3b70e496f979ea5e7bfa0c2cd20bb96e699c87eb4d25e3cb8dc8f16e0023d7fa50b21df5eeb3",
+          "sha256": "27f06c5e1ceae6a1ad3963c605b95a09be1d1722a2a392c616bc4bd5b3b8e017",
+          "sha1": "a561e3a2c2ec877d54b739dc37dfafe367f9c697",
+          "md5": "064a495431e941d65b32bb8b8f143f9e"
+        }
+      ]
+    }
+  ]
+}
