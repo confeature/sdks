@@ -88,6 +88,12 @@
  *      Below the workflow, a pack or credentialed job's or step's env: never
  *      redefines a workflow env name, and its *_VERSION values are exact (or
  *      the resolver's unit version).
+ *  14. THE RULES GATE THE RELEASES. sdk-publish.yml and cli-release.yml run
+ *      these rules over the tagged commit in a first job, workflow-rules,
+ *      which nothing can skip and every other job transitively needs.
+ *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
+ *      only variables its step's, job's or workflow's env: defines, it assigns
+ *      itself, or RUNNER_DEFAULTS lists.
  *  16. EVERY REFERENCE NAMES SOMETHING (round 5). In the two release
  *      workflows, each needs./steps./env./inputs. reference names a direct
  *      need and its output, an earlier step id, an env name in scope, an input.
@@ -97,12 +103,6 @@
  *      exactly ACTION_SURFACE's.
  *  18. RECORDED WRITE PERMISSIONS (round 9). Each write permission any
  *      workflow grants is one WRITE_PERMISSIONS records, job by job.
- *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
- *      only variables its step's, job's or workflow's env: defines, it assigns
- *      itself, or RUNNER_DEFAULTS lists.
- *  14. THE RULES GATE THE RELEASES. sdk-publish.yml and cli-release.yml run
- *      these rules over the tagged commit in a first job, workflow-rules,
- *      which nothing can skip and every other job transitively needs.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -2206,7 +2206,17 @@ const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
  */
 export function referenceProblem(
   expr,
-  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {}, secretsOf = null, inEnv = false },
+  {
+    doc,
+    jobId,
+    step = null,
+    ownEnv = false,
+    scriptOutputs = {},
+    secretsOf = null,
+    inEnv = false,
+    actionOutputs = ACTION_OUTPUTS,
+    credentialOutputs = CREDENTIAL_ACTION_OUTPUTS,
+  },
 ) {
   // Only dot paths into a context are judged here, so whatever reaches a
   // context any other way is refused outright (round 6): an index
@@ -2290,16 +2300,16 @@ export function referenceProblem(
     } else if (ctxName === "steps") {
       const s = before.find((x) => x?.id === a);
       if (s === undefined) return `${ref}: no earlier step of ${jobId} has id ${a}`;
-      // An action's recorded output is a credential (an OIDC-exchanged
-      // token): an env: value is its one place (round 8).
+      // A credential action's step (an OIDC-exchanged token) is read in an
+      // env: value only (round 8), whichever of its fields is named.
       if (
         typeof s.uses === "string" &&
-        Object.hasOwn(ACTION_OUTPUTS, s.uses.split("@")[0]) &&
+        Object.hasOwn(credentialOutputs, s.uses.split("@")[0]) &&
         !inEnv
       )
         return `${ref}: the credential output of ${s.uses.split("@")[0]} is read only in an env: value`;
       if (b === "outputs") {
-        const why = stepOutputProblem(s, c ?? "", scriptOutputs);
+        const why = stepOutputProblem(s, c ?? "", scriptOutputs, actionOutputs);
         if (why !== null) return `${ref}: ${why}`;
       }
     } else if (ctxName === "env") {
@@ -2363,13 +2373,21 @@ export function referenceFindings(workflows, scriptOutputs = {}, settings = null
 }
 
 /**
- * The outputs an action step offers, recorded (round 6): a reference to any
- * other is a typo or a renamed output, and resolves to "" at run time.
+ * The actions whose outputs are credentials (OIDC-exchanged registry tokens),
+ * split from ACTION_OUTPUTS (round 9): a step running one is read in an env:
+ * value only. An action offering only non-secret outputs goes in
+ * ACTION_OUTPUTS alone, and stays readable anywhere.
  */
-export const ACTION_OUTPUTS = {
+export const CREDENTIAL_ACTION_OUTPUTS = {
   "rust-lang/crates-io-auth-action": ["token"],
   "NuGet/login": ["NUGET_API_KEY"],
 };
+/**
+ * The outputs an action step offers, recorded (round 6): a reference to any
+ * other is a typo or a renamed output, and resolves to "" at run time. Every
+ * credential output is one of them.
+ */
+export const ACTION_OUTPUTS = { ...CREDENTIAL_ACTION_OUTPUTS };
 /** The repository scripts whose outputs a step reference may name, by their exported list. */
 export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
 const SCRIPT_OUTPUT_KEYS = { "tools/sdk-pack/resolve-publish.mjs": RESOLVER_OUTPUT_KEYS };
@@ -2454,10 +2472,10 @@ export function writesOutput(line, name) {
  * must offer it (ACTION_OUTPUTS). A resolver that stopped emitting `path`
  * would otherwise pass while every job got an empty UNIT_PATH.
  */
-function stepOutputProblem(s, name, scriptOutputs) {
+function stepOutputProblem(s, name, scriptOutputs, actionOutputs = ACTION_OUTPUTS) {
   if (typeof s?.uses === "string") {
     const repo = s.uses.split("@")[0];
-    return (ACTION_OUTPUTS[repo] ?? []).includes(name)
+    return (actionOutputs[repo] ?? []).includes(name)
       ? null
       : `action ${repo} offers no recorded output ${name}`;
   }

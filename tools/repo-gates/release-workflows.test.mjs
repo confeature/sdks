@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  ACTION_SURFACE,
+  CREDENTIAL_ACTION_OUTPUTS,
+  ACTION_OUTPUTS,
   CREDENTIAL_ENV,
+  isCredentialed,
+  referenceProblem,
   ENVIRONMENT_COMMANDS,
   MANIFEST,
   PINNED_ENV,
@@ -1529,20 +1534,26 @@ describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
       "R2_ACCESS_KEY_ID",
       "R2_SECRET_ACCESS_KEY",
     ]));
-  it("holds every PINNED_ENV name pinned to secrets.* or steps.*, for every job that has a pin", () => {
-    const jobs = [
-      "publish-go",
-      "publish-packagist",
-      "publish-swiftpm",
-      "publish-maven",
-      "publish-npm",
-      "upload",
-    ];
+  // Every credentialed job of the release workflows, read from the workflows
+  // themselves (round 9: a hand-kept list missed cli-release's release job).
+  const CREDENTIALED = [P, C].flatMap((f) =>
+    Object.entries(BASE[f].jobs)
+      .filter(([id, job]) => isCredentialed(f, id, job, BASE[f]))
+      .map(([id]) => id),
+  );
+  it("derives its credentialed jobs from the workflows, cli-release's release job among them", () => {
+    expect(CREDENTIALED).toEqual(expect.arrayContaining(["publish-npm", "upload", "release"]));
+    for (const id of CREDENTIALED)
+      expect(Object.keys(ACTION_SURFACE[P]).concat(Object.keys(ACTION_SURFACE[C]))).toContain(id);
+  });
+  it("holds every PINNED_ENV name pinned to secrets.*, steps.* or github.token, for every credentialed job", () => {
     for (const [name, pin] of Object.entries(PINNED_ENV))
-      for (const j of jobs)
-        if (/secrets|steps/.test(pin(j).source))
+      for (const j of CREDENTIALED)
+        if (/secrets|steps|github\\?\.token/.test(pin(j).source))
           expect(CREDENTIAL_ENV.has(name), `${name} (${j})`).toBe(true);
   });
+  it("checks GH_TOKEN, pinned to github.token, on the release job", () =>
+    expect(PINNED_ENV.GH_TOKEN("release").test("${{ github.token }}")).toBe(true));
   it("a job with no recorded deploy key accepts none", () => {
     expect(PINNED_ENV.DEPLOY_KEY("publish-npm").test("${{ secrets.MIRROR_DEPLOY_KEY }}")).toBe(
       false,
@@ -1834,5 +1845,59 @@ describe("the write token, the build and every job's surface (round 9)", () => {
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("credential outputs are split from the outputs an action offers (round 9)", () => {
+  const doc = {
+    jobs: {
+      j: {
+        steps: [
+          { id: "a", uses: "x/attest@0123" },
+          { name: "use", run: "true", env: { V: "${{ steps.a.outputs.url }}" } },
+        ],
+      },
+    },
+  };
+  const ask = (credentialOutputs, inEnv) =>
+    referenceProblem("steps.a.outputs.url", {
+      doc,
+      jobId: "j",
+      step: doc.jobs.j.steps[1],
+      inEnv,
+      actionOutputs: { "x/attest": ["url"] },
+      credentialOutputs,
+    });
+  it("a non-credential output is readable outside an env: value", () =>
+    expect(ask({}, false)).toBe(null));
+  it("a credential output is read in an env: value only", () => {
+    expect(ask({ "x/attest": ["url"] }, false)).toMatch(/read only in an env: value/);
+    expect(ask({ "x/attest": ["url"] }, true)).toBe(null);
+  });
+  it("an output no action offers is a missing reference", () =>
+    expect(
+      referenceProblem("steps.a.outputs.nope", {
+        doc,
+        jobId: "j",
+        step: doc.jobs.j.steps[1],
+        inEnv: true,
+        actionOutputs: { "x/attest": ["url"] },
+        credentialOutputs: {},
+      }),
+    ).toMatch(/offers no recorded output nope/));
+  it("every credential output is an offered output", () => {
+    for (const [repo, outs] of Object.entries(CREDENTIAL_ACTION_OUTPUTS))
+      expect(ACTION_OUTPUTS[repo], repo).toEqual(expect.arrayContaining(outs));
+  });
+});
+
+describe("the rule list reads in order (round 9)", () => {
+  it("numbers verify-workflows.mjs's rules 1, 2, … in order", () => {
+    const head = readFileSync(join(ROOT, "tools/repo-gates/verify-workflows.mjs"), "utf8").split(
+      "*/",
+    )[0];
+    const nums = [...head.matchAll(/^ \*\s+(\d+)\. [A-Z]/gm)].map((m) => Number(m[1]));
+    expect(nums).toEqual(nums.map((_, i) => i + 1));
+    expect(nums.length).toBeGreaterThanOrEqual(18);
   });
 });

@@ -4,8 +4,7 @@
 // repository is clean, and every rule is seen to fire on a fixture that
 // breaks only that rule.
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { rowSnapshots } from "./row-snapshots.mjs";
