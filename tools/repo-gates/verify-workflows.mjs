@@ -1497,7 +1497,10 @@ const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
  * expression sits in (null for job-level keys), `ownEnv` whether the step's
  * own env is in scope (with, run, if: yes; the step's env values: no).
  */
-export function referenceProblem(expr, { doc, jobId, step = null, ownEnv = false }) {
+export function referenceProblem(
+  expr,
+  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {} },
+) {
   // Only dot paths into a context are judged here, so whatever reaches a
   // context any other way is refused outright (round 6): an index
   // (`secrets['X']`, `needs['x']`), a function that serialises or rebuilds
@@ -1537,8 +1540,12 @@ export function referenceProblem(expr, { doc, jobId, step = null, ownEnv = false
       if (b === "outputs" && !Object.hasOwn(doc.jobs[a]?.outputs ?? {}, c ?? ""))
         return `${ref}: job ${a} has no output ${String(c)}`;
     } else if (ctxName === "steps") {
-      if (!before.some((s) => s?.id === a))
-        return `${ref}: no earlier step of ${jobId} has id ${a}`;
+      const s = before.find((x) => x?.id === a);
+      if (s === undefined) return `${ref}: no earlier step of ${jobId} has id ${a}`;
+      if (b === "outputs") {
+        const why = stepOutputProblem(s, c ?? "", scriptOutputs);
+        if (why !== null) return `${ref}: ${why}`;
+      }
     } else if (ctxName === "env") {
       if (!env.has(a)) return `${ref}: no env: in scope defines ${a}`;
     } else if (!inputs.has(a)) return `${ref}: the workflow declares no input ${a}`;
@@ -1553,7 +1560,7 @@ export function referenceProblem(expr, { doc, jobId, step = null, ownEnv = false
  * a declared input. A renamed `setup.outputs.path` would otherwise hand every
  * job an empty UNIT_PATH while every other check stays green.
  */
-export function referenceFindings(workflows) {
+export function referenceFindings(workflows, scriptOutputs = {}) {
   const out = [];
   const exprs = (v) => [...String(v).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
   for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
@@ -1561,7 +1568,7 @@ export function referenceFindings(workflows) {
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
       const check = (where, list, scope) => {
         for (const e of list) {
-          const why = referenceProblem(e, { doc, jobId, ...scope });
+          const why = referenceProblem(e, { doc, jobId, scriptOutputs, ...scope });
           if (why !== null) out.push({ file, job: where, why });
         }
       };
@@ -1585,6 +1592,49 @@ export function referenceFindings(workflows) {
     }
   }
   return out;
+}
+
+/**
+ * The outputs an action step offers, recorded (round 6): a reference to any
+ * other is a typo or a renamed output, and resolves to "" at run time.
+ */
+export const ACTION_OUTPUTS = {
+  "rust-lang/crates-io-auth-action": ["token"],
+  "NuGet/login": ["NUGET_API_KEY"],
+};
+/** The repository scripts whose outputs a step reference may name, read by verifyWorkflows. */
+export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
+
+/** The keys a script appends to $GITHUB_OUTPUT: those of its `return checkSafe({ … })`. */
+export function scriptOutputKeys(source) {
+  const m = /return checkSafe\(\{([\s\S]*?)\}\);/.exec(source);
+  // `key: value` and the shorthand `key,`.
+  return m === null ? [] : [...m[1].matchAll(/^\s*([A-Za-z_]\w*)\s*[:,]/gm)].map((x) => x[1]);
+}
+
+/**
+ * Why `steps.<id>.outputs.<name>` names nothing the step writes, or null
+ * (rule 16, round 6): a run step must write `<name>=` (or `<name><<`) to
+ * $GITHUB_OUTPUT, or run a recorded script that emits it; an action step
+ * must offer it (ACTION_OUTPUTS). A resolver that stopped emitting `path`
+ * would otherwise pass while every job got an empty UNIT_PATH.
+ */
+function stepOutputProblem(s, name, scriptOutputs) {
+  if (typeof s?.uses === "string") {
+    const repo = s.uses.split("@")[0];
+    return (ACTION_OUTPUTS[repo] ?? []).includes(name)
+      ? null
+      : `action ${repo} offers no recorded output ${name}`;
+  }
+  const run = String(s?.run ?? "");
+  const script = OUTPUT_SCRIPTS.find((f) => run.includes(`node ${f}`));
+  if (script !== undefined)
+    return (scriptOutputs[script] ?? []).includes(name)
+      ? null
+      : `${script} emits no output ${name}`;
+  const writes =
+    /GITHUB_OUTPUT/.test(run) && new RegExp(`(?:^|[\\s"'{;])${name}(?:=|<<)`, "m").test(run);
+  return writes ? null : `step ${s?.id} writes no ${name}= to $GITHUB_OUTPUT`;
 }
 
 /** The first job of each release workflow, which runs these rules over the tagged commit. */
@@ -1659,6 +1709,13 @@ export function releaseGateFindings(workflows) {
   return out;
 }
 
+/** The outputs each OUTPUT_SCRIPTS script emits, read from the repository at `root`. */
+export function readScriptOutputs(root) {
+  const out = {};
+  for (const f of OUTPUT_SCRIPTS) out[f] = scriptOutputKeys(readFileSync(join(root, f), "utf8"));
+  return out;
+}
+
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
 export function verifyWorkflows(root) {
   const settings = JSON.parse(readFileSync(join(root, SETTINGS), "utf8"));
@@ -1670,7 +1727,7 @@ export function verifyWorkflows(root) {
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
-    ...referenceFindings(workflows),
+    ...referenceFindings(workflows, readScriptOutputs(root)),
   ];
 }
 

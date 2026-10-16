@@ -18,6 +18,7 @@ import {
   WORKFLOWS,
   findings,
   publicGateFindings,
+  readScriptOutputs,
   referenceFindings,
   releaseGateFindings,
   verifyWorkflows,
@@ -31,6 +32,7 @@ const BASE = {};
 for (const f of readdirSync(join(ROOT, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
   BASE[f] = parseYaml(readFileSync(join(ROOT, WORKFLOWS, f), "utf8"));
 const P = "sdk-publish.yml";
+const SCRIPTS = readScriptOutputs(ROOT);
 const C = "cli-release.yml";
 
 const all = (w) =>
@@ -38,7 +40,7 @@ const all = (w) =>
     ...findings({ settings, manifest, workflows: w }),
     ...publicGateFindings(w),
     ...releaseGateFindings(w),
-    ...referenceFindings(w),
+    ...referenceFindings(w, SCRIPTS),
   ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
@@ -295,7 +297,7 @@ describe("the gate itself runs rule 16", () => {
   it("verifyWorkflows reports a renamed setup output in a copy of the repository", () => {
     const dir = mkdtempSync(join(tmpdir(), "release-workflows-"));
     try {
-      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS])
+      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS, "tools/sdk-pack/resolve-publish.mjs"])
         cpSync(join(ROOT, rel), join(dir, rel), { recursive: true });
       const f = join(dir, WORKFLOWS, P);
       writeFileSync(
@@ -779,5 +781,72 @@ describe("round 5's bypasses: a credential reaches no unpinned name, no test and
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("16 a step output reference names an output the step writes (round 6)", () => {
+  it.each([
+    [
+      "the resolver's output renamed (its script stops emitting path)",
+      (w, s) => [
+        w,
+        {
+          ...s,
+          "tools/sdk-pack/resolve-publish.mjs": s["tools/sdk-pack/resolve-publish.mjs"].filter(
+            (k) => k !== "path",
+          ),
+        },
+      ],
+      /steps\.resolve\.outputs\.path: tools\/sdk-pack\/resolve-publish\.mjs emits no output path/,
+    ],
+    [
+      "a run step that does not write the name",
+      (w, s) => {
+        const d = w[P].jobs["pack-npm"].steps.find((x) => x.id === "digest");
+        d.run = d.run.replace("sha256=", "digest=");
+        return [w, s];
+      },
+      /steps\.digest\.outputs\.sha256: step digest writes no sha256= to \$GITHUB_OUTPUT/,
+    ],
+    [
+      "an action output that is not recorded",
+      (w, s) => {
+        w[P].jobs["publish-crates"].steps.find(
+          (x) => x.name === "Upload",
+        ).env.CARGO_REGISTRY_TOKEN = "${{ steps.auth.outputs.secret }}";
+        return [w, s];
+      },
+      /action rust-lang\/crates-io-auth-action offers no recorded output secret/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const [w, scripts] = mutate(structuredClone(BASE), SCRIPTS);
+    const got = referenceFindings(w, scripts).map((f) => `${f.job}: ${f.why}`);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it("reads the resolver's emitted keys, shorthand included", () =>
+    expect(SCRIPTS["tools/sdk-pack/resolve-publish.mjs"]).toEqual(
+      expect.arrayContaining(["path", "version", "mirrorTag"]),
+    ));
+  it("verifyWorkflows refuses a resolver that stops emitting path, in a copy of the repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-workflows-"));
+    try {
+      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS, "tools/sdk-pack/resolve-publish.mjs"])
+        cpSync(join(ROOT, rel), join(dir, rel), { recursive: true });
+      const f = join(dir, "tools/sdk-pack/resolve-publish.mjs");
+      writeFileSync(
+        f,
+        readFileSync(f, "utf8").replace("    path: unit.path,", "    unitPath: unit.path,"),
+      );
+      expect(verifyWorkflows(dir).map((x) => x.why)).toContainEqual(
+        expect.stringMatching(
+          /steps\.resolve\.outputs\.path: tools\/sdk-pack\/resolve-publish\.mjs emits no output path/,
+        ),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
