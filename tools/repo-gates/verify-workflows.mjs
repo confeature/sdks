@@ -19,24 +19,24 @@
  *      requests no `id-token: write` and reads no `secrets` context, and no
  *      workflow grants either at the top level, where every job would inherit
  *      it. A pack job or a dry run is exactly such a job.
- *   3. CREDENTIALED JOBS RUN ONLY THEIR ALLOWLIST, AND RESTORE NO CACHE. EVERY
- *      job bound to an environment (a registry's, or cli-release's, whose two
- *      jobs hold the R2 token) runs only the commands of CREDENTIALED_COMMANDS
- *      (shell builtins, file tools that run no program, curl, git's transport,
- *      each registry client's upload, the pinned npm installing itself), read
- *      by shell-commands.mjs from every nesting level of every `run:` block,
- *      plus its PUBLISH_EXCEPTIONS (the one command crates.io, pub.dev and the
- *      CLI bucket each need, exact and for its job only). It sets no variable
- *      that decides what a later command runs, writes no GITHUB_ENV or
- *      GITHUB_PATH, runs no shell but bash, no container and no local or
- *      container action, and keeps no checkout credential. It uses no cache:
- *      no `actions/cache`, no `cache:` / `enable-cache:` / `bundler-cache:` /
- *      `cache-jdk:` input other than false — nor does a pack job, whose
- *      artifact the publish job uploads. An action that caches unless told not
- *      to (DEFAULT_CACHE: setup-go, setup-uv) must say false. A dependency that
- *      runs in the job holding the OIDC token or a key can publish or steal it;
- *      a poisoned cache is such a dependency. The allowlist replaced a
- *      blocklist that review walked past five ways (#794 review).
+ *   3. CREDENTIALED JOBS FAIL CLOSED ON GRAMMAR. EVERY job bound to an
+ *      environment (a registry's, or cli-release's, whose two jobs hold the R2
+ *      token) is held to strict-shell.mjs's minimal grammar (simple commands,
+ *      plain words, quotes holding only `$NAME`, plain if/then/else/fi;
+ *      everything else refused outright), and runs only CREDENTIALED_COMMANDS,
+ *      each with its exact option spellings and pinned destinations, plus its
+ *      PUBLISH_EXCEPTIONS (the one reviewed command crates.io, pub.dev, the
+ *      Maven bucket and the CLI bucket each need, exact, for its job only). It
+ *      writes only publish-tmp/, sets only CREDENTIALED_ENV variables, names
+ *      no GITHUB_ENV, GITHUB_PATH or runner temp directory, sets no
+ *      working-directory, runs only plain bash on an ubuntu-* runner, in no
+ *      container, beside no service, with no local or container action, and
+ *      keeps no checkout credential. It uses no cache: no `actions/cache`, no
+ *      `cache:` / `enable-cache:` / `bundler-cache:` / `cache-jdk:` input
+ *      other than false — nor does a pack job, whose artifact the publish job
+ *      uploads; an action that caches unless told not to (DEFAULT_CACHE:
+ *      setup-go, setup-uv) must say false. A job that does not fit is
+ *      simplified, never the grammar widened (#794 review, round 3).
  *   4. NO UNTRUSTED TRIGGERS. No workflow runs on `pull_request_target` or
  *      `workflow_run`, the two triggers that hand a fork's change a privileged
  *      context.
@@ -95,7 +95,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
-import { shellCommands } from "./shell-commands.mjs";
+import { lexStrict } from "./strict-shell.mjs";
 
 export const SETTINGS = "tools/repo-gates/release-settings.json";
 export const MANIFEST = "dagger/sdk-manifest.json";
@@ -129,12 +129,16 @@ const triggersOf = (doc) => {
 /**
  * Rule 3's recorded exceptions: the one command a credentialed job needs that
  * the allowlist below does not hold, exact, for its workflow and job only.
- * Each is matched against the whole command, so a prefix assignment, an extra
- * argument or a chained command is not the exception.
+ * Each is matched against the whole command (its raw words), so a prefix
+ * assignment, an extra argument, a redirection or a chained command is not
+ * the exception; no credentialed job may `cd` or set working-directory, so the
+ * path each names is the checkout's.
  *   crates.io (#900): `cargo publish --no-verify` packages the commit again and
  *     compiles nothing; crates.io takes no prebuilt archive.
  *   pub.dev (#900): `dart pub publish --force` packs and uploads in one
  *     command, and pub.dev accepts it only from the OIDC job.
+ *   maven.confeature.io (#902): maven-r2-upload.sh, whose ordering and
+ *     immutability logic is outside the strict grammar (round 3).
  *   cli.confeature.io (#801): publish-r2.sh is the only writer of the bucket
  *     (it checks every binary against SHA256SUMS, refuses to rewrite a
  *     released version, and moves `latest` forward only), so the two jobs
@@ -142,8 +146,11 @@ const triggersOf = (doc) => {
  */
 export const PUBLISH_EXCEPTIONS = {
   [PUBLISH_WORKFLOW]: {
-    "publish-crates": [/^cargo "\+\$\{RUST_VERSION\}" publish --no-verify$/],
-    "publish-pubdev": [/^dart pub publish --force$/],
+    "publish-crates": [
+      /^cargo "\+\$\{RUST_VERSION\}" publish --no-verify --manifest-path "\$\{UNIT_PATH\}\/Cargo\.toml"$/,
+    ],
+    "publish-pubdev": [/^dart pub publish --force --directory "\$\{UNIT_PATH\}"$/],
+    "publish-maven": [/^bash tools\/sdk-pack\/maven-r2-upload\.sh release$/],
   },
   [CLI_WORKFLOW]: {
     upload: [/^bash apps\/cli\/scripts\/publish-r2\.sh upload "\$\{TAG#cli-v\}" dist$/],
@@ -177,139 +184,327 @@ const isFalse = (v) => v === false || v === "false";
 const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?NPM_VERSION\}?"?$/;
 
 /**
- * Variables that decide what a later command runs or loads: a credentialed job
- * never sets one, in a `run:` block or an `env:` map. GIT_SSH_COMMAND is the
- * deploy-key jobs' one need, and is allowed as plain `ssh` with no config file
- * and no option that runs a command (SSH_COMMAND_RUNS).
+ * Rule 3's environment allowlist: the only variables a credentialed job may set,
+ * in the workflow's, the job's or a step's `env:` (a `run:` block sets none).
+ * A blocklist of "dangerous" names missed DOTNET_STARTUP_HOOKS, OPENSSL_CONF,
+ * RUBYGEMS_GEMDEPS, PAGER and more (#794 review, round 3); these are the
+ * names the real jobs use, and nothing else.
  */
-const EXEC_ENV =
-  /^(?:PATH|HOME|ENV|BASH_ENV|BASH_FUNC_\w+|SHELLOPTS|BASHOPTS|PS4|PROMPT_COMMAND|LD_\w+|DYLD_\w+|GIT_(?!SSH_COMMAND$)\w+|SSH_ASKPASS|XDG_CONFIG_HOME|CURL_HOME|NODE_OPTIONS|NODE_PATH|NPM_CONFIG_\w+|npm_config_\w+|RUBYOPT|RUBYLIB|GEM_HOME|GEM_PATH|BUNDLE_\w+|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PERL5OPT|PERL5LIB|CARGO_HOME|CARGO_BUILD_\w+|RUSTC|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|RUSTUP_HOME|RUSTUP_TOOLCHAIN|NUGET_PLUGIN_PATHS|PUB_CACHE|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE)$/;
+export const CREDENTIALED_ENV = new Set([
+  // Tool pins and fixed destinations, written once in the workflow's env.
+  "NODE_VERSION",
+  "NPM_VERSION",
+  "UV_VERSION",
+  "TWINE_VERSION",
+  "RUST_VERSION",
+  "RUBY_VERSION",
+  "DOTNET_VERSION",
+  "DART_VERSION",
+  "GO_VERSION",
+  "JAVA_VERSION",
+  "DENO_VERSION",
+  "MAVEN_URL",
+  "MAVEN_BUCKET",
+  "GITHUB_SSH_KNOWN_HOST",
+  // What the resolver and the pack job hand on.
+  "UNIT_NAME",
+  "UNIT_PATH",
+  "UNIT_VERSION",
+  "UNIT_COORDINATES",
+  "ARTIFACT",
+  "EXPECTED",
+  "EXPECTED_SHA256",
+  "EXPECTED_SUMS",
+  "SPLIT_SHA",
+  "RELEASE_TAG",
+  "MIRROR_REPOSITORY",
+  "MIRROR_TAG",
+  "TAG",
+  // Credentials, each read by its one upload.
+  "DEPLOY_KEY",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "MAVEN_R2_ACCESS_KEY_ID",
+  "MAVEN_R2_SECRET_ACCESS_KEY",
+  "NUGET_API_KEY",
+  "CARGO_REGISTRY_TOKEN",
+  // Literal switches the jobs set: telemetry off, and the unit's MSRV-aware
+  // resolution (its .cargo/config.toml, which a run from the root does not read).
+  "DOTNET_NOLOGO",
+  "DOTNET_CLI_TELEMETRY_OPTOUT",
+  "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS",
+  // git's transport, pinned: plain ssh, and only the ssh and file protocols.
+  "GIT_SSH_COMMAND",
+  "GIT_ALLOW_PROTOCOL",
+]);
 const SSH_COMMAND_RUNS =
-  /ProxyCommand|LocalCommand|KnownHostsCommand|-F\s+(?!\/dev\/null(?:\s|$))/i;
+  /ProxyCommand|LocalCommand|KnownHostsCommand|ProxyJump|-F\s+(?!\/dev\/null(?:\s|$))/i;
 
-/** A word as bash sees it once quoting is removed, near enough to read an option. */
-const dequote = (w) => w.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
-
-/** Why setting `name` to `value` is refused, or null. */
+/** Why a credentialed job may not set `name` to `value`, or null. */
 function envProblem(name, value) {
-  if (name === "GIT_SSH_COMMAND")
-    return /^ssh\s/.test(value) && !SSH_COMMAND_RUNS.test(value)
-      ? null
-      : "GIT_SSH_COMMAND must be plain `ssh -F /dev/null …`, with no option that runs a command";
-  return EXEC_ENV.test(name) ? `it sets ${name}, which decides what a later command runs` : null;
+  if (!CREDENTIALED_ENV.has(name)) return `it sets ${name}, which CREDENTIALED_ENV does not allow`;
+  if (name === "GIT_SSH_COMMAND" && (!/^ssh\s/.test(value) || SSH_COMMAND_RUNS.test(value)))
+    return "GIT_SSH_COMMAND must be plain `ssh -F /dev/null …`, with no option that runs a command";
+  if (name === "GIT_ALLOW_PROTOCOL" && !/^(?:ssh|file|ssh:file)$/.test(value))
+    return "GIT_ALLOW_PROTOCOL allows ssh and file only";
+  return null;
 }
-const assignmentProblem = (word) => {
-  const m = /^([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=(.*)$/s.exec(word);
-  return m === null ? null : envProblem(m[1], dequote(m[2]));
-};
 
-const ok = () => null;
-/** The command only with exactly these leading words. */
-const only =
-  (...sub) =>
-  (args, name) =>
-    sub.every((s, n) => args[n] === s) ? null : `${name} runs only \`${name} ${sub.join(" ")}\``;
-const GIT_SUBCOMMANDS = new Set(["init", "fetch", "push", "bundle", "rev-parse"]);
-const SED_SCRIPT = /^s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gpI0-9]*$/;
+const FLAG = "flag";
+const LITERAL = "literal";
+const VALUE = "value";
+/** The one scratch directory a credentialed job writes (and removes). */
+const SCRATCH = /^publish-tmp(?:\/[A-Za-z0-9._-]+)*$/;
+const scratchOnly = (name) => (ops) =>
+  ops.every((w) => SCRATCH.test(w.text) && !w.text.split("/").includes(".."))
+    ? null
+    : `${name} touches only publish-tmp/`;
+const SED_SCRIPT = /^s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1g?$/;
 
 /**
- * Rule 3's allowlist: every program a credentialed job may run, and, where
- * the program can run another, the arguments it may take. It is what the jobs
- * bound to an environment run today, and nothing else: shell builtins, file and
- * text tools that run no program, curl, git's transport commands, and each
- * registry client's upload. Functions the block defines are allowed (their
- * bodies are commands too, and are checked). Anything else is refused.
+ * Why `args` (lexed words) may not follow `name` under `spec`, or null.
+ *
+ *   options    exact spellings only, each FLAG, LITERAL (a literal value),
+ *              VALUE (a value that may be an expansion: the parser consumes it
+ *              as a value) or "=<x>" (exactly x). `--opt=value` and
+ *              `--opt value` are both read. No abbreviation, no unlisted option.
+ *   eoo        the end-of-options word the tool honours (`--`,
+ *              `--end-of-options`): an operand starting with an expansion is
+ *              allowed only after it, since one could expand to an option.
+ *   positional "none", "literal" or "any"; `check(operands)` sees the rest.
+ *   require    options that must be present.
+ */
+function argsProblem(name, args, spec) {
+  let afterEoo = false;
+  const operands = [];
+  const seen = new Set();
+  for (let k = 0; k < args.length; k += 1) {
+    const w = args[k];
+    if (!afterEoo && spec.eoo !== undefined && w.raw === spec.eoo) {
+      afterEoo = true;
+      continue;
+    }
+    if (!afterEoo && !w.leadsWithExpansion && w.text.startsWith("-") && w.text !== "-") {
+      if (w.hasExpansion) return `${name}: the option ${w.raw} is not a literal word`;
+      const eq = w.text.startsWith("--") ? w.text.indexOf("=") : -1;
+      const opt = eq === -1 ? w.text : w.text.slice(0, eq);
+      const kind = Object.hasOwn(spec.options ?? {}, opt) ? spec.options[opt] : undefined;
+      if (kind === undefined) return `${name}: ${opt} is not an option it may take`;
+      seen.add(opt);
+      if (kind === FLAG) {
+        if (eq !== -1) return `${name}: ${opt} takes no value`;
+        continue;
+      }
+      const value = eq !== -1 ? { text: w.text.slice(eq + 1), hasExpansion: false } : args[++k];
+      if (value === undefined) return `${name}: ${opt} needs a value`;
+      if (kind === LITERAL && value.hasExpansion) return `${name}: ${opt} takes a literal value`;
+      if (kind.startsWith("=") && (value.hasExpansion || value.text !== kind.slice(1)))
+        return `${name}: ${opt} must be exactly ${kind.slice(1)}`;
+      continue;
+    }
+    if (w.leadsWithExpansion && !afterEoo)
+      return `${name}: ${w.raw} starts with an expansion, which could become an option`;
+    if (spec.positional === "none") return `${name} takes no operand here`;
+    if (spec.positional === "literal" && w.hasExpansion) return `${name}: ${w.raw} must be literal`;
+    operands.push(w);
+  }
+  for (const r of spec.require ?? []) if (!seen.has(r)) return `${name} must run with ${r}`;
+  return spec.check?.(operands) ?? null;
+}
+
+/** A git refspec a credentialed push or fetch may name: never forced, never a transport. */
+const refspecOk = (w) =>
+  /^(?:HEAD|refs\/[^:]+):refs\/(?:heads|tags)\/[^:]+$/.test(w.text) && !w.text.includes("::");
+/** A remote: a literal URL of a repository the settings name, or (fetch) a received bundle. */
+function remoteOk(w, remotes, bundle) {
+  // Neither shape's character class admits `$`, `{` or `::`: an expansion never matches.
+  if (bundle && /^release\/[A-Za-z0-9._-]+\.bundle$/.test(w.text)) return true;
+  const m =
+    /^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\.git$/.exec(
+      w.text,
+    );
+  return m !== null && remotes.has(m[1]);
+}
+const GIT_DIR = /^--git-dir=publish-tmp(?:\/[A-Za-z0-9._-]+)+$/;
+function gitProblem(args, ctx) {
+  let k = 0;
+  while (k < args.length && args[k].text.startsWith("-")) {
+    if (args[k].hasExpansion || !GIT_DIR.test(args[k].text))
+      return `git: ${args[k].raw} is not a global option it may take (--git-dir=publish-tmp/… only)`;
+    k += 1;
+  }
+  const sub = args[k]?.text;
+  const rest = args.slice(k + 1);
+  const transport = (fetch) => (ops) => {
+    if (ops.length < 2 || !remoteOk(ops[0], ctx.remotes, fetch))
+      return `git ${sub}: the remote must be a literal URL of a repository ${SETTINGS} names${fetch ? ", or a received release/*.bundle" : ""}`;
+    return ops.slice(1).every(refspecOk)
+      ? null
+      : `git ${sub}: every refspec is <HEAD|refs/…>:refs/heads|tags/…, never forced`;
+  };
+  switch (args[k]?.raw) {
+    case "init":
+      return argsProblem("git init", rest, {
+        options: { "--quiet": FLAG, "--bare": FLAG },
+        positional: "literal",
+        check: scratchOnly("git init"),
+      });
+    case "bundle":
+      if (rest[0]?.raw !== "verify") return "git bundle runs only `verify`";
+      return argsProblem("git bundle verify", rest.slice(1), {
+        options: { "--quiet": FLAG },
+        eoo: "--end-of-options",
+        positional: "literal",
+        check: (ops) =>
+          ops.length === 1 && remoteOk(ops[0], ctx.remotes, true)
+            ? null
+            : "git bundle verify reads one received release/*.bundle",
+      });
+    case "fetch":
+      return argsProblem("git fetch", rest, {
+        options: { "--quiet": FLAG },
+        eoo: "--end-of-options",
+        positional: "any",
+        check: transport(true),
+      });
+    case "push":
+      return argsProblem("git push", rest, {
+        options: { "--atomic": FLAG },
+        eoo: "--end-of-options",
+        positional: "any",
+        check: transport(false),
+      });
+    case "rev-parse":
+      return argsProblem("git rev-parse", rest, { positional: "literal" });
+    default:
+      return `git runs only init, bundle verify, fetch, push and rev-parse`;
+  }
+}
+
+/**
+ * Rule 3's allowlist: every program a credentialed job may run, with the exact
+ * options each may take. It is what the jobs bound to an environment run
+ * today, and nothing else. Each upload's destination is pinned: npm and gem
+ * take no host option, dotnet's --source is nuget.org's, git's remote is a
+ * literal repository of the settings, and curl reaches proxy.golang.org only,
+ * writing nothing. What it promises: a credentialed run block runs these
+ * programs, reaches these hosts, and writes only publish-tmp/ (and the pinned
+ * npm's global prefix); anything else is refused.
  */
 export const CREDENTIALED_COMMANDS = {
-  // Shell builtins: control and state, never another program.
-  "[": ok,
-  test: ok,
-  ":": ok,
-  true: ok,
-  false: ok,
-  echo: ok,
-  printf: ok,
-  exit: ok,
-  return: ok,
-  cd: ok,
-  umask: ok,
-  set: ok,
-  read: ok,
-  local: ok,
-  export: (args) => args.map(assignmentProblem).find((p) => p !== null) ?? null,
-  // File and text tools: they read and write files and run nothing, except
-  // through the options refused here.
-  mkdir: ok,
-  rm: ok,
-  ls: ok,
-  cat: ok,
-  head: ok,
-  tail: ok,
-  wc: ok,
-  tr: ok,
-  cut: ok,
-  grep: ok,
-  basename: ok,
-  dirname: ok,
-  sha256sum: ok,
-  shasum: ok,
-  sort: (args) =>
-    args.some((a) => a.startsWith("--compress-program"))
-      ? "sort --compress-program runs a program"
-      : null,
-  find: (args) =>
-    args.some((a) => /^-(?:exec|execdir|ok|okdir)$/.test(a)) ? "find -exec runs a program" : null,
-  sed: (args) => {
-    const script = args.filter((a) => !/^-[nEr]$|^--quiet$/.test(a));
-    return script.length >= 1 && SED_SCRIPT.test(script[0]) && !script[0].startsWith("-")
+  "[": () => null,
+  test: () => null,
+  echo: () => null,
+  exit: (a) => argsProblem("exit", a, { positional: "literal" }),
+  printf: (a) =>
+    /^'[^']*'$/.test(a[0]?.raw ?? "") ? null : "printf's format is one single-quoted word",
+  umask: (a) => argsProblem("umask", a, { positional: "literal" }),
+  mkdir: (a) =>
+    argsProblem("mkdir", a, {
+      options: { "-p": FLAG },
+      positional: "literal",
+      check: scratchOnly("mkdir"),
+    }),
+  rm: (a) =>
+    argsProblem("rm", a, {
+      options: { "-rf": FLAG },
+      positional: "literal",
+      check: scratchOnly("rm"),
+    }),
+  ls: (a) => argsProblem("ls", a, { options: { "-1": FLAG }, positional: "literal" }),
+  find: (a) => argsProblem("find", a, { options: { "-type": LITERAL }, positional: "literal" }),
+  sort: (a) => argsProblem("sort", a, { positional: "none" }),
+  cut: (a) =>
+    argsProblem("cut", a, { options: { "-d": LITERAL, "-f": LITERAL }, positional: "none" }),
+  cmp: (a) => argsProblem("cmp", a, { positional: "literal" }),
+  sha256sum: (a) =>
+    argsProblem("sha256sum", a, {
+      options: { "--check": FLAG, "--strict": FLAG, "--quiet": FLAG },
+      positional: "none",
+    }),
+  sed: (a) =>
+    a.length === 1 && /^'[^']*'$/.test(a[0].raw) && SED_SCRIPT.test(a[0].text)
       ? null
-      : "sed runs only one s/…/…/ script ([gpI0-9] flags: never e or w)";
+      : "sed runs one single-quoted s/…/…/ script (flag g at most)",
+  curl: (a) =>
+    argsProblem("curl", a, {
+      options: {
+        "-fsS": FLAG,
+        "--tlsv1.2": FLAG,
+        "--proto": "==https",
+        "--retry": LITERAL,
+        "--retry-delay": LITERAL,
+        "--retry-all-errors": FLAG,
+      },
+      positional: "any",
+      check: (ops) =>
+        ops.length === 1 && ops[0].text.startsWith("https://proxy.golang.org/")
+          ? null
+          : "curl reaches https://proxy.golang.org/ only",
+    }),
+  git: gitProblem,
+  npm: (a, ctx) => {
+    if (PINNED_SELF_INSTALL.test(ctx.text)) return null;
+    if (a[0]?.raw !== "publish")
+      return "npm runs only `publish`, or installs itself at NPM_VERSION";
+    return argsProblem("npm publish", a.slice(1), {
+      options: { "--access": LITERAL, "--provenance": FLAG, "--ignore-scripts": FLAG },
+      positional: "any",
+      require: ["--ignore-scripts"],
+      check: (ops) => (ops.length === 1 ? null : "npm publish uploads one tarball"),
+    });
   },
-  curl: ok,
-  // git's transport, which runs nothing locally unless told to.
-  git: (args) => {
-    if (!GIT_SUBCOMMANDS.has(args[0]))
-      return `git runs only ${[...GIT_SUBCOMMANDS].join(", ")} (and no option before them)`;
-    return args.some((a) => /^--(?:upload-pack|receive-pack|exec)(?:=|$)/.test(a))
-      ? "git --upload-pack, --receive-pack and --exec run a program"
-      : null;
-  },
-  // Each registry client, for its upload only.
-  npm: (args, _name, text) =>
-    PINNED_SELF_INSTALL.test(text) || (args[0] === "publish" && args.includes("--ignore-scripts"))
-      ? null
-      : "npm runs only `publish --ignore-scripts`, or installs itself at NPM_VERSION",
-  gem: only("push"),
-  dotnet: only("nuget", "push"),
-  aws: only("s3api"),
-  rustup: only("toolchain", "install"),
+  gem: (a) =>
+    a[0]?.raw === "push"
+      ? argsProblem("gem push", a.slice(1), {
+          positional: "any",
+          check: (ops) => (ops.length === 1 ? null : "gem push uploads one gem"),
+        })
+      : "gem runs only `push`",
+  dotnet: (a) =>
+    a[0]?.raw === "nuget" && a[1]?.raw === "push"
+      ? argsProblem("dotnet nuget push", a.slice(2), {
+          options: { "--api-key": VALUE, "--source": "=https://api.nuget.org/v3/index.json" },
+          positional: "any",
+          require: ["--source"],
+        })
+      : "dotnet runs only `nuget push`",
+  rustup: (a) =>
+    a[0]?.raw === "toolchain" && a[1]?.raw === "install"
+      ? argsProblem("rustup toolchain install", a.slice(2), {
+          options: { "--profile": LITERAL },
+          eoo: "--",
+          positional: "any",
+        })
+      : "rustup runs only `toolchain install`",
 };
 
-/** Words a command may start with that are grammar, not a program. */
-const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until"]);
-for (const k of ["!", "{", "}", "esac"]) KEYWORDS.add(k);
-/** Headers whose remaining words are data (their substitutions are scanned on their own). */
-const HEADERS = new Set(["for", "case", "function", "select"]);
+/** The grammar keywords a credentialed run block may use: a plain if, nothing else. */
+const KEYWORDS = new Set(["if", "then", "else", "fi"]);
 
-/** Why one simple command may not run in a credentialed job, or null. */
-function commandProblem(words, functions, exceptions) {
+/** Why one lexed command may not run in a credentialed job, or null. */
+function commandProblem({ words, redirects }, exceptions, ctx) {
   let k = 0;
-  while (k < words.length && KEYWORDS.has(words[k])) k += 1;
-  const rest = words.slice(k);
-  if (rest.length === 0 || HEADERS.has(rest[0])) return null;
-  if (exceptions.some((re) => re.test(rest.join(" ")))) return null;
-  let n = 0;
-  for (; n < rest.length && /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(rest[n]); n += 1) {
-    const p = assignmentProblem(rest[n]);
-    if (p !== null) return p;
+  while (k < words.length && KEYWORDS.has(words[k].raw)) k += 1;
+  const cmd = words.slice(k);
+  for (const r of redirects) {
+    const tgt = r.word;
+    if (tgt.hasExpansion || tgt.text.split("/").includes(".."))
+      return `a redirection target must be a literal path (${tgt.raw})`;
+    if (r.op !== "<" && tgt.text !== "/dev/null" && !SCRATCH.test(tgt.text))
+      return `a credentialed job writes only publish-tmp/ or /dev/null (${tgt.raw})`;
   }
-  const cmd = rest.slice(n);
-  if (cmd.length === 0) return null; // assignments only
-  const [name, ...args] = cmd;
-  if (functions.has(name)) return null;
+  if (cmd.length === 0) return null;
+  const text = cmd.map((w) => w.raw).join(" ");
+  if (redirects.length === 0 && exceptions.some((re) => re.test(text))) return null;
+  if (cmd.some((w) => w.opExpansion))
+    return "an operator expansion (${NAME…}) is allowed only in a recorded exception";
+  const name = cmd[0].raw;
+  if (/^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(name)) return "a credentialed job assigns no variable";
   if (!Object.hasOwn(CREDENTIALED_COMMANDS, name))
     return `${name} is not a command a credentialed job runs`;
-  return CREDENTIALED_COMMANDS[name](args.map(dequote), name, cmd.join(" "));
+  return CREDENTIALED_COMMANDS[name](cmd.slice(1), { ...ctx, text });
 }
 
 /** Rules 4 and 6 (workflow scope) and the workflow-level half of rule 2. */
@@ -333,21 +528,21 @@ function workflowPins(file, doc, add) {
   return pins;
 }
 
-/** Rule 3's allowlist over one `run:` block of a job bound to an environment. */
-function credentialedRun(file, where, run, { jobId, add }) {
-  const { commands, functions, problems } = shellCommands(run);
+/** Rule 3's grammar and allowlist over one `run:` block of a job bound to an environment. */
+function credentialedRun(file, where, run, { jobId, remotes, add }) {
+  const { commands, problems } = lexStrict(run);
   for (const p of problems) add(file, where, `a credentialed job's run: block has ${p}`);
+  if (problems.length > 0) return;
   const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
-  for (const words of commands) {
-    const why = commandProblem(words, functions, exceptions);
-    if (why !== null) add(file, where, `a credentialed job runs \`${words.join(" ")}\`: ${why}`);
+  for (const c of commands) {
+    const why = commandProblem(c, exceptions, { remotes });
+    if (why !== null)
+      add(
+        file,
+        where,
+        `a credentialed job runs \`${c.words.map((w) => w.raw).join(" ")}\`: ${why}`,
+      );
   }
-  if (/\bGITHUB_(?:ENV|PATH)\b/.test(run))
-    add(
-      file,
-      where,
-      "a credentialed job writes GITHUB_ENV or GITHUB_PATH, which decide what a later step runs",
-    );
 }
 
 function runRules(file, where, run, ctx) {
@@ -426,6 +621,11 @@ function usesRules(file, where, step, ctx) {
     for (const k of ["run-id", "github-token", "repository"])
       if (k in w)
         add(file, where, `a credentialed job downloads an artifact from another run (${k}:)`);
+  // It lands where no script of the checkout lives, so it can replace none.
+  if (credentialed && repo === "actions/download-artifact" && !["release", "dist"].includes(w.path))
+    add(file, where, "a credentialed job downloads an artifact to release/ or dist/ only");
+  if (credentialed && repo === "actions/checkout" && w.path !== undefined)
+    add(file, where, "a credentialed job's checkout takes no path:");
   if (isPackOrPublish && repo === "actions/setup-node") {
     const v = String(w["node-version"] ?? "");
     if (!/^\$\{\{\s*env\.NODE_VERSION\s*\}\}$/.test(v) || pins.NODE_VERSION === undefined)
@@ -470,6 +670,36 @@ function tagPushOnly(doc) {
   );
 }
 
+/** The shell a credentialed step may run under: GitHub's default bash, named or not. */
+const BASH = new Set(["bash", "bash --noprofile --norc -eo pipefail {0}"]);
+/** Files through which a step changes what later steps run, or where the runner keeps them. */
+const RUNNER_FILES = /GITHUB_ENV|GITHUB_PATH|RUNNER_TEMP|runner\.temp|_runner_file_commands/;
+
+/**
+ * Rule 12's tag-push condition: `github.event_name == 'push'` and
+ * `startsWith(github.ref, 'refs/tags/')` as conjuncts of the top-level `&&`
+ * chain, with no `||`, `!` or `!=` anywhere that could turn them off.
+ */
+export function requiresTagPush(cond) {
+  if (typeof cond !== "string" || /\|\||!/.test(cond)) return false;
+  const top = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < cond.length; i += 1) {
+    if (cond[i] === "(") depth += 1;
+    else if (cond[i] === ")") depth -= 1;
+    else if (depth === 0 && cond.startsWith("&&", i)) {
+      top.push(cond.slice(start, i).trim());
+      start = i + 2;
+    }
+  }
+  top.push(cond.slice(start).trim());
+  return (
+    top.some((c) => /^github\.event_name\s*==\s*'push'$/.test(c)) &&
+    top.some((c) => /^startsWith\(\s*github\.ref\s*,\s*'refs\/tags\/'\s*\)$/.test(c))
+  );
+}
+
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
 function credentialedJobRules(file, jobId, job, doc, add) {
   if (job?.container !== undefined || job?.services !== undefined)
@@ -478,40 +708,55 @@ function credentialedJobRules(file, jobId, job, doc, add) {
       jobId,
       "a credentialed job runs in a container or beside services, whose images no rule pins",
     );
-  const cond = typeof job?.if === "string" ? job.if : "";
-  if (
-    !tagPushOnly(doc) &&
-    (!/github\.event_name\s*==\s*'push'/.test(cond) ||
-      !/startsWith\(\s*github\.ref\s*,\s*'refs\/tags\/'\s*\)/.test(cond) ||
-      cond.includes("||"))
-  )
+  if (typeof job?.["runs-on"] !== "string" || !job["runs-on"].startsWith("ubuntu-"))
     add(
       file,
       jobId,
-      "a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))",
+      "a credentialed job runs on a Linux (ubuntu-*) runner only, whose default shell is bash",
     );
+  if (!tagPushOnly(doc) && !requiresTagPush(job?.if))
+    add(
+      file,
+      jobId,
+      "a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    );
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
   const shells = [
     doc?.defaults?.run?.shell,
     job?.defaults?.run?.shell,
-    ...(Array.isArray(job?.steps) ? job.steps.map((s) => s?.shell) : []),
+    ...steps.map((s) => s?.shell),
   ];
   for (const sh of shells)
-    if (sh !== undefined && !/^bash(?:\s+[-\w]+)*(?:\s+\{0\})?$/.test(String(sh)))
-      add(file, jobId, `a credentialed job runs a shell other than bash (${String(sh)})`);
-  const envMaps = [
-    doc?.env,
-    job?.env,
-    ...(Array.isArray(job?.steps) ? job.steps.map((s) => s?.env) : []),
+    if (sh !== undefined && !BASH.has(String(sh)))
+      add(file, jobId, `a credentialed job runs a shell other than plain bash (${String(sh)})`);
+  const dirs = [
+    doc?.defaults?.run?.["working-directory"],
+    job?.defaults?.run?.["working-directory"],
+    ...steps.map((s) => s?.["working-directory"]),
   ];
-  for (const map of envMaps)
+  if (dirs.some((d) => d !== undefined))
+    add(
+      file,
+      jobId,
+      "a credentialed job sets working-directory: (an exception would resolve another script)",
+    );
+  for (const map of [doc?.env, job?.env, ...steps.map((s) => s?.env)])
     for (const [k, v] of Object.entries(map ?? {})) {
       const why = envProblem(k, String(v));
       if (why !== null) add(file, jobId, `a credentialed job's env: ${why}`);
     }
+  if (RUNNER_FILES.test(JSON.stringify(job ?? null)))
+    add(
+      file,
+      jobId,
+      "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+    );
 }
 
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
-function jobRules({ file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, add }) {
+function jobRules(args) {
+  const { file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, remotes, add } =
+    args;
   const env = envName(job);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   const credentialed = env !== undefined;
@@ -537,7 +782,17 @@ function jobRules({ file, jobId, job, doc, reusable, envs, workflows, allowed, u
   // Rule 3 holds EVERY job bound to an environment, not only a registry's:
   // cli-release's upload and promote hold the R2 token (#794 review).
   const isPackOrPublish = credentialed || jobId.startsWith("pack-");
-  const ctx = { jobId, credentialed, isPackOrPublish, workflows, allowed, used, pins, add };
+  const ctx = {
+    jobId,
+    credentialed,
+    isPackOrPublish,
+    workflows,
+    allowed,
+    used,
+    pins,
+    remotes,
+    add,
+  };
   if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
   if (typeof job?.uses === "string") callRules(file, jobId, job, ctx);
   for (const [i, step] of steps.entries()) {
@@ -667,12 +922,30 @@ export function findings({ settings, manifest, workflows }) {
   const envs = new Map((settings.environments ?? []).map((e) => [e.name, e]));
   const allowed = settings.allowedActions ?? [];
   const used = new Set();
+  // The repositories a credentialed git command may reach: this one, and each mirror.
+  const remotes = new Set([
+    "confeature/sdks",
+    ...(settings.mirrors ?? []).map((m) => m.repository),
+  ]);
   for (const [file, doc] of Object.entries(workflows)) {
     workflowRules(file, doc, add);
     const pins = workflowPins(file, doc, add);
     const reusable = triggersOf(doc).includes("workflow_call");
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {}))
-      jobRules({ file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, add });
+      jobRules({
+        file,
+        jobId,
+        job,
+        doc,
+        reusable,
+        envs,
+        workflows,
+        allowed,
+        used,
+        pins,
+        remotes,
+        add,
+      });
   }
   for (const a of allowed)
     if (!used.has(a)) add(SETTINGS, "-", `allows ${a}, which no workflow uses`);

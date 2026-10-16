@@ -374,9 +374,7 @@ jobs:
 
       - name: Check the artifact against the pack job's digest
         run: |
-          actual="$(sha256sum -- "release/$ARTIFACT" | cut -d' ' -f1)"
-          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
-            { echo "::error::release/$ARTIFACT is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+          printf '%s  %s\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict
 
       # Trusted publishing: npm exchanges this job's OIDC token. No token is
       # stored anywhere, and every package is set to disallow tokens.
@@ -486,10 +484,11 @@ jobs:
 
       - name: Check the artifact against the pack job's digests
         run: |
-          cd release
-          [ "$(ls -1 | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
-            { echo "::error::the file set differs from the pack job's"; exit 1; }
-          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict
+          mkdir -p publish-tmp
+          ls -1 release | sort > publish-tmp/got-files
+          printf '%s\n' "$EXPECTED_SUMS" | cut -d ' ' -f 3- | sort > publish-tmp/want-files
+          if cmp publish-tmp/got-files publish-tmp/want-files; then echo "the file set is the pack job's"; else echo "::error::the file set differs from the pack job's"; exit 1; fi
+          printf '%s\n' "$EXPECTED_SUMS" | sed 's|  |  release/|' | sha256sum --check --strict
 
       # Trusted publishing: the action exchanges this job's OIDC token with
       # PyPI and uploads PEP 740 attestations with the distributions.
@@ -541,7 +540,7 @@ jobs:
         run: pnpm run verify:manifest-author
 
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+        run: rustup toolchain install --profile minimal -- "$RUST_VERSION"
 
       # `cargo package` builds the packaged crate from the archive alone, so a
       # file missing from it fails here, not on the registry.
@@ -578,7 +577,7 @@ jobs:
           persist-credentials: false
 
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+        run: rustup toolchain install --profile minimal -- "$RUST_VERSION"
 
       # Trusted publishing: a crates.io token for this crate only, revoked by
       # the action's post step when the job ends.
@@ -586,11 +585,13 @@ jobs:
         id: auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
+      # From the root, with no working-directory: the unit's own
+      # .cargo/config.toml (MSRV-aware resolution) is restated as its variable.
       - name: Upload
-        working-directory: ${{ needs.setup.outputs.path }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo "+${RUST_VERSION}" publish --no-verify
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: cargo "+${RUST_VERSION}" publish --no-verify --manifest-path "${UNIT_PATH}/Cargo.toml"
 
   # ----------------------------------------------------------- rubygems ----
 
@@ -695,9 +696,7 @@ jobs:
 
       - name: Check the artifact against the pack job's digest
         run: |
-          actual="$(sha256sum -- "release/$ARTIFACT" | cut -d' ' -f1)"
-          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
-            { echo "::error::release/$ARTIFACT is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+          printf '%s  %s\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict
 
       # Trusted publishing: a short-lived API key for this gem only, written
       # where `gem push` reads it (GEM_HOST_API_KEY).
@@ -819,10 +818,11 @@ jobs:
 
       - name: Check the artifact against the pack job's digests
         run: |
-          cd release
-          [ "$(ls -1 | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
-            { echo "::error::the file set differs from the pack job's"; exit 1; }
-          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict
+          mkdir -p publish-tmp
+          ls -1 release | sort > publish-tmp/got-files
+          printf '%s\n' "$EXPECTED_SUMS" | cut -d ' ' -f 3- | sort > publish-tmp/want-files
+          if cmp publish-tmp/got-files publish-tmp/want-files; then echo "the file set is the pack job's"; else echo "::error::the file set differs from the pack job's"; exit 1; fi
+          printf '%s\n' "$EXPECTED_SUMS" | sed 's|  |  release/|' | sha256sum --check --strict
 
       # Trusted publishing: a one-hour API key from this job's OIDC token. The
       # policy on nuget.org names the account in NUGET_USER (an identifier,
@@ -923,8 +923,7 @@ jobs:
           sdk: ${{ env.DART_VERSION }}
 
       - name: Upload
-        working-directory: ${{ needs.setup.outputs.path }}
-        run: dart pub publish --force
+        run: dart pub publish --force --directory "${UNIT_PATH}"
 
   # ----------------------------------------------------------------- go ----
   # A Go module is published by its tag: proxy.golang.org builds the module zip
@@ -1029,23 +1028,25 @@ jobs:
         env:
           DEPLOY_KEY: ${{ secrets.GO_TAG_DEPLOY_KEY }}
         run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "::error::GO_TAG_DEPLOY_KEY is not set in environment sdk-publish-go"; exit 1; }
+          if [ -z "$DEPLOY_KEY" ]; then echo "::error::GO_TAG_DEPLOY_KEY is not set in environment sdk-publish-go"; exit 1; fi
           umask 077
-          mkdir -p "$RUNNER_TEMP/ssh"
-          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
-          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          mkdir -p publish-tmp/ssh
+          printf '%s\n' "$DEPLOY_KEY" > publish-tmp/ssh/key
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > publish-tmp/ssh/known_hosts
 
       # Never forced: a module tag that already exists is refused, and a
       # published Go version can never change (the checksum database keeps it).
       - name: Upload
+        env:
+          GIT_SSH_COMMAND: ssh -F /dev/null -i ${{ github.workspace }}/publish-tmp/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ github.workspace }}/publish-tmp/ssh/known_hosts
+          GIT_ALLOW_PROTOCOL: ssh
         run: |
-          [ -n "$RELEASE_TAG" ] || { echo "::error::the resolver gave no module tag"; exit 1; }
-          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
-          git push git@github.com:confeature/sdks.git "${GITHUB_SHA}:refs/tags/${RELEASE_TAG}"
+          if [ -z "$RELEASE_TAG" ]; then echo "::error::the resolver gave no module tag"; exit 1; fi
+          git push --atomic --end-of-options git@github.com:confeature/sdks.git "HEAD:refs/tags/${RELEASE_TAG}"
 
       - name: Remove the deploy key
         if: always()
-        run: rm -rf "$RUNNER_TEMP/ssh"
+        run: rm -rf publish-tmp/ssh
 
       # The first request makes the proxy fetch the tag; a version it cannot
       # serve turns this run red instead of failing a user's `go get`.
@@ -1105,12 +1106,12 @@ jobs:
         run: pnpm run verify:manifest-author
 
       - name: Pack the release artifact
-        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/$UNIT_NAME.bundle" > "$RUNNER_TEMP/split.out"
+        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/mirror.bundle" > "$RUNNER_TEMP/split.out"
 
       - name: Check the artifact against the resolved unit
         id: split
         run: |
-          file="$RUNNER_TEMP/release/$UNIT_NAME.bundle"
+          file="$RUNNER_TEMP/release/mirror.bundle"
           split="$(tail -n 1 "$RUNNER_TEMP/split.out")"
           head="$(git bundle list-heads "$file" refs/heads/main | cut -d' ' -f1)"
           [ -n "$split" ] && [ "$split" = "$head" ] ||
@@ -1165,41 +1166,38 @@ jobs:
 
       - name: Check the artifact against the pack job's digest and split
         run: |
-          file="$GITHUB_WORKSPACE/release/$UNIT_NAME.bundle"
-          actual="$(sha256sum -- "$file" | cut -d' ' -f1)"
-          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
-            { echo "::error::$file is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
-          git init --quiet --bare "$RUNNER_TEMP/mirror.git"
-          cd "$RUNNER_TEMP/mirror.git"
-          git bundle verify --quiet "$file"
-          git fetch --quiet "$file" refs/heads/main:refs/heads/main
-          got="$(git rev-parse refs/heads/main)"
-          [ -n "$SPLIT_SHA" ] && [ "$got" = "$SPLIT_SHA" ] ||
-            { echo "::error::the received main is $got, the pack job split $SPLIT_SHA"; exit 1; }
+          printf '%s  %s\n' "$EXPECTED_SHA256" release/mirror.bundle | sha256sum --check --strict
+          mkdir -p publish-tmp
+          git init --quiet --bare publish-tmp/mirror.git
+          git --git-dir=publish-tmp/mirror.git bundle verify --quiet --end-of-options release/mirror.bundle
+          git --git-dir=publish-tmp/mirror.git fetch --quiet --end-of-options release/mirror.bundle refs/heads/main:refs/heads/main
+          git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got-split
+          printf '%s\n' "$SPLIT_SHA" > publish-tmp/want-split
+          if cmp publish-tmp/got-split publish-tmp/want-split; then echo "main is the pack job's split"; else echo "::error::the received main is not the pack job's split $SPLIT_SHA"; exit 1; fi
 
       - name: Install the deploy key
         env:
           DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
         run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-packagist"; exit 1; }
+          if [ -z "$DEPLOY_KEY" ]; then echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-packagist"; exit 1; fi
           umask 077
-          mkdir -p "$RUNNER_TEMP/ssh"
-          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
-          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          mkdir -p publish-tmp/ssh
+          printf '%s\n' "$DEPLOY_KEY" > publish-tmp/ssh/key
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > publish-tmp/ssh/known_hosts
 
       # Never forced, and atomic: git refuses a main that does not fast-forward
       # and a tag that already exists, and then pushes neither.
       - name: Upload
+        env:
+          GIT_SSH_COMMAND: ssh -F /dev/null -i ${{ github.workspace }}/publish-tmp/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ github.workspace }}/publish-tmp/ssh/known_hosts
+          GIT_ALLOW_PROTOCOL: ssh
         run: |
-          [ -n "$MIRROR_REPOSITORY" ] && [ -n "$MIRROR_TAG" ] ||
-            { echo "::error::the resolver gave no mirror repository or tag"; exit 1; }
-          cd "$RUNNER_TEMP/mirror.git"
-          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
-          git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main" "${SPLIT_SHA}:refs/tags/${MIRROR_TAG}"
+          if [ -z "$MIRROR_TAG" ]; then echo "::error::the resolver gave no mirror tag"; exit 1; fi
+          git --git-dir=publish-tmp/mirror.git push --atomic --end-of-options git@github.com:confeature/confeature-php-sdk.git refs/heads/main:refs/heads/main "refs/heads/main:refs/tags/${MIRROR_TAG}"
 
       - name: Remove the deploy key
         if: always()
-        run: rm -rf "$RUNNER_TEMP/ssh"
+        run: rm -rf publish-tmp/ssh
 
   # ------------------------------------------------------------ swiftpm ----
   # The Swift SDK's mirror, exactly as Packagist's above. SwiftPM has no
@@ -1249,7 +1247,7 @@ jobs:
         run: pnpm run verify:manifest-author
 
       - name: Pack the release artifact
-        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/$UNIT_NAME.bundle" > "$RUNNER_TEMP/split.out"
+        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/mirror.bundle" > "$RUNNER_TEMP/split.out"
 
       # The coordinates users write in Package.swift must be the mirror's URL.
       # macOS has no sha256sum; `shasum -a 256` prints the same digest.
@@ -1258,7 +1256,7 @@ jobs:
         run: |
           [ "$UNIT_COORDINATES" = "https://github.com/$MIRROR_REPOSITORY" ] ||
             { echo "::error::the unit's coordinates ${UNIT_COORDINATES} are not its mirror ${MIRROR_REPOSITORY}"; exit 1; }
-          file="$RUNNER_TEMP/release/$UNIT_NAME.bundle"
+          file="$RUNNER_TEMP/release/mirror.bundle"
           split="$(tail -n 1 "$RUNNER_TEMP/split.out")"
           head="$(git bundle list-heads "$file" refs/heads/main | cut -d' ' -f1)"
           [ -n "$split" ] && [ "$split" = "$head" ] ||
@@ -1333,41 +1331,38 @@ jobs:
 
       - name: Check the artifact against the pack job's digest and split
         run: |
-          file="$GITHUB_WORKSPACE/release/$UNIT_NAME.bundle"
-          actual="$(sha256sum -- "$file" | cut -d' ' -f1)"
-          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
-            { echo "::error::$file is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
-          git init --quiet --bare "$RUNNER_TEMP/mirror.git"
-          cd "$RUNNER_TEMP/mirror.git"
-          git bundle verify --quiet "$file"
-          git fetch --quiet "$file" refs/heads/main:refs/heads/main
-          got="$(git rev-parse refs/heads/main)"
-          [ -n "$SPLIT_SHA" ] && [ "$got" = "$SPLIT_SHA" ] ||
-            { echo "::error::the received main is $got, the pack job split $SPLIT_SHA"; exit 1; }
+          printf '%s  %s\n' "$EXPECTED_SHA256" release/mirror.bundle | sha256sum --check --strict
+          mkdir -p publish-tmp
+          git init --quiet --bare publish-tmp/mirror.git
+          git --git-dir=publish-tmp/mirror.git bundle verify --quiet --end-of-options release/mirror.bundle
+          git --git-dir=publish-tmp/mirror.git fetch --quiet --end-of-options release/mirror.bundle refs/heads/main:refs/heads/main
+          git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got-split
+          printf '%s\n' "$SPLIT_SHA" > publish-tmp/want-split
+          if cmp publish-tmp/got-split publish-tmp/want-split; then echo "main is the pack job's split"; else echo "::error::the received main is not the pack job's split $SPLIT_SHA"; exit 1; fi
 
       - name: Install the deploy key
         env:
           DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
         run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-swiftpm"; exit 1; }
+          if [ -z "$DEPLOY_KEY" ]; then echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-swiftpm"; exit 1; fi
           umask 077
-          mkdir -p "$RUNNER_TEMP/ssh"
-          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
-          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          mkdir -p publish-tmp/ssh
+          printf '%s\n' "$DEPLOY_KEY" > publish-tmp/ssh/key
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > publish-tmp/ssh/known_hosts
 
       # Never forced, and atomic: git refuses a main that does not fast-forward
       # and a tag that already exists, and then pushes neither.
       - name: Upload
+        env:
+          GIT_SSH_COMMAND: ssh -F /dev/null -i ${{ github.workspace }}/publish-tmp/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ github.workspace }}/publish-tmp/ssh/known_hosts
+          GIT_ALLOW_PROTOCOL: ssh
         run: |
-          [ -n "$MIRROR_REPOSITORY" ] && [ -n "$MIRROR_TAG" ] ||
-            { echo "::error::the resolver gave no mirror repository or tag"; exit 1; }
-          cd "$RUNNER_TEMP/mirror.git"
-          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
-          git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main" "${SPLIT_SHA}:refs/tags/${MIRROR_TAG}"
+          if [ -z "$MIRROR_TAG" ]; then echo "::error::the resolver gave no mirror tag"; exit 1; fi
+          git --git-dir=publish-tmp/mirror.git push --atomic --end-of-options git@github.com:confeature/confeature-swift.git refs/heads/main:refs/heads/main "refs/heads/main:refs/tags/${MIRROR_TAG}"
 
       - name: Remove the deploy key
         if: always()
-        run: rm -rf "$RUNNER_TEMP/ssh"
+        run: rm -rf publish-tmp/ssh
 
   # -------------------------------------------------------------- maven ----
   # The JVM SDKs are served by a static Maven repository on Cloudflare R2
@@ -1529,6 +1524,12 @@ jobs:
       UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
       UNIT_VERSION: ${{ needs.setup.outputs.version }}
     steps:
+      - name: Checkout (tools/sdk-pack/maven-r2-upload.sh)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Receive the artifact (this run only)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -1537,113 +1538,31 @@ jobs:
 
       - name: Check the artifact against the pack job's digests
         run: |
-          cd release
-          [ "$(find . -type f | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
-            { echo "::error::the file set differs from the pack job's"; exit 1; }
-          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict --quiet
-          printf '%s\n' "$EXPECTED_SUMS" > "$RUNNER_TEMP/subjects.sha256"
+          mkdir -p publish-tmp
+          find release -type f | sed 's|^release/||' | sort > publish-tmp/got-files
+          printf '%s\n' "$EXPECTED_SUMS" | cut -d ' ' -f 3- | sort > publish-tmp/want-files
+          if cmp publish-tmp/got-files publish-tmp/want-files; then echo "the file set is the pack job's"; else echo "::error::the file set differs from the pack job's"; exit 1; fi
+          printf '%s\n' "$EXPECTED_SUMS" | sed 's|  |  release/|' | sha256sum --check --strict --quiet
+          printf '%s\n' "$EXPECTED_SUMS" > publish-tmp/subjects.sha256
 
       # One attestation whose subjects are every file, by its Maven path:
       # `gh attestation verify <file> --repo confeature/sdks` checks any one.
       - name: Attest every file (GitHub artifact attestation)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-checksums: ${{ runner.temp }}/subjects.sha256
+          subject-checksums: publish-tmp/subjects.sha256
 
-      # The runner's AWS CLI, on R2's S3 API (a bucket-scoped R2 token works on
-      # that API only, apps/cli/RELEASES-R2.md). Order: the version's artifacts,
-      # then the descriptors (.pom, .module) of the targets, then the root's,
-      # then the metadata, its checksums before it, so nothing names a file
-      # that is not there yet. A version file is put with If-None-Match: R2
-      # refuses an existing key atomically; one holding these exact bytes is a
-      # re-run of this job, kept; any other bytes mean the version is taken.
-      # Before anything is put, the stored metadata is read, and an upload
-      # that would drop a version it lists is refused.
+      # The upload is tools/sdk-pack/maven-r2-upload.sh, the job's one
+      # recorded exception: its ordering and immutability logic is outside the
+      # strict grammar a credentialed run block is held to (rule 3). It refuses
+      # metadata that drops a stored version, puts the version's files with
+      # If-None-Match, the metadata last, then reads the POM back.
       - name: Upload
         env:
           MAVEN_R2_ACCESS_KEY_ID: ${{ secrets.MAVEN_R2_ACCESS_KEY_ID }}
           MAVEN_R2_SECRET_ACCESS_KEY: ${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          [ -n "$MAVEN_R2_ACCESS_KEY_ID" ] && [ -n "$MAVEN_R2_SECRET_ACCESS_KEY" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] ||
-            { echo "::error::MAVEN_R2_ACCESS_KEY_ID, MAVEN_R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID must be set in environment sdk-publish-maven"; exit 1; }
-          export AWS_ACCESS_KEY_ID="$MAVEN_R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$MAVEN_R2_SECRET_ACCESS_KEY"
-          # Checksums only when the API requires them: newer AWS CLIs add CRC
-          # headers by default, which an S3-compatible endpoint need not accept.
-          export AWS_DEFAULT_REGION=auto AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AWS_PAGER=""
-          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          group="${UNIT_COORDINATES%%:*}"
-          root="${UNIT_COORDINATES#*:}"
-          base="${group//.//}"
-          s3() { aws s3api --endpoint-url "$endpoint" "$@"; }
-          type_of() {
-            case "$1" in
-              *.md5 | *.sha1 | *.sha256 | *.sha512) echo "text/plain" ;;
-              *.pom | *.xml) echo "application/xml" ;;
-              *.jar | *.aar) echo "application/java-archive" ;;
-              *.module | *.json) echo "application/json" ;;
-              *) echo "application/octet-stream" ;;
-            esac
-          }
-          rank() {
-            case "$1" in
-              */maven-metadata.xml) echo 4 ;;
-              */maven-metadata.xml.*) echo 3 ;;
-              "$base/$root/"*.pom* | "$base/$root/"*.module*) echo 2 ;;
-              *.pom* | *.module*) echo 1 ;;
-              *) echo 0 ;;
-            esac
-          }
-          put_once() {
-            local err
-            if err="$(s3 put-object --bucket "$MAVEN_BUCKET" --key "$1" --body "$1" --content-type "$(type_of "$1")" --cache-control "public, max-age=31536000, immutable" --if-none-match '*' 2>&1 >/dev/null)"; then
-              echo "uploaded $1"
-              return
-            fi
-            case "$err" in
-              *PreconditionFailed*) ;;
-              *) echo "::error::$1: $err"; exit 1 ;;
-            esac
-            s3 get-object --bucket "$MAVEN_BUCKET" --key "$1" "$RUNNER_TEMP/stored" >/dev/null
-            [ "$(sha256sum < "$RUNNER_TEMP/stored")" = "$(sha256sum < "$1")" ] ||
-              { echo "::error::$1 is already stored with other bytes: version ${UNIT_VERSION} is taken"; exit 1; }
-            echo "kept $1 (already stored, identical)"
-          }
-          keeps_stored_versions() {
-            local err
-            if ! err="$(s3 get-object --bucket "$MAVEN_BUCKET" --key "$1" "$RUNNER_TEMP/stored.xml" 2>&1 >/dev/null)"; then
-              case "$err" in
-                *NoSuchKey* | *"Not Found"*) return 0 ;;
-                *) echo "::error::cannot read the stored $1: $err"; exit 1 ;;
-              esac
-            fi
-            while IFS= read -r v; do
-              grep -qF "$v" "$1" ||
-                { echo "::error::$1 would drop ${v}, which the stored metadata lists"; exit 1; }
-            done < <(grep -o '<version>[^<]*</version>' "$RUNNER_TEMP/stored.xml")
-          }
-          cd release
-          while IFS= read -r f; do echo "$(rank "$f") $f"; done < <(find . -type f | sed 's|^\./||') | sort -k1,1n -k2,2 > "$RUNNER_TEMP/order"
-          while read -r r f; do
-            if [ "$r" -eq 4 ]; then keeps_stored_versions "$f"; fi
-          done < "$RUNNER_TEMP/order"
-          while read -r r f; do
-            if [ "$r" -le 2 ]; then put_once "$f"; fi
-          done < "$RUNNER_TEMP/order"
-          while read -r r f; do
-            if [ "$r" -ge 3 ]; then
-              s3 put-object --bucket "$MAVEN_BUCKET" --key "$f" --body "$f" --content-type "$(type_of "$f")" --cache-control "public, max-age=300" >/dev/null
-              echo "uploaded $f"
-            fi
-          done < "$RUNNER_TEMP/order"
-
-      # Through the public host, as a consumer resolves it.
-      - name: Ask maven.confeature.io for the release
-        run: |
-          group="${UNIT_COORDINATES%%:*}"
-          root="${UNIT_COORDINATES#*:}"
-          pom="${group//.//}/${root}/${UNIT_VERSION}/${root}-${UNIT_VERSION}.pom"
-          curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors "$MAVEN_URL/$pom"
+        run: bash tools/sdk-pack/maven-r2-upload.sh release
 
   # ------------------------------------------------------------ conclude ----
 

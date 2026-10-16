@@ -234,10 +234,7 @@ jobs:
       - name: Check the build against the release job's digest
         env:
           EXPECTED: ${{ needs.release.outputs.sums-digest }}
-        run: |
-          actual="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
-          [ -n "$EXPECTED" ] && [ "$actual" = "$EXPECTED" ] ||
-            { echo "::error::SHA256SUMS digest $actual != release job's $EXPECTED"; exit 1; }
+        run: printf '%s  %s\n' "$EXPECTED" dist/SHA256SUMS | sha256sum --check --strict
 
       - name: Upload v<ver>/ to R2
         env:
