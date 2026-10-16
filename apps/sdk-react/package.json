@@ -1,6 +1,6 @@
 {
   "name": "@confeature/sdk-react",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Confeature React SDK — Provider + hooks layer on top of @confeature/sdk-browser-js. Drop-in compatible with configcat-react.",
   "license": "MIT",
   "author": "MakerLabs",

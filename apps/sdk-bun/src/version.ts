@@ -9,4 +9,4 @@
  * stamps every SDK at `confeature-sdk-shared/<version>`; per-SDK files
  * like this one specialise the marker so traffic is attributable.
  */
-export const CONFEATURE_SDK_VERSION = "confeature-sdk-bun/0.1.0";
+export const CONFEATURE_SDK_VERSION = "confeature-sdk-bun/0.1.1";

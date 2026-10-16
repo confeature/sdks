@@ -1,6 +1,6 @@
 {
   "name": "@confeature/sdk-bun",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Confeature Bun SDK — drop-in compatible with configcat-js, idiomatic Bun runtime (Bun.file cache + globalThis.fetch).",
   "license": "MIT",
   "author": "MakerLabs",

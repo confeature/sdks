@@ -1,6 +1,6 @@
 {
   "name": "@confeature/sdk-deno",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Confeature Deno SDK — drop-in compatible with configcat-js, idiomatic Deno runtime (Deno.writeTextFile cache + globalThis.fetch + permission-aware fallback).",
   "license": "MIT",
   "author": "MakerLabs",

@@ -6,4 +6,4 @@
  * `@confeature/sdk-browser-js`'s `HttpConfigFetcher`) so the back-end
  * can track adoption per-runtime.
  */
-export const CONFEATURE_SDK_VERSION = "0.1.0";
+export const CONFEATURE_SDK_VERSION = "0.1.1";

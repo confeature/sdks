@@ -1,6 +1,6 @@
 {
   "name": "@confeature/sdk-cloudflare-worker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Confeature Cloudflare Worker SDK — drop-in compatible with @configcat/cloudflare-worker-client, idiomatic Workers runtime (KV cache + globalThis.fetch).",
   "license": "MIT",
   "author": "MakerLabs",

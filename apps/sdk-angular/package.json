@@ -1,6 +1,6 @@
 {
   "name": "@confeature/sdk-angular",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Confeature Angular SDK — ConfeatureService + provideConfeature + ConfeatureModule + *cfFlag directive + cfFlag pipe on top of @confeature/sdk-browser-js. ConfigCat publishes no official Angular SDK; drop-in compatible with the configcat-js runtime surface.",
   "license": "MIT",
   "author": "MakerLabs",
