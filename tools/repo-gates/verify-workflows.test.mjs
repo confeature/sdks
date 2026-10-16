@@ -1253,6 +1253,16 @@ jobs:
       /continue-on-error/,
     ],
     ["needs:", VERIFY.replace("  verify:\n", "  verify:\n    needs: other\n"), /needs:/],
+    [
+      "a job env",
+      VERIFY.replace("  verify:\n", "  verify:\n    env:\n      NODE_OPTIONS: x\n"),
+      /a job sets env:/,
+    ],
+    [
+      "a workflow env name off the allowlist",
+      `${VERIFY}env:\n  NODE_OPTIONS: --require ./x.js\n`,
+      /sets env NODE_OPTIONS, which PUBLIC_GATE_ENV/,
+    ],
   ])("refuses %s", (_, text, re) => fires(gate(text), re));
 });
 
@@ -1413,4 +1423,62 @@ describe("9 below the workflow: no redefined pin, every *_VERSION exact (#794 re
         ),
       ),
     ).toEqual([]));
+});
+
+describe("14 a status function cannot run a job past a failed workflow-rules (#794 review, round 4)", () => {
+  const W = (jobs) => parseYaml(`on: push\njobs:\n${jobs}`);
+  const GATE = "  workflow-rules:\n    steps: []\n  setup:\n    needs: workflow-rules\n";
+  const pub = (jobs) =>
+    releaseGateFindings({
+      "sdk-publish.yml": W(`${GATE}${jobs}`),
+      "cli-release.yml": W("  workflow-rules:\n    steps: []\n"),
+    }).map((f) => `${f.job}: ${f.why}`);
+  const PAST = /can run when workflow-rules did not succeed/;
+  it.each([
+    ["always() alone", "always()"],
+    ["failure() alone", "failure()"],
+    ["the success conjunct inside an ||", "always() && (needs.setup.result == 'success' || true)"],
+    [
+      "a success conjunct of a job that is not a need",
+      "always() && needs.other.result == 'success'",
+    ],
+    ["!cancelled()", "!cancelled()"],
+  ])("refuses %s", (_, cond) =>
+    // A block scalar: `!` would otherwise be a YAML tag.
+    expect(pub(`  pack-x:\n    needs: setup\n    if: >-\n      ${cond}\n`).join()).toMatch(PAST),
+  );
+  it("refuses a chain whose link runs past the gate", () =>
+    expect(
+      pub(
+        `  pack-x:\n    needs: setup\n    if: always()\n  publish-x:\n    needs: pack-x\n    if: always() && needs.pack-x.result == 'success'\n`,
+      ).join(),
+    ).toMatch(/publish-x: can run when/));
+  it.each([
+    ["no status function", "needs.setup.outputs.gate == 'test'"],
+    ["always() with the need's success", "always() && needs.setup.result == 'success'"],
+  ])("accepts %s", (_, cond) =>
+    expect(pub(`  pack-x:\n    needs: setup\n    if: ${cond}\n`)).toEqual([]),
+  );
+  it("conclude runs always() only while its script fails on the gate", () => {
+    const conclude = (run) =>
+      pub(
+        `  conclude:\n    needs: [workflow-rules, setup]\n    if: always()\n    steps:\n      - run: ${JSON.stringify(run)}\n`,
+      );
+    expect(conclude('if (needs["workflow-rules"]?.result !== "success") process.exit(1)')).toEqual(
+      [],
+    );
+    expect(conclude("echo ok").join()).toMatch(/conclude: can run when/);
+  });
+  it.each(["if: false", "continue-on-error: true"])("refuses a gate step with %s", (kv) =>
+    expect(
+      releaseGateFindings({
+        "sdk-publish.yml": W(
+          `  workflow-rules:\n    steps:\n      - ${kv}\n        run: pnpm run verify:workflows\n`,
+        ),
+        "cli-release.yml": W("  workflow-rules:\n    steps: []\n"),
+      })
+        .map((f) => f.why)
+        .join(),
+    ).toMatch(/step \? sets (if|continue-on-error):, so the rules can be skipped/),
+  );
 });

@@ -757,8 +757,8 @@ const RUNNER_FILES = /GITHUB_ENV|GITHUB_PATH|RUNNER_TEMP|runner\.temp|_runner_fi
  * `startsWith(github.ref, 'refs/tags/')` as conjuncts of the top-level `&&`
  * chain, with no `||`, `!` or `!=` anywhere that could turn them off.
  */
-export function requiresTagPush(cond) {
-  if (typeof cond !== "string" || /\|\||!/.test(cond)) return false;
+/** The top-level `&&` conjuncts of a GitHub expression, trimmed. */
+export function topConjuncts(cond) {
   const top = [];
   let depth = 0;
   let start = 0;
@@ -771,6 +771,12 @@ export function requiresTagPush(cond) {
     }
   }
   top.push(cond.slice(start).trim());
+  return top;
+}
+
+export function requiresTagPush(cond) {
+  if (typeof cond !== "string" || /\|\||!/.test(cond)) return false;
+  const top = topConjuncts(cond);
   return (
     top.some((c) => /^github\.event_name\s*==\s*'push'$/.test(c)) &&
     top.some((c) => /^startsWith\(\s*github\.ref\s*,\s*'refs\/tags\/'\s*\)$/.test(c))
@@ -1066,6 +1072,9 @@ export function findings({ settings, manifest, workflows }) {
   return out;
 }
 
+/** The only workflow-level env verify.yml may set: its two tool pins. */
+export const PUBLIC_GATE_ENV = new Set(["NODE_VERSION", "DENO_VERSION"]);
+
 /** The steps the public gate must run, each exactly, in a job and a step nothing can skip. */
 export const PUBLIC_GATE_STEPS = ["pnpm run verify", "deno task --cwd apps/cli test"];
 
@@ -1100,6 +1109,8 @@ export function publicGateFindings(workflows) {
   ])
     for (const k of keys)
       if (on?.[t]?.[k] !== undefined) add(`filters ${t} by ${k}, so a change can skip the gate`);
+  for (const k of Object.keys(doc?.env ?? {}))
+    if (!PUBLIC_GATE_ENV.has(k)) add(`sets env ${k}, which PUBLIC_GATE_ENV does not allow`);
   if (
     doc?.defaults?.run?.shell !== undefined ||
     doc?.defaults?.run?.["working-directory"] !== undefined
@@ -1109,6 +1120,7 @@ export function publicGateFindings(workflows) {
   for (const job of jobs) {
     if (job?.needs !== undefined) add("a job waits on another (needs:), which can skip it");
     if (job?.defaults?.run !== undefined) add("a job sets defaults.run");
+    if (job?.env !== undefined) add("a job sets env:, which can change what the gate runs");
     for (const s of Array.isArray(job?.steps) ? job.steps : []) {
       if (s?.shell !== undefined && s.shell !== "bash")
         add(`a step runs a shell other than bash (${String(s.shell)})`);
@@ -1129,6 +1141,26 @@ export function publicGateFindings(workflows) {
     if (!runs) add(`has no step that runs \`${gate}\` and cannot be skipped`);
   }
   return out;
+}
+
+const STATUS_FN = /\b(?:always|failure|cancelled)\(\)/;
+
+/**
+ * sdk-publish.yml's conclude job runs `always()` to report the run, holds
+ * nothing, and fails red itself when workflow-rules did not succeed: the one
+ * job rule 14 lets run past a failed gate, and only while its script says so.
+ */
+function reportsGateFailure(file, id, job) {
+  return (
+    file === PUBLISH_WORKFLOW &&
+    id === "conclude" &&
+    envName(job) === undefined &&
+    (job?.steps ?? []).some(
+      (s) =>
+        typeof s?.run === "string" &&
+        s.run.includes(`needs["${RELEASE_GATE_JOB}"]?.result !== "success"`),
+    )
+  );
 }
 
 /** The first job of each release workflow, which runs these rules over the tagged commit. */
@@ -1153,6 +1185,31 @@ export function releaseGateFindings(workflows) {
     }
     for (const k of ["needs", "if", "continue-on-error"])
       if (gate[k] !== undefined) add(RELEASE_GATE_JOB, `sets ${k}:, so the rules can be skipped`);
+    for (const s of Array.isArray(gate.steps) ? gate.steps : [])
+      for (const k of ["if", "continue-on-error"])
+        if (s?.[k] !== undefined)
+          add(RELEASE_GATE_JOB, `step ${s.name ?? "?"} sets ${k}:, so the rules can be skipped`);
+    // Whether a job runs only when workflow-rules succeeded. Without a status
+    // function, GitHub requires every need to succeed; with always(),
+    // failure() or cancelled() it requires nothing, so the condition itself
+    // must name a need that implies the gate: `needs.<id>.result == 'success'`
+    // as a top-level conjunct (round 4).
+    const memo = new Map();
+    const implies = (id) => {
+      if (id === RELEASE_GATE_JOB) return true;
+      if (memo.has(id)) return memo.get(id);
+      memo.set(id, false);
+      const cond = typeof jobs[id]?.if === "string" ? jobs[id].if : "";
+      const ds = needsOf(id);
+      const ok = !STATUS_FN.test(cond)
+        ? ds.some(implies)
+        : topConjuncts(cond).some((c) => {
+            const m = /^needs\.([\w-]+)\.result\s*==\s*'success'$/.exec(c);
+            return m !== null && ds.includes(m[1]) && implies(m[1]);
+          });
+      memo.set(id, ok);
+      return ok;
+    };
     const needsOf = (id) => {
       const n = jobs[id]?.needs;
       return Array.isArray(n) ? n : n === undefined ? [] : [n];
@@ -1168,6 +1225,11 @@ export function releaseGateFindings(workflows) {
         stack.push(...needsOf(n));
       }
       if (!seen.has(RELEASE_GATE_JOB)) add(id, `does not wait on ${RELEASE_GATE_JOB}`);
+      else if (!implies(id) && !reportsGateFailure(file, id, jobs[id]))
+        add(
+          id,
+          `can run when ${RELEASE_GATE_JOB} did not succeed: its if: uses always()/failure()/cancelled() without needs.<id>.result == 'success' for a need that implies it`,
+        );
     }
   }
   return out;
