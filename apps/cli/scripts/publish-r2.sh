@@ -83,7 +83,12 @@ newer() {
 }
 
 put() { # <key> <file> <content-type> <cache-control>
-  "${WRANGLER_CMD[@]}" r2 object put "$BUCKET/$1" --file "$2" \
+  # Absolute, always: the default wrangler runs through `pnpm --dir …`, which
+  # changes directory, so a relative --file would name nothing (cli-v0.3.0's
+  # first upload failed on exactly that, before any put).
+  local file
+  file="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")" || die "cannot resolve $2"
+  "${WRANGLER_CMD[@]}" r2 object put "$BUCKET/$1" --file "$file" \
     --content-type "$3" --cache-control "$4" --remote
 }
 

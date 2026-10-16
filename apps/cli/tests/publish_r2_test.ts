@@ -13,12 +13,15 @@ const ROOT = new URL("../../../", import.meta.url).pathname;
 
 const WRANGLER_STUB = `#!/usr/bin/env bash
 # r2 object put <bucket>/<key> --file F --content-type T --cache-control C --remote
+# STUB_CWD mimics the real default, \`pnpm --dir … exec wrangler\`, which changes directory.
+[ -n "$STUB_CWD" ] && cd "$STUB_CWD"
 key="\${4#*/}"; file=""; ct=""; cc=""
 shift 4
 while [ $# -gt 0 ]; do case "$1" in
   --file) file="$2"; shift 2;; --content-type) ct="$2"; shift 2;;
   --cache-control) cc="$2"; shift 2;; *) shift;; esac; done
 [ -n "$FAIL_PUT" ] && [ "$key" = "$FAIL_PUT" ] && exit 1
+[ -f "$file" ] || { echo "The file \"$file\" does not exist." >&2; exit 1; }
 mkdir -p "$BUCKET_DIR/$(dirname "$key")"
 cp "$file" "$BUCKET_DIR/$key"
 echo "$key|$ct|$cc" >> "$PUT_LOG"
@@ -267,4 +270,21 @@ Deno.test("with no CLI_BASE_URL, the host comes from install.sh's BASE_URL", () 
   const urls = Deno.readTextFileSync(`${f.dir}/curl.log`);
   const base = Deno.readTextFileSync(`${ROOT}apps/cli/install.sh`).match(/^BASE_URL="(.*)"$/m)![1];
   assertStringIncludes(urls, `${base}/latest`);
+});
+
+Deno.test("a relative dist dir still uploads when wrangler runs from another directory", async () => {
+  // cli-v0.3.0's first run: the workflow passes \`dist\` relative to the
+  // checkout, and the real wrangler runs under \`pnpm --dir\`, elsewhere.
+  const f = fixture();
+  await build(f);
+  const { code, stdout, stderr } = new Deno.Command("bash", {
+    args: [SCRIPT, "upload", "1.2.3", "dist"],
+    cwd: f.dir,
+    env: { ...f.env, STUB_CWD: "/" },
+  }).outputSync();
+  const dec = new TextDecoder();
+  if (code !== 0) throw new Error(dec.decode(stdout) + dec.decode(stderr));
+  if (!puts(f).some((p) => p.startsWith("v1.2.3/SHA256SUMS|"))) {
+    throw new Error("SHA256SUMS was not put");
+  }
 });
