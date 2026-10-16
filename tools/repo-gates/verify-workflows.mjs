@@ -306,10 +306,10 @@ const call = (uses, inputs) => ({ call: uses, with: inputs });
 /**
  * A run step of a FROZEN_JOBS job: its name, its run: text by sha256, and its
  * id, if:, env:, working-directory, shell, continue-on-error when it has
- * them. To record a reviewed change, copy the `got` surface the finding
- * prints (it carries the new sha256), or compute it with
- *   node -e 'const y=require("yaml"),f=require("fs");const s=y.parse(f.readFileSync(process.argv[1],"utf8")).jobs[process.argv[2]].steps[+process.argv[3]];console.log(require("crypto").createHash("sha256").update(s.run??s.with.script).digest("hex"))' <workflow> <job> <index>
- * (the same command gives a github-script `script:` sha256).
+ * them. To record a reviewed change, run `pnpm run verify:workflows` and copy
+ * the `got` surface its finding prints (it carries the new sha256; the same
+ * holds for a github-script `script:`), as CONTRIBUTING.md's "Changing a
+ * frozen release job" says.
  */
 const runStep = (name, sha256, extra = {}) => ({ name, run: { sha256 }, ...extra });
 /** release's and upload's check of the artifact against the build job's SHA256SUMS digest. */
@@ -598,8 +598,8 @@ export const ACTION_SURFACE = {
       step(PIN.githubScript, {
         if: "failure()",
         with: {
-          // The script by sha256: regenerate it as runStep's comment says (the
-          // finding on a changed script prints the new one).
+          // The script by sha256: copy the new one from the finding a changed
+          // script prints (CONTRIBUTING.md, "Changing a frozen release job").
           script: { sha256: "cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6" },
         },
       }),
@@ -663,13 +663,22 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
           : (Array.isArray(job?.steps) ? job.steps : [])
               .filter((s) => FROZEN_JOBS.has(`${file}#${jobId}`) || typeof s?.uses === "string")
               .map(surfaceOf);
+      // A whole-frozen job counts and names its steps; any other, its actions.
+      const frozen = FROZEN_JOBS.has(`${file}#${jobId}`);
+      const unit = frozen ? "steps" : "actions";
       if (got.length !== want.length)
-        add(`runs ${got.length} actions, ACTION_SURFACE records ${want.length}`);
+        add(`runs ${got.length} ${unit}, ACTION_SURFACE records ${want.length}`);
       for (let i = 0; i < Math.max(got.length, want.length); i += 1)
-        if (canonical(got[i] ?? null) !== canonical(want[i] ?? null))
+        if (canonical(got[i] ?? null) !== canonical(want[i] ?? null)) {
+          // Frozen: got[i] is job.steps[i], so the workflow's step names it.
+          const name = job?.steps?.[i]?.name ?? want[i]?.name;
+          const label = frozen
+            ? `step ${i + 1}${typeof name === "string" ? ` (${name})` : ""}`
+            : `action ${i + 1}`;
           add(
-            `action ${i + 1} is ${canonical(got[i] ?? null)}, ACTION_SURFACE records ${canonical(want[i] ?? null)}`,
+            `${label} is ${canonical(got[i] ?? null)}, ACTION_SURFACE records ${canonical(want[i] ?? null)}`,
           );
+        }
     }
     for (const jobId of Object.keys(jobs)) {
       const key = `${file}#${jobId}`;

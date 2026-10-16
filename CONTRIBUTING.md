@@ -80,3 +80,12 @@ checks that every declared gate is wired where this table says, and named in it.
 | `sdk-publish.yml`, the npm pack job, before its dry run                                                | `check:npm-tarball`: the tarball is the resolved unit, has no `workspace:` range and a LICENSE, and contains every entry point it names                                                                                                                               |
 | `sdk-publish.yml`, the Packagist and SwiftPM pack jobs, before their dry runs                          | `split-mirror`: the mirror's history is the unit's split, refused when any commit carries an author, committer or message address that is not a noreply one                                                                                                           |
 | `sdk-publish.yml`, the Maven pack job, before its probe of the live repository                         | `check:maven-release`: the release is exactly the unit's, at the resolved version, with matching checksums, sources and javadoc jars, POMs carrying no address, and metadata that keeps every live version                                                            |
+
+## Changing a frozen release job
+
+`verify:workflows` freezes the release workflows (`tools/repo-gates/verify-workflows.mjs`, rule 17): every action of `sdk-publish.yml`, `cli-release.yml` and `release-gate.yml` is recorded in `ACTION_SURFACE`, and the jobs in `FROZEN_JOB_KEYS` (cli-release's build, release and upload, release-gate's test) are recorded whole, run steps by the sha256 of their `run:` text, with their job keys and their workflow's `env:` and `defaults:`. To change one:
+
+1. Change the step (or job) in the workflow.
+2. Run `pnpm run verify:workflows`. It prints, for each step that changed, `step <n> (<name>) is <got>, ACTION_SURFACE records <want>`; `<got>` carries the new `run.sha256` (or, for github-script, `with.script.sha256`).
+3. Copy `<got>` into the matching entry of `ACTION_SURFACE` (or `FROZEN_JOB_KEYS`, `FROZEN_WORKFLOW_KEYS`), then rerun until it prints `verify-workflows: ok`.
+4. Commit the workflow and the recorded surface together, and review them together: the hash records that this exact text was reviewed, nothing more.

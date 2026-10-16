@@ -1909,7 +1909,7 @@ describe("every CLI job that publishes re-checks the tag is on main (round 10, M
       [
         `B1 ${job}: the on-main step deleted`,
         (w) => void w[C].jobs[job].steps.splice(at(w, job), 1),
-        /runs \d+ actions, ACTION_SURFACE records \d+/,
+        /runs \d+ steps, ACTION_SURFACE records \d+/,
       ],
       [
         `B2 ${job}: the on-main step with if: false`,
@@ -2044,7 +2044,7 @@ describe("the write-token exemption skips rules 3 and 15 only (round 10, MED-2)"
       [
         "E4 test: a project script on the host before github-script",
         (w) => void T(w).steps.splice(1, 0, { name: "x", run: "bash scripts/prepare.sh\n" }),
-        /test: runs \d+ actions, ACTION_SURFACE records \d+/,
+        /test: runs \d+ steps, ACTION_SURFACE records \d+/,
       ],
       [
         "E8 test: a job env from github.token",
@@ -2393,4 +2393,29 @@ describe("any route to the token or a secret is one (round 11, F2)", () => {
     ["needs.secrets.outputs.x", false],
     ["'github.token'", false],
   ])("readsCredentialContext(%s) is %s", (e, want) => expect(readsCredentialContext(e)).toBe(want));
+});
+
+describe("a frozen job's finding names the step (round 11)", () => {
+  it("says `step <n> (<name>)` for a run step and `action <n>` outside frozen jobs", () => {
+    const got = added((w) => {
+      w[C].jobs.build.steps.find((s) => s.id === "sums").run += "echo x\n";
+      w[P].jobs["pack-npm"].steps.find((s) => String(s.uses).startsWith("actions/setup-node")).with[
+        "node-version"
+      ] = "1";
+    });
+    expect(got).toContainEqual(
+      expect.stringMatching(/^cli-release\.yml: build: step 6 \(Generate SHA256SUMS\) is \{/),
+    );
+    expect(got).toContainEqual(
+      expect.stringMatching(/^sdk-publish\.yml: pack-npm: action 3 is \{/),
+    );
+  });
+  it("names a frozen action step by its workflow name", () => {
+    const got = added((w) => void (w[C].jobs.release.steps[0].with["fetch-depth"] = 1));
+    expect(got).toContainEqual(
+      expect.stringMatching(
+        /^cli-release\.yml: release: step 1 \(Checkout \(release-github\.sh\)\) is/,
+      ),
+    );
+  });
 });
