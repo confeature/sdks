@@ -14,7 +14,8 @@
  * The publish table is `publish[]` in `dagger/sdk-manifest.json`: one unit per
  * releasable package. A tag is `tagFormat` from that file, `sdk-<name>-v<semver>`.
  * It is refused, before any job that can reach a credential, when:
- *   - it is not shaped as `tagFormat` (strict regex, semver without build metadata);
+ *   - it is not shaped as `tagFormat` (strict regex, semver without build metadata),
+ *     or a dry run's `--version` is not that semver;
  *   - it names no unit;
  *   - the unit's registry is `none`, or it is `blockedBy` an open issue;
  *   - the unit's gate is `pending` (nothing ships without a gate);
@@ -209,6 +210,10 @@ export async function resolvePublish({
     ({ name, version: tagVersion } = m.groups);
   } else {
     name = unitName;
+    // A dispatch input, which reaches the outputs (and the pack job's paths and
+    // the mirror tag) like a tag's version does: held to the same semver.
+    if (dryRunVersion !== undefined && !new RegExp(`^${SEMVER}$`).test(dryRunVersion))
+      throw new Refusal(`--version "${dryRunVersion}" is not semver (X.Y.Z[-pre])`);
     tagVersion = dryRunVersion;
   }
 
@@ -298,7 +303,7 @@ async function main() {
       appendFileSync(
         process.env.GITHUB_OUTPUT,
         Object.entries(out)
-          .map(([k, v]) => `${k}=${v}\n`)
+          .map(([k, v]) => `${k}=${String(v)}\n`)
           .join(""),
       );
     console.log(JSON.stringify(out));

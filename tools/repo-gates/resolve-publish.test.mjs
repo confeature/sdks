@@ -27,8 +27,9 @@ const unpublished = async () => false;
 
 describe("the real publish table", () => {
   it("has exactly one unit per roster entry, plus shared", () => {
-    const units = REAL.publish.map((u) => u.name).sort();
-    const expected = [...REAL.sdks.map((s) => s.name), "shared"].sort();
+    const byName = (a, b) => a.localeCompare(b);
+    const units = REAL.publish.map((u) => u.name).sort(byName);
+    const expected = [...REAL.sdks.map((s) => s.name), "shared"].sort(byName);
     expect(units).toEqual(expected);
   });
 
@@ -236,6 +237,24 @@ describe("every refusal fails closed", () => {
       { unit: "a" },
       /needs --version/,
     ));
+  // A workflow_dispatch input reaches the outputs, and through them the pack
+  // job's paths and the mirror tag: it is held to the tag's semver, not only to
+  // the safe character set (#794 review: `1.0.0/../x` and `{x}` passed).
+  it.each(["1.0.0/../x", "{x}", "1.0", "v1.0.0", "1.0.0+build", "01.0.0", ""])(
+    "a dry-run --version that is not semver (%j)",
+    (version) =>
+      refused(
+        fixture([unit({ versionSource: "tag" })], [covered()], {}),
+        { unit: "a", version },
+        /--version .* is not semver/,
+      ),
+  );
+  it("a dry-run --version that is semver is the version", async () => {
+    const root = fixture([unit({ versionSource: "tag" })], [covered()], {});
+    expect((await resolvePublish({ root, unit: "a", version: "1.2.3-rc.1" })).version).toBe(
+      "1.2.3-rc.1",
+    );
+  });
   it("unsafe characters in an emitted value", () =>
     refused(
       fixture([unit({ coordinates: "@x/a;rm -rf" })], [covered()], base),
