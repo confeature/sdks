@@ -1164,7 +1164,6 @@ jobs:
       EXPECTED_SHA256: ${{ needs.pack-packagist.outputs.sha256 }}
       SPLIT_SHA: ${{ needs.pack-packagist.outputs.split }}
       UNIT_NAME: ${{ needs.setup.outputs.name }}
-      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
       MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
       # git reads no global or system configuration (rule 3, round 4).
       GIT_CONFIG_GLOBAL: /dev/null
@@ -1332,7 +1331,6 @@ jobs:
       EXPECTED_SHA256: ${{ needs.pack-swiftpm.outputs.sha256 }}
       SPLIT_SHA: ${{ needs.pack-swiftpm.outputs.split }}
       UNIT_NAME: ${{ needs.setup.outputs.name }}
-      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
       MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
       # git reads no global or system configuration (rule 3, round 4).
       GIT_CONFIG_GLOBAL: /dev/null

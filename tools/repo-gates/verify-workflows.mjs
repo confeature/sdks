@@ -225,7 +225,6 @@ export const CREDENTIALED_ENV = new Set([
   "EXPECTED_SUMS",
   "SPLIT_SHA",
   "RELEASE_TAG",
-  "MIRROR_REPOSITORY",
   "MIRROR_TAG",
   "TAG",
   // Credentials, each read by its one upload.
@@ -527,6 +526,15 @@ function commandProblem({ words, redirects }, exceptions, ctx) {
       return `a redirection target must be a literal path (${tgt.raw})`;
     if (r.op !== "<" && tgt.text !== "/dev/null" && !SCRATCH.test(tgt.text))
       return `a credentialed job writes only publish-tmp/ or /dev/null (${tgt.raw})`;
+    // Input only from what the job received or wrote: never a device (bash
+    // opens /dev/tcp/<host>/<port> as a socket), never the checkout's files.
+    if (
+      r.op === "<" &&
+      tgt.text !== "/dev/null" &&
+      !SCRATCH.test(tgt.text) &&
+      !/^(?:release|dist)\/[A-Za-z0-9._/-]+$/.test(tgt.text)
+    )
+      return `a credentialed job reads input only from publish-tmp/, release/ or dist/ (${tgt.raw})`;
   }
   if (cmd.length === 0) return null;
   // The exceptions match the raw words: an exact spelling, quotes included,
@@ -864,8 +872,20 @@ function pinScopeRules(file, jobId, job, doc, add) {
 
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
 function jobRules(args) {
-  const { file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, remotes, add } =
-    args;
+  const {
+    file,
+    jobId,
+    job,
+    doc,
+    reusable,
+    envs,
+    workflows,
+    allowed,
+    used,
+    pins,
+    remotesByEnv,
+    add,
+  } = args;
   const env = envName(job);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   const credentialed = env !== undefined;
@@ -899,7 +919,7 @@ function jobRules(args) {
     allowed,
     used,
     pins,
-    remotes,
+    remotes: remotesByEnv.get(envName(job)) ?? new Set(),
     add,
   };
   if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
@@ -1040,11 +1060,17 @@ export function findings({ settings, manifest, workflows }) {
   const envs = new Map((settings.environments ?? []).map((e) => [e.name, e]));
   const allowed = settings.allowedActions ?? [];
   const used = new Set();
-  // The repositories a credentialed git command may reach: this one, and each mirror.
-  const remotes = new Set([
-    "confeature/sdks",
-    ...(settings.mirrors ?? []).map((m) => m.repository),
-  ]);
+  // The repositories a credentialed git command may reach, per environment:
+  // each mirror from its own environment only, and this repository from the
+  // Go module tags' environment only (round 4: one literal per registry).
+  const remotesByEnv = new Map();
+  const reach = (env, repo) => {
+    if (!remotesByEnv.has(env)) remotesByEnv.set(env, new Set());
+    remotesByEnv.get(env).add(repo);
+  };
+  for (const m of settings.mirrors ?? []) reach(m.environment, m.repository);
+  if (settings.goModuleTags?.environment !== undefined)
+    reach(settings.goModuleTags.environment, "confeature/sdks");
   for (const [file, doc] of Object.entries(workflows)) {
     workflowRules(file, doc, add);
     const pins = workflowPins(file, doc, add);
@@ -1061,7 +1087,7 @@ export function findings({ settings, manifest, workflows }) {
         allowed,
         used,
         pins,
-        remotes,
+        remotesByEnv,
         add,
       });
   }
