@@ -127,7 +127,7 @@ const withMirrors = () => {
 const READS_SECRET = (name) =>
   GOOD.replace(
     "      - run: npm publish",
-    `      - env:\n          R2_ACCESS_KEY_ID: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
+    `      - env:\n          R2_ACCESS_KEY_ID: \${{ secrets.${name} }}\n        run: test -n "$R2_ACCESS_KEY_ID"\n      - run: npm publish`,
   );
 
 describe("the real repository", () => {

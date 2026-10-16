@@ -95,7 +95,8 @@ function step(doc, jobId, name) {
 function resolveEnv({ env, doc, jobId }, table) {
   // One table serves a job's steps, so each key is checked at job scope.
   for (const key of Object.keys(table)) {
-    const why = referenceProblem(key, { doc, jobId, secretsOf: SECRETS });
+    // Every table value substitutes an env: value.
+    const why = referenceProblem(key, { doc, jobId, secretsOf: SECRETS, inEnv: true });
     if (why !== null) throw new Error(`test value for \${{ ${key} }} names nothing: ${why}`);
   }
   const out = {};

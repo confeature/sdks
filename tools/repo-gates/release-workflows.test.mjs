@@ -994,3 +994,128 @@ describe("expressions are read as GitHub reads them: case-folded, with their str
     expect(expressionBodies("${{ unterminated")).toEqual([" unterminated"]);
   });
 });
+
+describe("a credential is readable only by a run: block (round 7, HIGH)", () => {
+  const upload = (w) => w[C].jobs.upload.steps.find((s) => s.env?.R2_SECRET_ACCESS_KEY);
+  it.each([
+    [
+      "a step if: leaking a bit of R2_SECRET_ACCESS_KEY",
+      (w) => {
+        upload(w).if = "${{ startsWith(env.R2_SECRET_ACCESS_KEY, '0') }}";
+      },
+      /if: .* is not a recorded condition/,
+    ],
+    [
+      "the same if: written bare",
+      (w) => {
+        upload(w).if = "startsWith(env.R2_SECRET_ACCESS_KEY, '0')";
+      },
+      /the credential R2_SECRET_ACCESS_KEY is read only by a run: block/,
+    ],
+    [
+      "continue-on-error from a secret",
+      (w) => {
+        upload(w)["continue-on-error"] = "${{ secrets.R2_SECRET_ACCESS_KEY == 'x' }}";
+      },
+      /continue-on-error: holds an expression|a secret is read only in an env: value/,
+    ],
+    [
+      "timeout-minutes from a secret",
+      (w) => {
+        upload(w)["timeout-minutes"] = "${{ secrets.R2_SECRET_ACCESS_KEY }}";
+      },
+      /timeout-minutes: holds an expression/,
+    ],
+    [
+      "a step name carrying the value",
+      (w) => {
+        upload(w).name = "Upload ${{ env.R2_SECRET_ACCESS_KEY }}";
+      },
+      /name: holds an expression/,
+    ],
+    [
+      "a with: carrying a secret",
+      (w) => {
+        const d = w[C].jobs.upload.steps.find((s) =>
+          String(s.uses).startsWith("actions/download-artifact"),
+        );
+        d.with = { ...d.with, name: "${{ secrets.R2_SECRET_ACCESS_KEY }}" };
+      },
+      /a secret is read only in an env: value/,
+    ],
+    [
+      "F1 environment.url from a job-level credential",
+      (w) => {
+        const j = w[C].jobs.upload;
+        const s = upload(w);
+        j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+        delete s.env.R2_SECRET_ACCESS_KEY;
+        j.environment = {
+          name: "cli-release",
+          url: "https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}",
+        };
+      },
+      /environment: is a literal name/,
+    ],
+    [
+      "A11/E1 a credential moved to the job env",
+      (w) => {
+        const j = w[C].jobs.upload;
+        const s = upload(w);
+        j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+        delete s.env.R2_SECRET_ACCESS_KEY;
+      },
+      /the credential R2_SECRET_ACCESS_KEY is set in the job's env/,
+    ],
+    [
+      "a credential set on a step whose run: does not read it",
+      (w) => {
+        const s = w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload");
+        s.env = { ...s.env, DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+      },
+      /step Upload sets the credential DEPLOY_KEY but its run: does not read it/,
+    ],
+    [
+      "F3 an upper-case if: on the upload step",
+      (w) => {
+        upload(w).if = "contains(TOJSON(SECRETS), 'a')";
+      },
+      /is not a recorded condition|toJSON, fromJSON, format and join are refused/,
+    ],
+    [
+      "a job if: reading env",
+      (w) => {
+        w[P].jobs["publish-npm"].if += " && env.NPM_VERSION != ''";
+      },
+      /a credentialed job's if: reads more than needs\. and github\./,
+    ],
+    [
+      "a job timeout from an expression",
+      (w) => {
+        w[P].jobs["publish-npm"]["timeout-minutes"] = "${{ needs.setup.outputs.version }}";
+      },
+      /a credentialed job's timeout-minutes: holds an expression/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it("F2: a download-artifact from another run with a secret token stays refused", () => {
+    const got = added((w) => {
+      const d = w[C].jobs.upload.steps.find((s) =>
+        String(s.uses).startsWith("actions/download-artifact"),
+      );
+      d.with = {
+        ...d.with,
+        "github-token": "${{ secrets.R2_SECRET_ACCESS_KEY }}",
+        repository: "attacker/x",
+        "run-id": "1",
+      };
+    });
+    expect(got.some((g) => /downloads an artifact from another run/.test(g))).toBe(true);
+    expect(got.some((g) => /a secret is read only in an env: value/.test(g))).toBe(true);
+  });
+});

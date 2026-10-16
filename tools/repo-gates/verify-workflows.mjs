@@ -296,6 +296,10 @@ export const PINNED_ENV = {
   GIT_CONFIG_NOSYSTEM: () => LIT("1"),
 };
 export const CREDENTIALED_ENV = new Set(Object.keys(PINNED_ENV));
+/** The names pinned to a secret or a step output: the credentials themselves. */
+export const CREDENTIAL_ENV = new Set(
+  Object.keys(PINNED_ENV).filter((k) => /secrets|steps/.test(PINNED_ENV[k]("publish-x").source)),
+);
 const SSH_COMMAND_RUNS =
   /ProxyCommand|LocalCommand|KnownHostsCommand|ProxyJump|-F\s+(?!\/dev\/null(?:\s|$))/i;
 
@@ -1065,8 +1069,93 @@ export function requiresTagPush(cond) {
   );
 }
 
+/** The step if: values a credentialed job may carry, exact (a key removal that always runs). */
+export const RECORDED_STEP_IFS = ["always()"];
+/** The contexts a credentialed job's name: and if: may read: what is public anyway. */
+const PUBLIC_JOB_CONTEXTS = /^(?:needs|github)\./;
+
+/**
+ * Round 7: a credential is readable outside run:, so a credentialed job
+ * reads expressions only where a value cannot leave the job (env: and with:
+ * values, which other rules hold): a step's if: leaks a bit through
+ * skipped-vs-ran, a name: or the environment's url the value itself, a
+ * timeout or continue-on-error the same bit. And a credential is set only in
+ * the env: of the step whose run: reads it (or which runs its exception).
+ */
+function credentialExposureRules(file, jobId, job, doc, add) {
+  const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
+  if (job?.environment !== undefined && typeof job.environment !== "string")
+    add(
+      file,
+      jobId,
+      "a credentialed job's environment: is a literal name (its url: would carry an expression out)",
+    );
+  for (const [scope, map] of [
+    ["the workflow's", doc?.env],
+    ["the job's", job?.env],
+  ])
+    for (const k of Object.keys(map ?? {}))
+      if (CREDENTIAL_ENV.has(k))
+        add(
+          file,
+          jobId,
+          `the credential ${k} is set in ${scope} env; only the env: of the step that reads it may set it`,
+        );
+  for (const [k, v] of Object.entries(job ?? {})) {
+    if (["env", "steps", "with"].includes(k)) continue;
+    const list = k === "if" ? [String(v), ...expressionBodies(v)] : allExpressions(v);
+    for (const e of list) {
+      if (k !== "name" && k !== "if" && list.length > 0) {
+        add(file, jobId, `a credentialed job's ${k}: holds an expression`);
+        break;
+      }
+      const refs = [...withoutStrings(e).matchAll(/(?<![\w.-])([A-Za-z_]+)\./g)].map(
+        (m) => `${m[1].toLowerCase()}.`,
+      );
+      if (refs.some((r) => !PUBLIC_JOB_CONTEXTS.test(r)) || /\bgithub\.token\b/i.test(e))
+        add(
+          file,
+          jobId,
+          `a credentialed job's ${k}: reads more than needs. and github. (${e.trim()})`,
+        );
+    }
+  }
+  for (const s of Array.isArray(job?.steps) ? job.steps : []) {
+    const where = s?.name ?? "?";
+    for (const [k, v] of Object.entries(s ?? {})) {
+      if (k === "env" || k === "with") continue;
+      if (k === "if") {
+        if (!RECORDED_STEP_IFS.includes(String(v)))
+          add(
+            file,
+            jobId,
+            `step ${where}'s if: ${String(v)} is not a recorded condition (skipped-vs-ran is public)`,
+          );
+        continue;
+      }
+      if (allExpressions(v).length > 0 && k !== "run")
+        add(file, jobId, `step ${where}'s ${k}: holds an expression`);
+    }
+    const run = typeof s?.run === "string" ? s.run : "";
+    const isException = exceptions.some((re) =>
+      lexStrict(run).commands.some((c) =>
+        re.test(
+          c.words
+            .slice(commandStart(c))
+            .map((w) => w.raw)
+            .join(" "),
+        ),
+      ),
+    );
+    for (const k of Object.keys(s?.env ?? {}))
+      if (CREDENTIAL_ENV.has(k) && !isException && !new RegExp(`\\$\\{?${k}\\b`).test(run))
+        add(file, jobId, `step ${where} sets the credential ${k} but its run: does not read it`);
+  }
+}
+
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
 function credentialedJobRules(file, jobId, job, doc, add) {
+  credentialExposureRules(file, jobId, job, doc, add);
   if (job?.container !== undefined || job?.services !== undefined)
     add(
       file,
@@ -1575,7 +1664,7 @@ const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
  */
 export function referenceProblem(
   expr,
-  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {}, secretsOf = null },
+  { doc, jobId, step = null, ownEnv = false, scriptOutputs = {}, secretsOf = null, inEnv = false },
 ) {
   // Only dot paths into a context are judged here, so whatever reaches a
   // context any other way is refused outright (round 6): an index
@@ -1585,7 +1674,8 @@ export function referenceProblem(
   const e = expr.trim();
   // Names are judged case-insensitively, outside string literals, and only
   // in ASCII: GitHub folds `TOJSON(SECRETS)` to `toJSON(secrets)` (round 7).
-  if (/[^\x00-\x7f]/.test(e)) return `${e}: a non-ASCII character in an expression`;
+  if ([...e].some((ch) => ch.charCodeAt(0) > 0x7f))
+    return `${e}: a non-ASCII character in an expression`;
   const bareText = withoutStrings(e);
   if (bareText.replace(/\s+/g, "").toLowerCase() !== "tojson(needs)") {
     if (/\[/.test(bareText)) return `${e}: an index ([…]) into a context`;
@@ -1623,7 +1713,16 @@ export function referenceProblem(
       (ctxName === "github" && a !== a.toLowerCase())
     )
       return `${ref}: write the context in lower case (GitHub folds case, this check reads it exactly)`;
-    if (ctxName === "github") continue;
+    if (ctxName === "github") {
+      // github.token is a credential: an env: value is its one place (round 7).
+      if (a.toLowerCase() === "token" && !inEnv)
+        return `${ref}: a credential is read only in an env: value`;
+      continue;
+    }
+    if (ctxName === "secrets" && !inEnv)
+      return `${ref}: a secret is read only in an env: value (an if:, a name or a with: would carry it out)`;
+    if (ctxName === "env" && !inEnv && CREDENTIAL_ENV.has(a))
+      return `${ref}: the credential ${a} is read only by a run: block`;
     // The workflow's own env sees no job's needs, steps or env.
     if (jobId === null && ["needs", "steps", "env"].includes(ctxName))
       return `${ref}: the workflow's env cannot read the ${ctxName} context`;
@@ -1676,7 +1775,13 @@ export function referenceFindings(workflows, scriptOutputs = {}, settings = null
     // The workflow's own env values (round 6: they were never read).
     for (const v of Object.values(doc?.env ?? {}))
       for (const e of exprs(v)) {
-        const why = referenceProblem(e, { doc, jobId: null, scriptOutputs, secretsOf });
+        const why = referenceProblem(e, {
+          doc,
+          jobId: null,
+          scriptOutputs,
+          secretsOf,
+          inEnv: true,
+        });
         if (why !== null) out.push({ file, job: "-", why });
       }
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
@@ -1687,20 +1792,19 @@ export function referenceFindings(workflows, scriptOutputs = {}, settings = null
         }
       };
       check(jobId, typeof job?.if === "string" ? [job.if, ...exprs(job.if)] : [], {});
-      for (const v of [
-        job?.name,
-        ...Object.values(job?.env ?? {}),
-        ...Object.values(job?.with ?? {}),
-      ])
+      for (const v of [job?.name, ...Object.values(job?.with ?? {})])
         check(jobId, exprs(v ?? ""), {});
+      for (const v of Object.values(job?.env ?? {})) check(jobId, exprs(v), { inEnv: true });
+      // Every other job key (environment, timeout-minutes, continue-on-error, …).
+      const { steps: _s, env: _e, if: _i, name: _n, with: _w, outputs: _o, ...rest } = job ?? {};
+      check(jobId, allExpressions(rest), {});
       for (const v of Object.values(job?.outputs ?? {})) check(jobId, exprs(v), { step: null });
       for (const [i, s] of (Array.isArray(job?.steps) ? job.steps : []).entries()) {
         const where = `${jobId} step ${s?.name ?? i + 1}`;
-        for (const v of Object.values(s?.env ?? {})) check(where, exprs(v), { step: s });
-        const own = [s?.name, s?.run, ...Object.values(s?.with ?? {})].flatMap((v) =>
-          exprs(v ?? ""),
-        );
-        if (typeof s?.if === "string") own.push(s.if);
+        for (const v of Object.values(s?.env ?? {}))
+          check(where, exprs(v), { step: s, inEnv: true });
+        const { env: _se, ...others } = s ?? {};
+        const own = allExpressions(others);
         check(where, own, { step: s, ownEnv: true });
       }
     }
