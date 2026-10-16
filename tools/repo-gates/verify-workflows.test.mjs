@@ -1328,3 +1328,50 @@ describe("15 a run block reads only variables something defines (#794 review, ro
     fires(run(swap(INSTALL_STEP, '      - run: echo "$RUNNER_OS"')), /reads \$RUNNER_OS/);
   });
 });
+
+describe("rule 3 judges what bash passes, never the quoted source (#794 review, round 4)", () => {
+  const block = (cmd) => `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
+  const inPublish = (cmd) => run(swap(PUBLISH_STEP, block(cmd)));
+  it.each([
+    ["printf '-v' X y", "printf '-v' X y"],
+    ["printf '-vX' y", "printf '-vX' y"],
+    ["printf '-v' HOME", "printf '-v' HOME 'publish-tmp'"],
+    ['printf "-v"', 'printf "-v" GIT_SSH_COMMAND "sh -c %s #" id'],
+    ["printf '-vHOME'", "printf '-vHOME' 'publish-tmp'"],
+    ["printf with another format", "printf '%b' x"],
+    ["printf with --", "printf -- '%s\\n' x"],
+  ])("refuses %s", (_, cmd) => fires(inPublish(cmd), /printf takes no option/));
+  it.each([
+    ["a quoted subcommand that is not the allowed one", "'npm' 'ci'", /npm runs only `publish`/],
+    ["a quoted git subcommand", "git 'config' x y", /git runs only init/],
+    ["a quoted assignment word", "'X'=1 echo", /not a command|assigns no variable/],
+    ["a command name from an expansion", '"$X"', /\$\{X\} is not a command/],
+  ])("refuses %s", (_, cmd, re) => fires(inPublish(cmd), re));
+  it.each([
+    ["a quoted command name", "'printf' '%s\\n' x"],
+    ["a quoted npm subcommand", `npm 'publish' --ignore-scripts "./release/$ARTIFACT"`],
+    ["a quoted git subcommand", "git 'rev-parse' refs/heads/main"],
+  ])("judges %s by what bash passes, and accepts it", (_, cmd) =>
+    expect(inPublish(cmd)).toEqual([]),
+  );
+  it.each([
+    ["HOME", "/tmp/h"],
+    ["XDG_CONFIG_HOME", "publish-tmp"],
+    ["GIT_CONFIG_GLOBAL", "publish-tmp/.gitconfig"],
+    ["GIT_CONFIG_NOSYSTEM", "0"],
+  ])("refuses %s=%s in a credentialed env:", (name, value) =>
+    fires(
+      run(swap(PUBLISH_STEP, `      - env:\n          ${name}: ${value}\n        run: echo hi`)),
+      new RegExp(`sets ${name}, which points every tool at another configuration`),
+    ),
+  );
+  it("accepts the git config isolation values", () =>
+    expect(
+      run(
+        swap(
+          PUBLISH_STEP,
+          '      - env:\n          GIT_CONFIG_GLOBAL: /dev/null\n          GIT_CONFIG_NOSYSTEM: "1"\n        run: echo hi',
+        ),
+      ),
+    ).toEqual([]));
+});

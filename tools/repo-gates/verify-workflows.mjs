@@ -246,8 +246,25 @@ export const CREDENTIALED_ENV = new Set([
 const SSH_COMMAND_RUNS =
   /ProxyCommand|LocalCommand|KnownHostsCommand|ProxyJump|-F\s+(?!\/dev\/null(?:\s|$))/i;
 
+/**
+ * Names that point git, curl and every tool at a configuration file of the
+ * job's choosing (a .gitconfig or .curlrc written into publish-tmp): never set
+ * in a credentialed job, however spelled, except the belt-and-braces values
+ * that turn the global and system git config off.
+ */
+const CONFIG_HOMES = new Map([
+  ["HOME", null],
+  ["XDG_CONFIG_HOME", null],
+  ["GIT_CONFIG_GLOBAL", "/dev/null"],
+  ["GIT_CONFIG_NOSYSTEM", "1"],
+]);
+
 /** Why a credentialed job may not set `name` to `value`, or null. */
 function envProblem(name, value) {
+  if (CONFIG_HOMES.has(name))
+    return CONFIG_HOMES.get(name) === value
+      ? null
+      : `it sets ${name}, which points every tool at another configuration`;
   if (!CREDENTIALED_ENV.has(name)) return `it sets ${name}, which CREDENTIALED_ENV does not allow`;
   if (name === "GIT_SSH_COMMAND" && (!/^ssh\s/.test(value) || SSH_COMMAND_RUNS.test(value)))
     return "GIT_SSH_COMMAND must be plain `ssh -F /dev/null …`, with no option that runs a command";
@@ -265,6 +282,8 @@ const scratchOnly = (name) => (ops) =>
   ops.every((w) => SCRATCH.test(w.text) && !w.text.split("/").includes(".."))
     ? null
     : `${name} touches only publish-tmp/`;
+/** The printf formats the credentialed jobs use, as bash passes them (unquoted). */
+const PRINTF_FORMATS = new Set(["%s\\n", "%s  %s\\n"]);
 const SED_SCRIPT = /^s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1g?$/;
 
 /**
@@ -286,7 +305,7 @@ function argsProblem(name, args, spec) {
   const seen = new Set();
   for (let k = 0; k < args.length; k += 1) {
     const w = args[k];
-    if (!afterEoo && spec.eoo !== undefined && w.raw === spec.eoo) {
+    if (!afterEoo && spec.eoo !== undefined && w.text === spec.eoo) {
       afterEoo = true;
       continue;
     }
@@ -348,7 +367,7 @@ function gitProblem(args, ctx) {
       ? null
       : `git ${sub}: every refspec is <HEAD|refs/…>:refs/heads|tags/…, never forced`;
   };
-  switch (args[k]?.raw) {
+  switch (args[k]?.text) {
     case "init":
       return argsProblem("git init", rest, {
         options: { "--quiet": FLAG, "--bare": FLAG },
@@ -356,7 +375,7 @@ function gitProblem(args, ctx) {
         check: scratchOnly("git init"),
       });
     case "bundle":
-      if (rest[0]?.raw !== "verify") return "git bundle runs only `verify`";
+      if (rest[0]?.text !== "verify") return "git bundle runs only `verify`";
       return argsProblem("git bundle verify", rest.slice(1), {
         options: { "--quiet": FLAG },
         eoo: "--end-of-options",
@@ -402,8 +421,12 @@ export const CREDENTIALED_COMMANDS = {
   test: () => null,
   echo: () => null,
   exit: (a) => argsProblem("exit", a, { positional: "literal" }),
+  // No option (bash strips the quotes, so `printf '-v' X` binds X), and only
+  // the formats the jobs use: the arguments after one are data.
   printf: (a) =>
-    /^'[^']*'$/.test(a[0]?.raw ?? "") ? null : "printf's format is one single-quoted word",
+    a[0] !== undefined && !a[0].hasExpansion && PRINTF_FORMATS.has(a[0].text)
+      ? null
+      : `printf takes no option, and its format is one of ${[...PRINTF_FORMATS].map((f) => `'${f}'`).join(", ")}`,
   umask: (a) => argsProblem("umask", a, { positional: "literal" }),
   mkdir: (a) =>
     argsProblem("mkdir", a, {
@@ -429,7 +452,7 @@ export const CREDENTIALED_COMMANDS = {
       positional: "none",
     }),
   sed: (a) =>
-    a.length === 1 && /^'[^']*'$/.test(a[0].raw) && SED_SCRIPT.test(a[0].text)
+    a.length === 1 && !a[0].hasExpansion && SED_SCRIPT.test(a[0].text)
       ? null
       : "sed runs one single-quoted s/…/…/ script (flag g at most)",
   curl: (a) =>
@@ -451,7 +474,7 @@ export const CREDENTIALED_COMMANDS = {
   git: gitProblem,
   npm: (a, ctx) => {
     if (PINNED_SELF_INSTALL.test(ctx.text)) return null;
-    if (a[0]?.raw !== "publish")
+    if (a[0]?.text !== "publish")
       return "npm runs only `publish`, or installs itself at NPM_VERSION";
     return argsProblem("npm publish", a.slice(1), {
       options: { "--access": LITERAL, "--provenance": FLAG, "--ignore-scripts": FLAG },
@@ -461,14 +484,14 @@ export const CREDENTIALED_COMMANDS = {
     });
   },
   gem: (a) =>
-    a[0]?.raw === "push"
+    a[0]?.text === "push"
       ? argsProblem("gem push", a.slice(1), {
           positional: "any",
           check: (ops) => (ops.length === 1 ? null : "gem push uploads one gem"),
         })
       : "gem runs only `push`",
   dotnet: (a) =>
-    a[0]?.raw === "nuget" && a[1]?.raw === "push"
+    a[0]?.text === "nuget" && a[1]?.text === "push"
       ? argsProblem("dotnet nuget push", a.slice(2), {
           options: { "--api-key": VALUE, "--source": "=https://api.nuget.org/v3/index.json" },
           positional: "any",
@@ -476,7 +499,7 @@ export const CREDENTIALED_COMMANDS = {
         })
       : "dotnet runs only `nuget push`",
   rustup: (a) =>
-    a[0]?.raw === "toolchain" && a[1]?.raw === "install"
+    a[0]?.text === "toolchain" && a[1]?.text === "install"
       ? argsProblem("rustup toolchain install", a.slice(2), {
           options: { "--profile": LITERAL },
           eoo: "--",
@@ -491,6 +514,8 @@ const KEYWORDS = new Set(["if", "then", "else", "fi"]);
 /** Why one lexed command may not run in a credentialed job, or null. */
 function commandProblem({ words, redirects }, exceptions, ctx) {
   let k = 0;
+  // `.raw` on purpose, the one place: bash recognises a reserved word only
+  // unquoted, and a quoted `'if'` is then judged as a command name (by .text).
   while (k < words.length && KEYWORDS.has(words[k].raw)) k += 1;
   const cmd = words.slice(k);
   for (const r of redirects) {
@@ -501,12 +526,18 @@ function commandProblem({ words, redirects }, exceptions, ctx) {
       return `a credentialed job writes only publish-tmp/ or /dev/null (${tgt.raw})`;
   }
   if (cmd.length === 0) return null;
+  // The exceptions match the raw words: an exact spelling, quotes included,
+  // is stricter than the unquoted text, never looser.
   const text = cmd.map((w) => w.raw).join(" ");
   if (redirects.length === 0 && exceptions.some((re) => re.test(text))) return null;
   if (cmd.some((w) => w.opExpansion))
     return "an operator expansion (${NAME…}) is allowed only in a recorded exception";
-  const name = cmd[0].raw;
-  if (/^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(name)) return "a credentialed job assigns no variable";
+  const name = cmd[0].text;
+  if (
+    /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/.test(cmd[0].raw) ||
+    /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(name)
+  )
+    return "a credentialed job assigns no variable";
   if (!Object.hasOwn(CREDENTIALED_COMMANDS, name))
     return `${name} is not a command a credentialed job runs`;
   return CREDENTIALED_COMMANDS[name](cmd.slice(1), { ...ctx, text });

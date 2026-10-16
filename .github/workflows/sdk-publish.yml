@@ -1022,6 +1022,9 @@ jobs:
       RELEASE_TAG: ${{ needs.setup.outputs.releaseTag }}
       UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
       UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      # git reads no global or system configuration (rule 3, round 4).
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
     steps:
       # Only for the commit object the tag points at; the push uses the key.
       - name: Checkout
@@ -1163,6 +1166,9 @@ jobs:
       UNIT_NAME: ${{ needs.setup.outputs.name }}
       MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
       MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
+      # git reads no global or system configuration (rule 3, round 4).
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
     steps:
       - name: Receive the artifact (this run only)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1328,6 +1334,9 @@ jobs:
       UNIT_NAME: ${{ needs.setup.outputs.name }}
       MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
       MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
+      # git reads no global or system configuration (rule 3, round 4).
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: "1"
     steps:
       - name: Receive the artifact (this run only)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
