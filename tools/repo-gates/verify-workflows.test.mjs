@@ -49,13 +49,11 @@ env:
   ARTIFACT: \${{ needs.pack-npm.outputs.file }}
   EXPECTED_SHA256: \${{ needs.pack-npm.outputs.sha256 }}
   EXPECTED_SUMS: \${{ needs.pack-npm.outputs.sums }}
-  DEPLOY_KEY: k
   RELEASE_TAG: \${{ needs.setup.outputs.releaseTag }}
   MIRROR_TAG: \${{ needs.setup.outputs.mirrorTag }}
   UNIT_COORDINATES: \${{ needs.setup.outputs.coordinates }}
   UNIT_PATH: \${{ needs.setup.outputs.path }}
   RUST_VERSION: "1.88.0"
-  NUGET_API_KEY: k
 `;
 const GOOD = `  pack-npm:
     steps:
@@ -373,7 +371,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ["rake release", /rake is not a command/],
   ])("3 a publish job running %s", (cmd, why) => fires(run(swap(UPLOAD, cmd)), why));
   it.each([
-    'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
+    'dotnet nuget push "./release/x.nupkg" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
   ])("3 accepts the registry client upload %s", (cmd) =>
     expect(run(swap(UPLOAD, cmd))).toEqual([]),
@@ -390,10 +388,12 @@ describe("each rule fires on a fixture that breaks only it", () => {
     fires(run(swap(UPLOAD, cmd)), PROJECT);
     // In its own job, and nowhere else, it is the recorded exception.
     const own = swap("  publish-npm:\n", `  ${job}:\n`).replace(UPLOAD, cmd);
-    expect(run(own).filter((w) => PROJECT.test(w))).toEqual([]);
+    // Its pack outputs are its own job's (PINNED_ENV derives pack-<registry>).
+    const head = HEAD.replaceAll("needs.pack-npm.", `needs.${job.replace("publish-", "pack-")}.`);
+    expect(run(own, { head }).filter((w) => PROJECT.test(w))).toEqual([]);
     // A variant of it is not the exception.
     const variant = own.replace(cmd, `${cmd} && cargo build`);
-    fires(run(variant), PROJECT);
+    fires(run(variant, { head }), PROJECT);
   });
   it("1 a secret its environment does not declare", () =>
     fires(
@@ -797,7 +797,7 @@ const REASONS = {
   "curl -o": "curl: -o is not an option it may take",
   "curl -K": "curl: -K is not an option it may take",
   "curl to another host":
-    "curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/ (literal up to /@v/)",
+    "curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly",
   "aws (only the reviewed Maven script uploads to R2)":
     "aws is not a command a credentialed job runs",
   "rustup run": "rustup runs only `toolchain install`",
@@ -1054,7 +1054,7 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
     ],
     [
       "the Go proxy warm-up",
-      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list"`,
+      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v\${UNIT_VERSION}.info"`,
     ],
     [
       "the NuGet upload",
@@ -1090,7 +1090,8 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
       PUBLISH_STEP,
       '      - run: |\n          cargo "+${RUST_VERSION}" publish --no-verify \\\n            --manifest-path "${UNIT_PATH}/Cargo.toml"',
     );
-    expect(run(own).filter((w) => CRED.test(w))).toEqual([]);
+    const head = HEAD.replaceAll("needs.pack-npm.", "needs.pack-crates.");
+    expect(run(own, { head, s: reach() }).filter((w) => CRED.test(w))).toEqual([]);
   });
 
   const jobWith = (extra) =>

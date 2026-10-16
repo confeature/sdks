@@ -195,59 +195,71 @@ const isFalse = (v) => v === false || v === "false";
 const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?NPM_VERSION\}?"?$/;
 
 /**
- * Rule 3's environment allowlist: the only variables a credentialed job may set,
- * in the workflow's, the job's or a step's `env:` (a `run:` block sets none).
- * A blocklist of "dangerous" names missed DOTNET_STARTUP_HOOKS, OPENSSL_CONF,
- * RUBYGEMS_GEMDEPS, PAGER and more (#794 review, round 3); these are the
- * names the real jobs use, and nothing else.
+ * Rule 3's environment allowlist, and each name's one value (rounds 3 to 6):
+ * the only variables a credentialed job may set, in the workflow's, the job's
+ * or a step's env:, each pinned. A blocklist of "dangerous" names missed
+ * DOTNET_STARTUP_HOOKS and friends (round 3); an unpinned allowed name took
+ * `${{ secrets['X'] }}`, `${{ toJSON(secrets) }}` or `${{ github['token'] }}`
+ * and carried it into a tag name (round 6). So every allowed name has an
+ * exact form: a literal, a resolver or pack output of THIS job's chain, a
+ * declared secret written exactly `${{ secrets.NAME }}` (rule 1 checks the
+ * declaration), or the named step output of an OIDC exchange.
+ * A function of the job id: a publish job trusts its own pack job's outputs.
  */
-export const CREDENTIALED_ENV = new Set([
-  // Tool pins and fixed destinations, written once in the workflow's env.
-  "NODE_VERSION",
-  "NPM_VERSION",
-  "UV_VERSION",
-  "TWINE_VERSION",
-  "RUST_VERSION",
-  "RUBY_VERSION",
-  "DOTNET_VERSION",
-  "DART_VERSION",
-  "GO_VERSION",
-  "JAVA_VERSION",
-  "DENO_VERSION",
-  "MAVEN_URL",
-  "MAVEN_BUCKET",
-  "GITHUB_SSH_KNOWN_HOST",
-  // What the resolver and the pack job hand on.
-  "UNIT_NAME",
-  "UNIT_PATH",
-  "UNIT_VERSION",
-  "UNIT_COORDINATES",
-  "ARTIFACT",
-  "EXPECTED",
-  "EXPECTED_SHA256",
-  "EXPECTED_SUMS",
-  "SPLIT_SHA",
-  "RELEASE_TAG",
-  "MIRROR_TAG",
-  "TAG",
-  // Credentials, each read by its one upload.
-  "DEPLOY_KEY",
-  "R2_ACCESS_KEY_ID",
-  "R2_SECRET_ACCESS_KEY",
-  "CLOUDFLARE_ACCOUNT_ID",
-  "MAVEN_R2_ACCESS_KEY_ID",
-  "MAVEN_R2_SECRET_ACCESS_KEY",
-  "NUGET_API_KEY",
-  "CARGO_REGISTRY_TOKEN",
-  // Literal switches the jobs set: telemetry off, and the unit's MSRV-aware
-  // resolution (its .cargo/config.toml, which a run from the root does not read).
-  "DOTNET_NOLOGO",
-  "DOTNET_CLI_TELEMETRY_OPTOUT",
-  "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS",
-  // git's transport, pinned: plain ssh, and only the ssh and file protocols.
-  "GIT_SSH_COMMAND",
-  "GIT_ALLOW_PROTOCOL",
-]);
+const EXPR = (e) => new RegExp(`^\\$\\{\\{\\s*${e}\\s*\\}\\}$`);
+const LIT = (v) => new RegExp(`^${v.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}$`);
+const VERSION_PIN = /^\d+\.\d+\.\d+$/;
+const SECRET_PIN = EXPR("secrets\\.[A-Z][A-Z0-9_]*");
+const PACK = (jobId, out) =>
+  EXPR(`needs\\.${jobId.replace(/^publish-/, "pack-")}\\.outputs\\.${out}`);
+const WS = "\\$\\{\\{ github\\.workspace \\}\\}";
+export const PINNED_ENV = {
+  NODE_VERSION: () => VERSION_PIN,
+  NPM_VERSION: () => VERSION_PIN,
+  UV_VERSION: () => VERSION_PIN,
+  TWINE_VERSION: () => VERSION_PIN,
+  RUST_VERSION: () => VERSION_PIN,
+  RUBY_VERSION: () => VERSION_PIN,
+  DOTNET_VERSION: () => VERSION_PIN,
+  DART_VERSION: () => VERSION_PIN,
+  GO_VERSION: () => VERSION_PIN,
+  JAVA_VERSION: () => VERSION_PIN,
+  DENO_VERSION: () => VERSION_PIN,
+  MAVEN_URL: () => LIT("https://maven.confeature.io"),
+  MAVEN_BUCKET: () => LIT("confeature-maven"),
+  GITHUB_SSH_KNOWN_HOST: () => /^github\.com ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/,
+  UNIT_PATH: () => EXPR("needs\\.setup\\.outputs\\.path"),
+  UNIT_VERSION: () => EXPR("needs\\.setup\\.outputs\\.version"),
+  UNIT_COORDINATES: () => EXPR("needs\\.setup\\.outputs\\.coordinates"),
+  UNIT_NAME: () => EXPR("needs\\.setup\\.outputs\\.name"),
+  RELEASE_TAG: () => EXPR("needs\\.setup\\.outputs\\.releaseTag"),
+  MIRROR_TAG: () => EXPR("needs\\.setup\\.outputs\\.mirrorTag"),
+  TAG: () => EXPR("github\\.ref_name"),
+  ARTIFACT: (j) => PACK(j, "file"),
+  EXPECTED_SHA256: (j) => PACK(j, "sha256"),
+  EXPECTED_SUMS: (j) => PACK(j, "sums"),
+  SPLIT_SHA: (j) => PACK(j, "split"),
+  EXPECTED: () => EXPR("needs\\.release\\.outputs\\.sums-digest"),
+  DEPLOY_KEY: () => SECRET_PIN,
+  R2_ACCESS_KEY_ID: () => SECRET_PIN,
+  R2_SECRET_ACCESS_KEY: () => SECRET_PIN,
+  CLOUDFLARE_ACCOUNT_ID: () => SECRET_PIN,
+  MAVEN_R2_ACCESS_KEY_ID: () => SECRET_PIN,
+  MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET_PIN,
+  NUGET_API_KEY: () => EXPR("steps\\.login\\.outputs\\.NUGET_API_KEY"),
+  CARGO_REGISTRY_TOKEN: () => EXPR("steps\\.auth\\.outputs\\.token"),
+  DOTNET_NOLOGO: () => LIT("1"),
+  DOTNET_CLI_TELEMETRY_OPTOUT: () => LIT("1"),
+  CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: () => LIT("fallback"),
+  GIT_SSH_COMMAND: () =>
+    new RegExp(
+      `^ssh -F /dev/null -i ${WS}/publish-tmp/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${WS}/publish-tmp/ssh/known_hosts$`,
+    ),
+  GIT_ALLOW_PROTOCOL: () => LIT("ssh"),
+  GIT_CONFIG_GLOBAL: () => LIT("/dev/null"),
+  GIT_CONFIG_NOSYSTEM: () => LIT("1"),
+};
+export const CREDENTIALED_ENV = new Set(Object.keys(PINNED_ENV));
 const SSH_COMMAND_RUNS =
   /ProxyCommand|LocalCommand|KnownHostsCommand|ProxyJump|-F\s+(?!\/dev\/null(?:\s|$))/i;
 
@@ -473,10 +485,13 @@ export const CREDENTIALED_COMMANDS = {
       positional: "any",
       // Literal up to the module's /@v/: the proxy fetches whatever origin a
       // path names, so an expansion before it could carry a secret anywhere.
+      // Exactly the module's version info: a prefix let `../`, `%2e`, `?` or
+      // `@` (which curl collapses or reparses) leave the module (round 6).
       check: (ops) =>
-        ops.length === 1 && ctx.goProxyPrefixes.some((p) => ops[0].text.startsWith(p))
+        ops.length === 1 &&
+        ctx.goProxyPrefixes.some((p) => ops[0].text === `${p}v\${UNIT_VERSION}.info`)
           ? null
-          : `curl reaches only ${ctx.goProxyPrefixes.join(", ") || "no URL"} (literal up to /@v/)`,
+          : `curl reaches only ${ctx.goProxyPrefixes.map((p) => `${p}v\${UNIT_VERSION}.info`).join(", ") || "no URL"}, exactly`,
     }),
   git: gitProblem,
   npm: (a, ctx) => {
@@ -609,7 +624,13 @@ function credentialProblem(cmd, redirects, ctx) {
     for (const n of reads(w)) {
       const alone = w.text === `\${${n}}`;
       const prev = cmd[k - 1]?.text;
-      if (alone && (name === "[" || name === "test") && (prev === "-z" || prev === "-n")) continue;
+      // An emptiness test, and nothing else on its line: `[ -n "$K" -a … ]`
+      // or `[ -n "$K" = abc ]` would compare it (round 6).
+      const shape =
+        name === "["
+          ? cmd.length === 4 && cmd[3].raw === "]" && k === 2
+          : name === "test" && cmd.length === 3 && k === 2;
+      if (alone && shape && (prev === "-z" || prev === "-n")) continue;
       if (alone && name === "dotnet" && prev === "--api-key") continue;
       if (
         alone &&
@@ -966,27 +987,6 @@ export function requiresTagPush(cond) {
   );
 }
 
-/**
- * The values the exceptions and the credentialed blocks trust, each pinned to
- * the one expression that may set it (round 5): `UNIT_PATH: publish-tmp/evil`
- * at step level turned cargo's --manifest-path to a crate of the job's own.
- */
-const EXPR = (e) => new RegExp(`^\\$\\{\\{\\s*${e}\\s*\\}\\}$`);
-export const PINNED_ENV = {
-  UNIT_PATH: EXPR("needs\\.setup\\.outputs\\.path"),
-  UNIT_VERSION: EXPR("needs\\.setup\\.outputs\\.version"),
-  UNIT_COORDINATES: EXPR("needs\\.setup\\.outputs\\.coordinates"),
-  UNIT_NAME: EXPR("needs\\.setup\\.outputs\\.name"),
-  RELEASE_TAG: EXPR("needs\\.setup\\.outputs\\.releaseTag"),
-  MIRROR_TAG: EXPR("needs\\.setup\\.outputs\\.mirrorTag"),
-  TAG: EXPR("github\\.ref_name"),
-  ARTIFACT: EXPR("needs\\.pack-[a-z]+\\.outputs\\.file"),
-  EXPECTED_SHA256: EXPR("needs\\.pack-[a-z]+\\.outputs\\.sha256"),
-  EXPECTED_SUMS: EXPR("needs\\.pack-[a-z]+\\.outputs\\.sums"),
-  SPLIT_SHA: EXPR("needs\\.pack-[a-z]+\\.outputs\\.split"),
-  EXPECTED: EXPR("needs\\.release\\.outputs\\.sums-digest"),
-};
-
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
 function credentialedJobRules(file, jobId, job, doc, add) {
   if (job?.container !== undefined || job?.services !== undefined)
@@ -1031,7 +1031,7 @@ function credentialedJobRules(file, jobId, job, doc, add) {
     for (const [k, v] of Object.entries(map ?? {})) {
       const why = envProblem(k, String(v));
       if (why !== null) add(file, jobId, `a credentialed job's env: ${why}`);
-      if (Object.hasOwn(PINNED_ENV, k) && !PINNED_ENV[k].test(String(v)))
+      if (Object.hasOwn(PINNED_ENV, k) && !PINNED_ENV[k](jobId).test(String(v)))
         add(
           file,
           jobId,
@@ -1498,6 +1498,22 @@ const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
  * own env is in scope (with, run, if: yes; the step's env values: no).
  */
 export function referenceProblem(expr, { doc, jobId, step = null, ownEnv = false }) {
+  // Only dot paths into a context are judged here, so whatever reaches a
+  // context any other way is refused outright (round 6): an index
+  // (`secrets['X']`, `needs['x']`), a function that serialises or rebuilds
+  // (`toJSON(secrets)`, `fromJSON(…)`, `format(…)`, `join(…)`), or a bare
+  // context. conclude's `toJSON(needs)` is the one exception, exact.
+  const e = expr.trim();
+  if (e !== "toJSON(needs)") {
+    if (/\[/.test(e)) return `${e}: an index ([…]) into a context`;
+    if (/\b(?:toJSON|fromJSON|format|join)\s*\(/.test(e))
+      return `${e}: toJSON, fromJSON, format and join are refused`;
+    const bare =
+      /(?<![\w.'])(secrets|github|env|vars|steps|needs|inputs|matrix|job|runner|strategy)(?![\w.])/.exec(
+        e.replace(/'[^']*'/g, "''"),
+      );
+    if (bare !== null) return `${e}: the bare ${bare[1]} context`;
+  }
   const job = doc?.jobs?.[jobId];
   const needs = asList(job?.needs);
   const steps = Array.isArray(job?.steps) ? job.steps : [];
