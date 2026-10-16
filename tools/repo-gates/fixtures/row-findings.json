@@ -1160,5 +1160,20 @@
   ],
   "E9 release-gate: a workflow env from github.token": [
     "release-gate.yml: -: names github.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow (its token reaches its frozen github-script step only)"
+  ],
+  "R1 verify.yml: every permissions: removed": [
+    "verify.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
+  ],
+  "R3 contract-live.yml: every permissions: removed": [
+    "contract-live.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
+  ],
+  "R7 release-gate.yml: the workflow's permissions: removed": [
+    "release-gate.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
+  ],
+  "R8 verify.yml: the workflow's permissions: removed only": [
+    "verify.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
+  ],
+  "R8b a new workflow with no permissions:": [
+    "new.yml: -: sets no workflow-level permissions: (its jobs would hold the repository's default token)"
   ]
 }

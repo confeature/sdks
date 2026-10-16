@@ -285,6 +285,19 @@ const fullCheckout = () =>
   step(PIN.checkout, { with: { "fetch-depth": 0, "persist-credentials": false } });
 /** An artifact of this run, by its exact name, to its exact path. */
 const download = (name, path) => step(PIN.download, { with: { name, path } });
+/**
+ * A pack job's hand-off: its artifact `name`, from `$RUNNER_TEMP/release/<glob>`,
+ * kept one day, failing when nothing matches.
+ */
+const uploadRelease = (name, glob) =>
+  step(PIN.upload, {
+    with: {
+      name,
+      path: `\${{ runner.temp }}/release/${glob}`,
+      "if-no-files-found": "error",
+      "retention-days": 1,
+    },
+  });
 /** setup-node at the workflow's NODE_VERSION. */
 const setupNode = () =>
   step(PIN.setupNode, { with: { "node-version": "${{ env.NODE_VERSION }}" } });
@@ -348,14 +361,7 @@ export const ACTION_SURFACE = {
       shallowCheckout(),
       step(PIN.pnpm),
       setupNode(),
-      step(PIN.upload, {
-        with: {
-          name: "release-npm",
-          path: "${{ runner.temp }}/release/*.tgz",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-npm", "*.tgz"),
     ],
     "publish-npm": [
       step(PIN.setupNode, {
@@ -371,14 +377,7 @@ export const ACTION_SURFACE = {
       step(PIN.pnpm),
       setupNode(),
       step(PIN.setupUv, { with: { version: "${{ env.UV_VERSION }}", "enable-cache": false } }),
-      step(PIN.upload, {
-        with: {
-          name: "release-pypi",
-          path: "${{ runner.temp }}/release/*",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-pypi", "*"),
     ],
     "publish-pypi": [
       download("release-pypi", "release"),
@@ -391,14 +390,7 @@ export const ACTION_SURFACE = {
       step(PIN.pnpm),
       setupNode(),
       step(PIN.setupRuby, { with: { "ruby-version": "${{ env.RUBY_VERSION }}" } }),
-      step(PIN.upload, {
-        with: {
-          name: "release-rubygems",
-          path: "${{ runner.temp }}/release/*.gem",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-rubygems", "*.gem"),
     ],
     "publish-rubygems": [download("release-rubygems", "release"), step(PIN.rubygemsAuth)],
     "pack-nuget": [
@@ -406,14 +398,7 @@ export const ACTION_SURFACE = {
       step(PIN.pnpm),
       setupNode(),
       step(PIN.setupDotnet, { with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" } }),
-      step(PIN.upload, {
-        with: {
-          name: "release-nuget",
-          path: "${{ runner.temp }}/release/*",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-nuget", "*"),
     ],
     "publish-nuget": [
       step(PIN.setupDotnet, { with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" } }),
@@ -441,28 +426,14 @@ export const ACTION_SURFACE = {
       fullCheckout(),
       step(PIN.pnpm),
       setupNode(),
-      step(PIN.upload, {
-        with: {
-          name: "release-packagist",
-          path: "${{ runner.temp }}/release/*.bundle",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-packagist", "*.bundle"),
     ],
     "publish-packagist": [download("release-packagist", "release")],
     "pack-swiftpm": [
       fullCheckout(),
       step(PIN.pnpm),
       setupNode(),
-      step(PIN.upload, {
-        with: {
-          name: "release-swiftpm",
-          path: "${{ runner.temp }}/release/*.bundle",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-swiftpm", "*.bundle"),
     ],
     "publish-swiftpm": [download("release-swiftpm", "release")],
     "pack-maven": [
@@ -472,14 +443,7 @@ export const ACTION_SURFACE = {
       step(PIN.setupJava, {
         with: { distribution: "temurin", "java-version": "${{ env.JAVA_VERSION }}" },
       }),
-      step(PIN.upload, {
-        with: {
-          name: "release-maven",
-          path: "${{ runner.temp }}/release/",
-          "if-no-files-found": "error",
-          "retention-days": 1,
-        },
-      }),
+      uploadRelease("release-maven", ""),
     ],
     "publish-maven": [
       shallowCheckout(),
@@ -593,6 +557,8 @@ export const ACTION_SURFACE = {
       step(PIN.githubScript, {
         if: "failure()",
         with: {
+          // The script by sha256: regenerate it as runStep's comment says (the
+          // finding on a changed script prints the new one).
           script: { sha256: "cb5c24833e2cce900457be40523a97da36a70ad94c3ec51e22ea18da0f8a51f6" },
         },
       }),
@@ -1733,6 +1699,14 @@ export function continueOnErrorFindings(workflows) {
 export function writePermissionFindings(workflows) {
   const out = [];
   for (const [file, doc] of Object.entries(workflows)) {
+    // Without a workflow-level value every job that sets none holds the
+    // repository's default token (round 10: deleting it passed).
+    if (doc?.permissions === undefined || doc?.permissions === null)
+      out.push({
+        file,
+        job: "-",
+        why: "sets no workflow-level permissions: (its jobs would hold the repository's default token)",
+      });
     const top = writesOf(doc?.permissions);
     if (top.length > 0)
       out.push({
@@ -2754,7 +2728,29 @@ export function allFindings({ settings, manifest, workflows, scriptOutputs }) {
     ...writePermissionFindings(workflows),
     ...continueOnErrorFindings(workflows),
     ...exemptTokenFindings(workflows),
+    ...daggerFnFindings(manifest),
   ];
+}
+
+/**
+ * Every daggerFn in dagger/sdk-manifest.json is one Dagger function name
+ * (round 10): release-gate.yml and sdk-publish.yml's gate pass it to the
+ * dagger action as `args: <daggerFn> --source=.`, so anything else (a space,
+ * `;`, `$( )`) would reach the CLI's command line. The manifest spells them
+ * the way the Dagger CLI takes them, kebab-case (`go-test`), so that is the
+ * shape held, not the camelCase of the module's source.
+ */
+const DAGGER_FN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+export function daggerFnFindings(manifest) {
+  const out = [];
+  for (const s of Array.isArray(manifest?.sdks) ? manifest.sdks : [])
+    if (s?.daggerFn !== undefined && !DAGGER_FN.test(String(s.daggerFn)))
+      out.push({
+        file: "dagger/sdk-manifest.json",
+        job: String(s?.name ?? "?"),
+        why: `daggerFn ${JSON.stringify(s.daggerFn)} is not one Dagger function name (${DAGGER_FN.source})`,
+      });
+  return out;
 }
 
 function main() {
