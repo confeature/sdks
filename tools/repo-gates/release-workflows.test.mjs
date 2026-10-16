@@ -17,6 +17,7 @@ import {
   ACTION_OUTPUTS,
   CREDENTIAL_ENV,
   isCredentialed,
+  writesOf,
   referenceProblem,
   ENVIRONMENT_COMMANDS,
   MANIFEST,
@@ -2071,5 +2072,23 @@ describe("the write-token exemption skips rules 3 and 15 only (round 10, MED-2)"
     expect(exemptTokenFindings(w).map((f) => f.why)).toContain(
       "WRITE_TOKEN_EXEMPT records a job the workflow does not have",
     );
+  });
+});
+
+describe("one reader of a permissions value (round 10, DRY)", () => {
+  it.each([
+    ["write-all", ["write-all"]],
+    ["read-all", []],
+    [{ issues: "write", contents: "write", packages: "read" }, ["contents", "issues"]],
+    [{}, []],
+    [undefined, []],
+  ])("writesOf(%j) is %j", (perms, want) => expect(writesOf(perms)).toEqual(want));
+  it("a job without its own permissions holds the workflow's", () => {
+    const doc = { permissions: { contents: "write" }, jobs: { j: { steps: [] } } };
+    expect(isCredentialed("x.yml", "j", doc.jobs.j, doc)).toBe(true);
+    expect(
+      isCredentialed("x.yml", "j", { permissions: { contents: "read" }, steps: [] }, doc),
+    ).toBe(false);
+    expect(isCredentialed("x.yml", "j", { steps: [] }, { permissions: "write-all" })).toBe(true);
   });
 });

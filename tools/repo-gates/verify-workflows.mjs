@@ -1732,22 +1732,16 @@ export function continueOnErrorFindings(workflows) {
 /** Rule 18 over every workflow. */
 export function writePermissionFindings(workflows) {
   const out = [];
-  const writes = (perms) =>
-    perms === "write-all"
-      ? ["write-all"]
-      : Object.entries(perms ?? {})
-          .filter(([, v]) => v === "write")
-          .map(([k]) => k)
-          .sort();
   for (const [file, doc] of Object.entries(workflows)) {
-    if (writes(doc?.permissions).length > 0)
+    const top = writesOf(doc?.permissions);
+    if (top.length > 0)
       out.push({
         file,
         job: "-",
-        why: `grants ${writes(doc.permissions).join(", ")} write at the workflow level (grant it to the one job that needs it)`,
+        why: `grants ${top.join(", ")} write at the workflow level (grant it to the one job that needs it)`,
       });
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
-      const got = writes(job?.permissions);
+      const got = writesOf(job?.permissions);
       const want = [...(WRITE_PERMISSIONS[`${file}#${jobId}`] ?? [])].sort();
       if (got.join(",") !== want.join(","))
         out.push({
@@ -1760,14 +1754,19 @@ export function writePermissionFindings(workflows) {
   return out;
 }
 
-/** The write permissions a job holds: its own, or the workflow's when it sets none. */
-export function writePermissions(job, doc) {
-  const perms = job?.permissions ?? doc?.permissions;
-  if (perms === "write-all") return ["*"];
+/**
+ * The write permissions one `permissions:` value grants, sorted: `write-all`
+ * as itself, a map's `write` keys, nothing otherwise (round 10: one reader,
+ * where rule 18 and isCredentialed each had their own). A job without its own
+ * `permissions:` holds its workflow's; the caller picks which value to read.
+ */
+export function writesOf(perms) {
+  if (perms === "write-all") return ["write-all"];
   if (perms === null || typeof perms !== "object") return [];
   return Object.entries(perms)
     .filter(([, v]) => v === "write")
-    .map(([k]) => k);
+    .map(([k]) => k)
+    .sort();
 }
 
 /**
@@ -1832,7 +1831,7 @@ export function exemptTokenFindings(workflows) {
 export function isCredentialed(file, jobId, job, doc) {
   if (envName(job) !== undefined) return true;
   if (Object.hasOwn(WRITE_TOKEN_EXEMPT, `${file}#${jobId}`)) return false;
-  if (writePermissions(job, doc).length > 0) return true;
+  if (writesOf(job?.permissions ?? doc?.permissions).length > 0) return true;
   return allExpressions(job).some((e) => TOKEN_NAME.test(withoutStrings(e)));
 }
 
