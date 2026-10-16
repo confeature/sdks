@@ -247,17 +247,31 @@ function main(argv) {
   }
   let tree;
   const live = {};
+  const contradictory = [];
   try {
     tree = readTree(repo);
     for (const f of readdirSync(liveDir)) {
-      if (f.endsWith(".xml")) live[f.slice(0, -4)] = readFileSync(join(liveDir, f), "utf8");
-      else if (f.endsWith(".absent")) live[f.slice(0, -7)] = null;
+      const aid = f.endsWith(".xml")
+        ? f.slice(0, -4)
+        : f.endsWith(".absent")
+          ? f.slice(0, -7)
+          : null;
+      if (aid === null) continue;
+      // A 200 and a 404 for one artifact: the fetch's outcome is unknown.
+      if (Object.hasOwn(live, aid)) contradictory.push(aid);
+      live[aid] = f.endsWith(".xml") ? readFileSync(join(liveDir, f), "utf8") : null;
     }
   } catch (e) {
     console.error(`check-maven-release: cannot read the release (${e?.message ?? e})`);
     return 2;
   }
-  const problems = releaseProblems(tree, coordinates, version, live);
+  const problems = [
+    ...contradictory.map(
+      (aid) =>
+        `${aid}: the live directory holds both ${aid}.xml and ${aid}.absent: refusing to guess`,
+    ),
+    ...releaseProblems(tree, coordinates, version, live),
+  ];
   for (const p of problems) console.error(`::error::${p}`);
   if (problems.length > 0) return 1;
   console.log(

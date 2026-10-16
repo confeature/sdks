@@ -129,6 +129,19 @@ describe("files that never belong in a published tarball (#794 review)", () => {
     "dist/fixtures/config.json",
     "dist/client.test.mjs",
     "dist/client.spec.d.ts",
+    ".netrc",
+    ".pypirc",
+    ".yarnrc.yml",
+    "id_ecdsa",
+    "keys/id_ecdsa.pub",
+    "release.jks",
+    "android.keystore",
+    // Case does not hide a file: npm keeps the name as packed.
+    ".ENV",
+    "Tests/unit/x.js",
+    "dist/x.Test.js",
+    "dist/Fixtures/a.json",
+    "certs/SERVER.PEM",
   ])("refuses %s", (file) =>
     expect(check(GOOD, [...FILES, file])).toEqual([
       `${file}: a secret, a dependency tree, VCS data or a test file has no place in a published package`,
@@ -140,6 +153,11 @@ describe("files that never belong in a published tarball (#794 review)", () => {
     "dist/keyboard.js",
     "dist/latest.d.ts",
     "dist/contest.js",
+    // The case-insensitive match keeps its look-alikes accepted.
+    "dist/Environment.mjs",
+    "dist/Testing.mjs",
+    "dist/KeyStore.js",
+    "dist/Netrc.js",
   ])("accepts %s (a name that only looks alike)", (file) =>
     expect(check(GOOD, [...FILES, file])).toEqual([]),
   );

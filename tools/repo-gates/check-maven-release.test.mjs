@@ -392,6 +392,18 @@ describe("the CLI", () => {
     expect(r.stderr).toContain("no answer from the live repository");
   });
 
+  it("exits 1 when an artifact has both a live answer and a 404 marker", () => {
+    const live = tree({
+      [`${ROOT_ID}.xml`]: metadata(ROOT_ID, ["0.1.0"]),
+      [`${ROOT_ID}.absent`]: "",
+    });
+    const r = run(tree(release([ROOT_ID], ["0.1.0", VERSION])), COORDINATES, VERSION, live);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `${ROOT_ID}: the live directory holds both ${ROOT_ID}.xml and ${ROOT_ID}.absent`,
+    );
+  });
+
   it("exits 2 without a live directory: the live state is never assumed", () => {
     expect(run(tree(release()), COORDINATES, VERSION).status).toBe(2);
   });

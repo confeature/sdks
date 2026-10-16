@@ -7,18 +7,27 @@
 // path skipped main() and the script exited 0 having checked nothing.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { isEntry } from "../lib/is-entry.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
+const dirs = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+/** A crash is not a verdict: an uncaught error prints a stack, never the script's own words. */
+const CRASH = /ERR_[A-Z_]+|^\s+at .+:\d+:\d+\)?$|Error \[/m;
+
 /** Run `script` (repo-relative) through a symlink in a fresh temp directory. */
 function viaSymlink(script, ...args) {
   const dir = mkdtempSync(join(tmpdir(), "is-entry-"));
+  dirs.push(dir);
   const link = join(dir, script.split("/").pop());
   symlinkSync(join(ROOT, script), link);
   return spawnSync(process.execPath, [link, ...args], { encoding: "utf8", cwd: dir });
@@ -28,28 +37,47 @@ describe("every gate still runs when invoked through a symlinked path", () => {
   // Bad input, so a gate that ran must exit non-zero; one that skipped main()
   // exits 0 in silence.
   it.each([
-    ["tools/sdk-pack/check-npm-tarball.mjs", [], 2],
-    ["tools/sdk-pack/check-maven-release.mjs", [], 2],
-    ["tools/sdk-pack/resolve-publish.mjs", [], 1],
-    ["tools/sdk-pack/resolve-publish.mjs", ["--bogus", "x"], 2],
+    ["tools/sdk-pack/check-npm-tarball.mjs", [], 2, /usage: check-npm-tarball/],
+    ["tools/sdk-pack/check-maven-release.mjs", [], 2, /usage: check-maven-release/],
+    ["tools/sdk-pack/resolve-publish.mjs", [], 1, /refused: pass exactly one of --tag or --unit/],
+    ["tools/sdk-pack/resolve-publish.mjs", ["--bogus", "x"], 2, /usage: resolve-publish/],
     // Their own copies were already right; they now share the one module.
-    ["tools/repo-gates/verify-codeowners.mjs", [], 1],
-    ["tools/repo-gates/verify-no-dup-json-keys.mjs", ["no-such.json"], 2],
-    ["tools/manifest-author.mjs", ["no-such.json"], 2],
-  ])("%s %j exits %i", (script, args, code) => {
+    ["tools/repo-gates/verify-codeowners.mjs", [], 1, /verify-codeowners: 1 finding/],
+    [
+      "tools/repo-gates/verify-no-dup-json-keys.mjs",
+      ["no-such.json"],
+      2,
+      /no-such\.json: cannot read/,
+    ],
+    ["tools/manifest-author.mjs", ["no-such.json"], 2, /manifest-author: no-such\.json/],
+  ])("%s %j exits %i with its own verdict, not a crash", (script, args, code, verdict) => {
     const r = viaSymlink(script, ...args);
-    expect(r.status, r.stderr).toBe(code);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).not.toMatch(CRASH);
+    expect(out).toMatch(verdict);
+    expect(r.status, out).toBe(code);
   });
 
   // These read the repository, which is clean, so their verdict is a line.
   it.each([
     ["tools/repo-gates/verify-workflows.mjs", /verify-workflows: ok/],
     ["tools/repo-gates/verify-declarations.mjs", /Gate declarations OK/],
-  ])("%s gives its verdict", (script, verdict) => {
-    const r = viaSymlink(script);
-    expect(`${r.stdout}${r.stderr}`).toMatch(verdict);
-    expect(r.status).toBe(0);
-  });
+    // Its verdict depends on the working tree; that it gives one is the point.
+    [
+      "tools/repo-gates/verify-fmt-lint.mjs",
+      /verify:fmt-lint: format (?:ok|FAILED), lint (?:ok|FAILED)/,
+    ],
+  ])(
+    "%s gives its verdict, not a crash",
+    (script, verdict) => {
+      const r = viaSymlink(script);
+      const out = `${r.stdout}${r.stderr}`;
+      expect(out).not.toMatch(CRASH);
+      expect(out).toMatch(verdict);
+      expect([0, 1]).toContain(r.status);
+    },
+    60_000,
+  );
 });
 
 describe("isEntry", () => {

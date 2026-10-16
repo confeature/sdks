@@ -54,17 +54,18 @@ const normalise = (p) => p.replace(/^\.\//, "");
  * Files no published package of ours ever carries: a registry keeps what it is
  * given, so the first publish of one is permanent. Deliberately small, each a
  * category, never a guess about a build's layout:
- *   - secrets: `.env*`, `.npmrc` (it can hold a token), private keys and
- *     certificate stores (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
- *     `id_ed25519*`);
+ *   - secrets: `.env*`, `.npmrc`, `.netrc`, `.pypirc`, `.yarnrc.yml` (each can
+ *     hold a token), private keys and key stores (`*.pem`, `*.key`, `*.p12`,
+ *     `*.pfx`, `*.jks`, `*.keystore`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`);
  *   - a dependency tree or VCS data: a `node_modules/` or `.git/` directory;
  *   - tests: a `__tests__/`, `tests/`, `fixtures/` or `__fixtures__/`
  *     directory, or a `*.test.*` / `*.spec.*` file. The SDKs ship `dist/`,
  *     README and LICENSE; a test in the tarball is a build that swept up its
  *     source tree.
+ * Matched case-insensitively: `.ENV` and `Tests/` are the same mistake.
  */
 const UNPUBLISHABLE_NAME =
-  /^(?:\.env(?:\..*)?|\.npmrc|.*\.(?:pem|key|p12|pfx)|id_(?:rsa|ed25519)(?:\..*)?|.*\.(?:test|spec)\.[^/]+)$/;
+  /^(?:\.env(?:\..*)?|\.npmrc|\.netrc|\.pypirc|\.yarnrc\.yml|.*\.(?:pem|key|p12|pfx|jks|keystore)|id_(?:rsa|ed25519|ecdsa)(?:\..*)?|.*\.(?:test|spec)\.[^/]+)$/i;
 const UNPUBLISHABLE_DIR = new Set([
   "node_modules",
   ".git",
@@ -77,7 +78,7 @@ const unpublishable = (path) => {
   const parts = path.split("/");
   return (
     UNPUBLISHABLE_NAME.test(parts.at(-1)) ||
-    parts.slice(0, -1).some((d) => UNPUBLISHABLE_DIR.has(d))
+    parts.slice(0, -1).some((d) => UNPUBLISHABLE_DIR.has(d.toLowerCase()))
   );
 };
 
