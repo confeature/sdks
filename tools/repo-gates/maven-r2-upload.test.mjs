@@ -178,7 +178,7 @@ describe("maven-r2-upload.sh", () => {
     const r = run(dir);
     expect(r.status).toBe(1);
     expect(r.stdout).toContain(
-      "io/confeature/other/0.2.0/other-0.2.0.jar is not under io/confeature/x/",
+      "io/confeature/other/0.2.0/other-0.2.0.jar is not under io/confeature/x/ or a target its module names",
     );
     expect(read(dir, "calls")).toBe("");
   });
@@ -195,7 +195,13 @@ describe("maven-r2-upload.sh", () => {
         const v = `release/io/confeature/${aid}/${version}/${aid}-${version}`;
         write(`${v}.jar`, `jar ${aid} ${version}`);
         write(`${v}.pom`, `pom ${aid} ${version}`);
-        write(`${v}.module`, `module ${aid} ${version}`);
+        // The root's Gradle module names its target, as a Kotlin MP build's does.
+        write(
+          `${v}.module`,
+          aid === "x"
+            ? `{"variants":[{"name":"jvmApiElements-published","available-at":{"url":"../../x-jvm/${version}/x-jvm-${version}.module","group":"io.confeature","module":"x-jvm","version":"${version}"}}]}`
+            : `module ${aid} ${version}`,
+        );
         write(
           `release/io/confeature/${aid}/maven-metadata.xml`,
           `<metadata>${versions.map((x) => `<version>${x}</version>`).join("")}</metadata>`,
@@ -218,9 +224,28 @@ describe("maven-r2-upload.sh", () => {
       "put io/confeature/x-jvm/maven-metadata.xml (unconditional)",
       "put io/confeature/x/maven-metadata.xml (unconditional)",
     ]);
-    expect(read(dir, "store/io/confeature/x/maven-metadata.xml")).toContain(
-      "<version>0.1.0</version>",
-    );
-    expect(read(dir, "store/io/confeature/x/0.1.0/x-0.1.0.jar")).toBe("jar x 0.1.0");
+    // The stored metadata is the new one: both versions, the new one included.
+    const meta = read(dir, "store/io/confeature/x/maven-metadata.xml");
+    expect(meta).toContain("<version>0.1.0</version>");
+    expect(meta).toContain("<version>0.2.0</version>");
+  });
+
+  it.each([
+    ["a sibling that only shares the prefix, with no root module", "x-evil", null],
+    ["a sibling the root module does not name", "x-evil", "x-jvm"],
+    ["another unit's artifact, even if the root module names it", "other", "other"],
+  ])("refuses %s, before aws runs", (_, sibling, named) => {
+    const dir = fixture();
+    if (named !== null)
+      writeFileSync(
+        join(dir, "release/io/confeature/x/0.2.0/x-0.2.0.module"),
+        `{"variants":[{"available-at":{"url":"../../${named}/0.2.0/${named}-0.2.0.module"}}]}`,
+      );
+    mkdirSync(join(dir, `release/io/confeature/${sibling}/0.2.0`), { recursive: true });
+    writeFileSync(join(dir, `release/io/confeature/${sibling}/0.2.0/${sibling}-0.2.0.jar`), "jar");
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain(`io/confeature/${sibling}/0.2.0/${sibling}-0.2.0.jar is not under`);
+    expect(read(dir, "calls")).toBe("");
   });
 });

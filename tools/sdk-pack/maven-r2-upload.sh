@@ -97,13 +97,23 @@ keeps_stored_versions() {
 }
 cd "$release"
 while IFS= read -r f; do echo "$(rank "$f") $f"; done < <(find . -type f | sed 's|^\./||') | sort -k1,1n -k2,2 > "$tmp/order"
-# Every key is the unit's: its root artifact or one of its <root>-<target>
-# artifacts, never another unit's, before anything is read or put.
+# Every key is the unit's: its root artifact, or a <root>-<target> artifact
+# the root's Gradle module names (`"available-at": {"url": "../../<id>/…"}`),
+# never a sibling that merely shares the prefix, before anything is read or put.
+module="$base/$root/$UNIT_VERSION/$root-$UNIT_VERSION.module"
+: > "$tmp/ids"
+echo "$root" >> "$tmp/ids"
+if [ -f "$module" ]; then
+  grep -o '"url" *: *"\.\./\.\./[^/"]*/' "$module" | sed 's|.*\.\./\.\./||; s|/$||' |
+    while IFS= read -r id; do
+      case "$id" in "$root-"*) echo "$id" ;; esac
+    done >> "$tmp/ids"
+fi
 while read -r r f; do
-  case "$f" in
-    "$base/$root/"* | "$base/$root-"*/*) ;;
-    *) echo "::error::$f is not under $base/$root/ or $base/$root-*/: not this unit's"; exit 1 ;;
-  esac
+  id="${f#"$base/"}"
+  id="${id%%/*}"
+  [ "${f#"$base/$id/"}" != "$f" ] && grep -qxF -- "$id" "$tmp/ids" ||
+    { echo "::error::$f is not under $base/$root/ or a target its module names: not this unit's"; exit 1; }
 done < "$tmp/order"
 while read -r r f; do
   if [ "$r" -eq 4 ]; then keeps_stored_versions "$f"; fi
