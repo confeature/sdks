@@ -16,7 +16,8 @@
 #
 # What it does, in order:
 #   1. refuses to start without MAVEN_R2_ACCESS_KEY_ID, MAVEN_R2_SECRET_ACCESS_KEY
-#      and CLOUDFLARE_ACCOUNT_ID;
+#      and CLOUDFLARE_ACCOUNT_ID, and refuses any file outside the unit's own
+#      artifacts (<group>/<root>/ and <group>/<root>-<target>/);
 #   2. refuses a maven-metadata.xml that would drop a version the stored one
 #      lists;
 #   3. puts every file of the version with If-None-Match: * (immutable, a
@@ -96,6 +97,14 @@ keeps_stored_versions() {
 }
 cd "$release"
 while IFS= read -r f; do echo "$(rank "$f") $f"; done < <(find . -type f | sed 's|^\./||') | sort -k1,1n -k2,2 > "$tmp/order"
+# Every key is the unit's: its root artifact or one of its <root>-<target>
+# artifacts, never another unit's, before anything is read or put.
+while read -r r f; do
+  case "$f" in
+    "$base/$root/"* | "$base/$root-"*/*) ;;
+    *) echo "::error::$f is not under $base/$root/ or $base/$root-*/: not this unit's"; exit 1 ;;
+  esac
+done < "$tmp/order"
 while read -r r f; do
   if [ "$r" -eq 4 ]; then keeps_stored_versions "$f"; fi
 done < "$tmp/order"
@@ -110,7 +119,5 @@ while read -r r f; do
 done < "$tmp/order"
 
 # Through the public host, as a consumer resolves it.
-group="${UNIT_COORDINATES%%:*}"
-root="${UNIT_COORDINATES#*:}"
-pom="${group//.//}/${root}/${UNIT_VERSION}/${root}-${UNIT_VERSION}.pom"
+pom="${base}/${root}/${UNIT_VERSION}/${root}-${UNIT_VERSION}.pom"
 curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors "$MAVEN_URL/$pom"
