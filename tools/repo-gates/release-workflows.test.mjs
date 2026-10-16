@@ -927,3 +927,70 @@ describe("16 reads the workflow env, secrets, vars and matrix too (round 6)", ()
     ).toBe(true);
   });
 });
+
+describe("expressions are read as GitHub reads them: case-folded, with their strings (round 7)", () => {
+  const resolveEnv = (w) => w[P].jobs.setup.steps.find((s) => s.id === "resolve").env;
+  it.each([
+    [
+      "TOJSON(SECRETS) in upper case",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ TOJSON(SECRETS) }}";
+      },
+      /toJSON, fromJSON, format and join are refused/,
+    ],
+    [
+      "SECRETS.X in upper case, outside an environment",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ SECRETS.GO_TAG_DEPLOY_KEY }}";
+      },
+      /reads the secrets context outside an environment/,
+    ],
+    [
+      "GITHUB.TOKEN in upper case",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ GITHUB.TOKEN }}";
+      },
+      /write the context in lower case/,
+    ],
+    [
+      "a `}}` inside a string hiding toJSON(secrets)",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ ('}}' && '') || toJSON(secrets) }}";
+      },
+      /toJSON, fromJSON, format and join are refused/,
+    ],
+    [
+      "a '' escape inside the string",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ ('it''s }}' && '') || toJSON(secrets) }}";
+      },
+      /toJSON, fromJSON, format and join are refused/,
+    ],
+    [
+      "a non-ASCII letter (Cyrillic s) in a context name",
+      (w) => {
+        resolveEnv(w).UNIT = "${{ ѕecrets.X }}";
+      },
+      /a non-ASCII character in an expression/,
+    ],
+    [
+      "an if: reading SECRETS outside an environment",
+      (w) => {
+        w[P].jobs.setup.steps.find((s) => s.id === "resolve").if = "contains(SECRETS.X, 'a')";
+      },
+      /reads the secrets context outside an environment/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it("splits expressions only outside strings", async () => {
+    const { expressionBodies } = await import("./verify-workflows.mjs");
+    expect(expressionBodies("a ${{ ('}}' && x) }} b ${{ y }}")).toEqual([" ('}}' && x) ", " y "]);
+    expect(expressionBodies("${{ 'it''s }}' }}")).toEqual([" 'it''s }}' "]);
+    expect(expressionBodies("${{ unterminated")).toEqual([" unterminated"]);
+  });
+});

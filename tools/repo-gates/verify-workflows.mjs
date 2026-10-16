@@ -131,7 +131,43 @@ export function globMatches(glob, ref) {
 const envName = (job) =>
   typeof job?.environment === "string" ? job.environment : job?.environment?.name;
 const grantsIdToken = (perms) => perms === "write-all" || perms?.["id-token"] === "write";
-const readsSecrets = (node) => /\$\{\{[^}]*\bsecrets\b/.test(JSON.stringify(node ?? null));
+/**
+ * The bodies of every `${{ … }}` in `text`, read the way GitHub reads them
+ * (round 7): a `'…'` string (with its `''` escape) may hold `}}`, so a regex
+ * that stops at the first `}}` let `${{ ('}}' && '') || toJSON(secrets) }}`
+ * hide its tail. An unterminated expression runs to the end of the text.
+ */
+export function expressionBodies(text) {
+  const s = String(text ?? "");
+  const out = [];
+  let i = s.indexOf("${{");
+  while (i !== -1) {
+    let j = i + 3;
+    let inString = false;
+    for (; j < s.length; j += 1) {
+      // The `''` escape toggles twice, so it needs no case of its own.
+      if (s[j] === "'") inString = !inString;
+      else if (!inString && s.startsWith("}}", j)) break;
+    }
+    out.push(s.slice(i + 3, j));
+    i = s.indexOf("${{", j + 2);
+  }
+  return out;
+}
+/** An expression with its string literals emptied, for judging its names. */
+export const withoutStrings = (e) => e.replace(/'(?:[^']|'')*'/g, "''");
+/** A key's expressions: an `if:` without `${{ }}` is one bare expression. */
+const exprsOf = (key, value) =>
+  key === "if" && !String(value).includes("${{") ? [String(value)] : expressionBodies(value);
+/** Every expression anywhere in `node` (its `if:` keys read as bare expressions). */
+export function allExpressions(node, key = null) {
+  if (typeof node === "string") return exprsOf(key, node);
+  if (node === null || typeof node !== "object") return [];
+  return Object.entries(node).flatMap(([k, v]) => allExpressions(v, Array.isArray(node) ? key : k));
+}
+/** Contexts and functions are case-insensitive in GitHub's expressions (round 7). */
+const readsSecrets = (node) =>
+  allExpressions(node).some((e) => /\bsecrets\b/i.test(withoutStrings(e)));
 const triggersOf = (doc) => {
   const on = doc?.on ?? doc?.[true]; // YAML 1.1 reads a bare `on` key as true
   return typeof on === "string" ? [on] : Array.isArray(on) ? on : Object.keys(on ?? {});
@@ -1547,15 +1583,19 @@ export function referenceProblem(
   // (`toJSON(secrets)`, `fromJSON(…)`, `format(…)`, `join(…)`), or a bare
   // context. conclude's `toJSON(needs)` is the one exception, exact.
   const e = expr.trim();
-  if (e !== "toJSON(needs)") {
-    if (/\[/.test(e)) return `${e}: an index ([…]) into a context`;
-    if (/\b(?:toJSON|fromJSON|format|join)\s*\(/.test(e))
+  // Names are judged case-insensitively, outside string literals, and only
+  // in ASCII: GitHub folds `TOJSON(SECRETS)` to `toJSON(secrets)` (round 7).
+  if (/[^\x00-\x7f]/.test(e)) return `${e}: a non-ASCII character in an expression`;
+  const bareText = withoutStrings(e);
+  if (bareText.replace(/\s+/g, "").toLowerCase() !== "tojson(needs)") {
+    if (/\[/.test(bareText)) return `${e}: an index ([…]) into a context`;
+    if (/\b(?:tojson|fromjson|format|join)\s*\(/i.test(bareText))
       return `${e}: toJSON, fromJSON, format and join are refused`;
     const bare =
-      /(?<![\w.'])(secrets|github|env|vars|steps|needs|inputs|matrix|job|runner|strategy)(?![\w.])/.exec(
-        e.replace(/'[^']*'/g, "''"),
+      /(?<![\w.'])(secrets|github|env|vars|steps|needs|inputs|matrix|job|runner|strategy)(?![\w.])/i.exec(
+        bareText,
       );
-    if (bare !== null) return `${e}: the bare ${bare[1]} context`;
+    if (bare !== null) return `${e}: the bare ${bare[1].toLowerCase()} context`;
   }
   const job = doc?.jobs?.[jobId];
   const needs = asList(job?.needs);
@@ -1571,10 +1611,19 @@ export function referenceProblem(
     ...Object.keys(on?.workflow_dispatch?.inputs ?? {}),
     ...Object.keys(on?.workflow_call?.inputs ?? {}),
   ]);
-  for (const m of expr.matchAll(
-    /(?<![\w.])(needs|steps|env|inputs|secrets|vars|matrix)\.([A-Za-z_][\w-]*)(?:\.([A-Za-z_][\w-]*))?(?:\.([A-Za-z_][\w-]*))?/g,
+  for (const m of bareText.matchAll(
+    /(?<![\w.])(needs|steps|env|inputs|secrets|vars|matrix|github)\.([A-Za-z_][\w-]*)(?:\.([A-Za-z_][\w-]*))?(?:\.([A-Za-z_][\w-]*))?/gi,
   )) {
-    const [ref, ctxName, a, b, c] = m;
+    const [ref, rawCtx, a, rawB, c] = m;
+    const ctxName = rawCtx.toLowerCase();
+    const b = rawB?.toLowerCase();
+    if (
+      rawCtx !== ctxName ||
+      (ctxName !== "github" && rawB !== undefined && rawB !== b) ||
+      (ctxName === "github" && a !== a.toLowerCase())
+    )
+      return `${ref}: write the context in lower case (GitHub folds case, this check reads it exactly)`;
+    if (ctxName === "github") continue;
     // The workflow's own env sees no job's needs, steps or env.
     if (jobId === null && ["needs", "steps", "env"].includes(ctxName))
       return `${ref}: the workflow's env cannot read the ${ctxName} context`;
@@ -1620,7 +1669,7 @@ export function referenceProblem(
  */
 export function referenceFindings(workflows, scriptOutputs = {}, settings = null) {
   const out = [];
-  const exprs = (v) => [...String(v).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+  const exprs = (v) => expressionBodies(v);
   const secretsOf = settings === null ? null : declaredSecrets(settings);
   for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
     const doc = workflows[file];
