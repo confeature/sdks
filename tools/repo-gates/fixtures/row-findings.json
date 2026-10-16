@@ -1288,5 +1288,47 @@
     "cli-release.yml: upload: reads secret R2_ACCESS_KEY_ID, which environment sdk-publish-npm does not declare",
     "cli-release.yml: upload: reads secret R2_SECRET_ACCESS_KEY, which environment sdk-publish-npm does not declare",
     "cli-release.yml: upload: the job's keys are {\"environment\":\"sdk-publish-npm\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+  ],
+  "X1 test: job env github['token']": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"G\":\"${{ github['token'] }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X2 test: job env toJSON(github)": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"G\":\"${{ toJSON(github) }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X3 test: job env github[format()]": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"G\":\"${{ github[format('{0}{1}', 'to', 'ken')] }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X4 test: job env join(github.*)": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"G\":\"${{ join(github.*, ',') }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X5 release-gate: workflow env toJSON(github)": [
+    "release-gate.yml: -: names github.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow (its token reaches its frozen github-script step only)",
+    "release-gate.yml: -: the workflow's env/defaults are {\"env\":{\"G\":\"${{ toJSON(github) }}\"}}, FROZEN_WORKFLOW_KEYS records {}"
+  ],
+  "X6 test: job env secrets['X']": [
+    "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
+    "release-gate.yml: test: reads the secrets context outside an environment",
+    "release-gate.yml: test: the job's keys are {\"env\":{\"G\":\"${{ secrets['R2_SECRET_ACCESS_KEY'] }}\"},\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}, FROZEN_JOB_KEYS records {\"name\":\"test ${{ matrix.sdk.name }} (${{ matrix.sdk.daggerFn }})\",\"needs\":\"setup\",\"permissions\":{\"contents\":\"read\",\"issues\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"strategy\":{\"fail-fast\":false,\"matrix\":\"${{ fromJSON(needs.setup.outputs.matrix) }}\"},\"timeout-minutes\":30}"
+  ],
+  "X9 setup: toJSON(github) makes the job credentialed": [
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "release-gate.yml: setup step Compute coverage counts: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "release-gate.yml: setup step Derive covered-SDK matrix from manifest: a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)",
+    "release-gate.yml: setup step Write coverage summary: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "release-gate.yml: setup: a credentialed job's env: RELEASE_TAG is ${{ github.event.release.tag_name }}, not its pinned expression",
+    "release-gate.yml: setup: a credentialed job's env: it sets COVERED, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets EXEMPT, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets G, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets PENDING, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's env: it sets TOTAL, which CREDENTIALED_ENV does not allow",
+    "release-gate.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "release-gate.yml: setup: a credentialed job's outputs: holds an expression"
   ]
 }

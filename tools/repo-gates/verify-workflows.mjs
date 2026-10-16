@@ -1825,8 +1825,25 @@ export const WRITE_TOKEN_EXEMPT = {
     "issues: write only; publishes nothing; every step frozen; no expression names github.token or secrets",
 };
 
-/** github.token or the secrets context, in an expression (GitHub folds case). */
-const TOKEN_NAME = /\b(?:github\s*\.\s*token|secrets)\b/i;
+/**
+ * Whether an expression can reach the job's token or a secret (round 11):
+ * any use of the secrets context, and any use of the github context other
+ * than `github.<name>` with name not `token`. A pattern for `github.token`
+ * alone let `github['token']`, `toJSON(github)`, `github.*`,
+ * `join(github.*, ',')` and `github[format(…)]` through, each of which reads
+ * the token. Judged on the string-stripped expression, case-insensitively
+ * (GitHub folds case); a `.github` or `.secrets` property of another context
+ * is not the context.
+ */
+export function readsCredentialContext(expr) {
+  const bare = withoutStrings(expr);
+  if (/(?<![\w.-])secrets(?![\w-])/i.test(bare)) return true;
+  for (const m of bare.matchAll(/(?<![\w.-])github(?![\w-])/gi)) {
+    const next = /^\s*\.\s*([A-Za-z_][\w-]*)/.exec(bare.slice(m.index + m[0].length));
+    if (next === null || next[1].toLowerCase() === "token") return true;
+  }
+  return false;
+}
 
 /**
  * A WRITE_TOKEN_EXEMPT job, or its workflow outside `jobs:`, naming
@@ -1852,7 +1869,7 @@ export function exemptTokenFindings(workflows) {
       [jobId, job],
       ["-", workflowLevel],
     ])
-      if (allExpressions(node).some((e) => TOKEN_NAME.test(withoutStrings(e))))
+      if (allExpressions(node).some(readsCredentialContext))
         out.push({
           file,
           job: where,
@@ -1872,7 +1889,7 @@ export function isCredentialed(file, jobId, job, doc) {
   if (envName(job) !== undefined) return true;
   if (Object.hasOwn(WRITE_TOKEN_EXEMPT, `${file}#${jobId}`)) return false;
   if (writesOf(job?.permissions ?? doc?.permissions).length > 0) return true;
-  return allExpressions(job).some((e) => TOKEN_NAME.test(withoutStrings(e)));
+  return allExpressions(job).some(readsCredentialContext);
 }
 
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */

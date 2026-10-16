@@ -18,6 +18,7 @@ import {
   CREDENTIAL_ENV,
   isCredentialed,
   writesOf,
+  readsCredentialContext,
   FROZEN_JOBS,
   FROZEN_WORKFLOW_KEYS,
   daggerFnFindings,
@@ -2320,4 +2321,76 @@ describe("a frozen job is frozen whole, with its workflow's env and defaults (ro
       expect(Object.keys(FROZEN_WORKFLOW_KEYS)).toContain(file);
     }
   });
+});
+
+describe("any route to the token or a secret is one (round 11, F2)", () => {
+  const G = "release-gate.yml";
+  const T = (w) => w[G].jobs.test;
+  const EXEMPT = /names github\.token or secrets in a WRITE_TOKEN_EXEMPT job \(/;
+  it.each(
+    ROWS.rows([
+      [
+        "X1 test: job env github['token']",
+        (w) => void (T(w).env = { G: "${{ github['token'] }}" }),
+        EXEMPT,
+      ],
+      [
+        "X2 test: job env toJSON(github)",
+        (w) => void (T(w).env = { G: "${{ toJSON(github) }}" }),
+        EXEMPT,
+      ],
+      [
+        "X3 test: job env github[format()]",
+        (w) => void (T(w).env = { G: "${{ github[format('{0}{1}', 'to', 'ken')] }}" }),
+        EXEMPT,
+      ],
+      [
+        "X4 test: job env join(github.*)",
+        (w) => void (T(w).env = { G: "${{ join(github.*, ',') }}" }),
+        EXEMPT,
+      ],
+      [
+        "X5 release-gate: workflow env toJSON(github)",
+        (w) => void (w[G].env = { G: "${{ toJSON(github) }}" }),
+        /release-gate\.yml: -: names github\.token or secrets in a WRITE_TOKEN_EXEMPT job's workflow/,
+      ],
+      [
+        "X6 test: job env secrets['X']",
+        (w) => void (T(w).env = { G: "${{ secrets['R2_SECRET_ACCESS_KEY'] }}" }),
+        EXEMPT,
+      ],
+      [
+        "X9 setup: toJSON(github) makes the job credentialed",
+        (w) => void (w[G].jobs.setup.env = { G: "${{ toJSON(github) }}" }),
+        /release-gate\.yml: setup: a credentialed job/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+  it.each([
+    ["github.token", true],
+    ["GITHUB.TOKEN", true],
+    ["github . token", true],
+    ["github['token']", true],
+    ["github[format('{0}{1}', 'to', 'ken')]", true],
+    ["toJSON(github)", true],
+    ["join(github.*, ',')", true],
+    ["format('{0}', github)", true],
+    ["github", true],
+    ["secrets.X", true],
+    ["secrets['X']", true],
+    ["toJSON(SECRETS)", true],
+    ["github.ref_name", false],
+    ["github.event.release.tag_name", false],
+    ["toJSON(github.event.release.tag_name)", false],
+    ["steps.github.outputs.x", false],
+    ["needs.secrets.outputs.x", false],
+    ["'github.token'", false],
+  ])("readsCredentialContext(%s) is %s", (e, want) => expect(readsCredentialContext(e)).toBe(want));
 });
