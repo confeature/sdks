@@ -117,6 +117,8 @@ function bin(tools, dir = scratch()) {
   }
   return dir;
 }
+/** The sha256 of a string, hex. */
+const sha256Text = (s) => createHash("sha256").update(s).digest("hex");
 /** Logs `<tool> <argv…>`, one line per call, to $ARGV_LOG. */
 const RECORD = (name) =>
   `printf '%s' ${name} >> "$ARGV_LOG"; printf ' %s' "$@" >> "$ARGV_LOG"; echo >> "$ARGV_LOG"`;
@@ -613,14 +615,18 @@ if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(d
   });
 
   describe("cli-release's GitHub mirror (the release job: contents: write, GH_TOKEN)", () => {
-    // gh release view <tag> exits 1 until $GH_EXISTS is set; --json … prints $GH_ASSETS.
+    // A stateful gh: $GH_REMOTE holds the release's assets once it exists
+    // ($GH_REMOTE/.exists); create fails when $GH_CREATE_FAIL is set.
     const GH = `${RECORD("gh")}
 [ -n "$GH_TOKEN" ] || { echo "no GH_TOKEN" >&2; exit 4; }
-if [ "$1 $2" = "release create" ]; then : > "$GH_STATE"; fi
-if [ "$1 $2" = "release view" ]; then
-  [ -n "$GH_EXISTS" ] || [ -f "$GH_STATE" ] || exit 1
-  [ "$4" = "--json" ] && echo "\${GH_ASSETS:-0}"
-fi
+case "$1 $2" in
+  "release create") [ -z "$GH_CREATE_FAIL" ] || exit 1; : > "$GH_REMOTE/.exists" ;;
+  "release view")
+    [ -f "$GH_REMOTE/.exists" ] || exit 1
+    [ "$4" = "--json" ] && /bin/ls -1 "$GH_REMOTE" ;;
+  "release download") /bin/cp "$GH_REMOTE"/* "$5"/ ;;
+  "release upload") shift 3; /bin/cp "$@" "$GH_REMOTE"/ ;;
+esac
 exit 0`;
     const TABLE = {
       "github.token": "t",
@@ -628,54 +634,124 @@ exit 0`;
       "needs.build.outputs.sums-digest": "d",
     };
     // release-github.sh runs these (its exception), besides gh.
-    const TOOLS = ["bash"];
-    const ws = () =>
-      workspace({ "dist/confeature-x86_64": "b", "dist/SHA256SUMS": "s" }, [
-        "apps/cli/scripts/release-github.sh",
-      ]);
-    const gh = (test) =>
-      upload({
+    const TOOLS = ["bash", "grep", "sed", "sort", "cmp", "comm", "mkdir", "rm", "cat", "tr", "wc"];
+    const BIN = { "confeature-x86_64": "b1", "confeature-aarch64": "b2" };
+    const sums = (files) =>
+      Object.entries(files)
+        .map(([n, body]) => `${sha256Text(body)}  ${n}`)
+        .sort()
+        .join("\n") + "\n";
+    /** dist/ with `files` and a SHA256SUMS over `summed`; the release's assets in `remote`. */
+    const gh = ({ files = BIN, summed = files, remote = null, test = {}, tag } = {}) => {
+      const ws = workspace(
+        {
+          ...Object.fromEntries(Object.entries(files).map(([n, b]) => [`dist/${n}`, b])),
+          "dist/SHA256SUMS": sums(summed),
+        },
+        ["apps/cli/scripts/release-github.sh"],
+      );
+      const GH_REMOTE = scratch();
+      if (remote !== null) {
+        writeFileSync(join(GH_REMOTE, ".exists"), "");
+        for (const [n, b] of Object.entries(remote))
+          writeFileSync(join(GH_REMOTE, n), b === "SUMS" ? sums(summed) : b);
+      }
+      const out = upload({
         doc: CLI,
         jobId: "release",
         name: "Create the GitHub release and upload its assets (mirror)",
-        ws: ws(),
-        table: TABLE,
+        ws,
+        table: tag === undefined ? TABLE : { ...TABLE, "github.ref_name": tag },
         stubs: { gh: GH },
         tools: TOOLS,
-        test: { GH_STATE: join(scratch(), "created"), ...test },
+        test: { GH_REMOTE, ...test },
       });
+      return {
+        ...out,
+        remote: readdirSync(GH_REMOTE)
+          .filter((n) => n !== ".exists")
+          .sort(),
+      };
+    };
+    const ALL = ["SHA256SUMS", "confeature-aarch64", "confeature-x86_64"];
 
     it("creates the release from the tag, then uploads the binaries and SHA256SUMS", () => {
-      const { r, argv } = gh({});
+      const { r, argv, remote } = gh();
       expect(r.status, r.stderr).toBe(0);
       expect(argv).toEqual([
         "gh release view cli-v1.2.3",
         "gh release create cli-v1.2.3 --title Confeature CLI 1.2.3 --generate-notes --verify-tag",
-        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
-        "gh release upload cli-v1.2.3 dist/confeature-x86_64 dist/SHA256SUMS",
+        "gh release view cli-v1.2.3 --json assets --jq .assets[].name",
+        "gh release upload cli-v1.2.3 dist/confeature-aarch64 dist/confeature-x86_64 dist/SHA256SUMS",
       ]);
+      expect(remote).toEqual(ALL);
     });
-    it("on an existing release with no assets, uploads without creating", () => {
-      const { r, argv } = gh({ GH_EXISTS: "1", GH_ASSETS: "0" });
+    it("a partial upload: checks what is there, uploads only the missing assets", () => {
+      const { r, argv, remote } = gh({ remote: { "confeature-x86_64": "b1" } });
       expect(r.status, r.stderr).toBe(0);
-      expect(argv).toEqual([
-        "gh release view cli-v1.2.3",
-        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
-        "gh release upload cli-v1.2.3 dist/confeature-x86_64 dist/SHA256SUMS",
-      ]);
+      expect(argv.at(-1)).toBe(
+        "gh release upload cli-v1.2.3 dist/confeature-aarch64 dist/SHA256SUMS",
+      );
+      expect(argv).toContain("gh release download cli-v1.2.3 --dir publish-tmp/gh-assets");
+      expect(remote).toEqual(ALL);
     });
-    it("replaces nothing on a release that already has assets", () => {
-      const { r, argv } = gh({ GH_EXISTS: "1", GH_ASSETS: "3" });
+    it("replaces nothing on a release that already carries exactly this build", () => {
+      const { r, argv } = gh({ remote: { ...BIN, SHA256SUMS: "SUMS" } });
       expect(r.status, r.stderr).toBe(0);
-      expect(argv).toEqual([
-        "gh release view cli-v1.2.3",
-        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
-      ]);
-      expect(r.stdout).toContain("already carries 3 assets");
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+      expect(r.stdout).toContain("already carries this build's 3 assets");
+    });
+    it("fails on an asset the build does not have, uploading nothing", () => {
+      const { r, argv } = gh({ remote: { "confeature-x86_64": "b1", "confeature-evil": "x" } });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/carries assets this build does not: confeature-evil/);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it("fails on a present asset with other bytes, uploading nothing", () => {
+      const { r, argv } = gh({ remote: { "confeature-x86_64": "other bytes" } });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/the release's confeature-x86_64 is not this build's/);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it("fails on a present SHA256SUMS that is not this build's", () => {
+      const { r } = gh({ remote: { SHA256SUMS: "0  confeature-x86_64\n" } });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/the release's SHA256SUMS is not this build's/);
+    });
+    it("fails before any gh call on a binary SHA256SUMS does not match", () => {
+      const { r, argv } = gh({ files: BIN, summed: { ...BIN, "confeature-x86_64": "other" } });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/a binary does not match SHA256SUMS/);
+      expect(argv).toEqual([]);
+    });
+    it("fails before any gh call on a binary SHA256SUMS does not name", () => {
+      const { r, argv } = gh({ files: { ...BIN, "confeature-extra": "x" }, summed: BIN });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/does not name exactly the binaries/);
+      expect(argv).toEqual([]);
+    });
+    it("stops before any upload when the release cannot be created", () => {
+      const { r, argv } = gh({ test: { GH_CREATE_FAIL: "1" } });
+      expect(r.status).not.toBe(0);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([]);
+    });
+    it.each(["cli-v1.2", "cli-v1.2.3-rc1", "cli-v1.2.3x", "sdk-v1.2.3", "cli-v.1.2.3"])(
+      "exits 2 on the tag %s",
+      (tag) => {
+        const { r, argv } = gh({ tag });
+        expect(r.status, r.stderr).toBe(2);
+        expect(argv).toEqual([]);
+      },
+    );
+    it("exits 1 on a dist with no binaries", () => {
+      const { r, argv } = gh({ files: {}, summed: {} });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/no binaries in dist/);
+      expect(argv).toEqual([]);
     });
     it("checks the build against the build job's digest first", () => {
       const s = step(CLI, "release", "Check the build against the build job's digest");
-      const dir = ws();
+      const dir = workspace({ "dist/SHA256SUMS": "s" });
       const env = (digest) =>
         resolveEnv(s, { ...TABLE, "needs.build.outputs.sums-digest": digest });
       expect(runBlock(s, dir, env(sha256(join(dir, "dist/SHA256SUMS")))).status).toBe(0);
