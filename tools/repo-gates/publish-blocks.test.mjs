@@ -904,3 +904,98 @@ describe("a block's temporary files stay in its own scratch directory", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 });
+
+describe("cli-release's build hands release and upload the digest they check (round 10, MED-4)", () => {
+  const BINS = { "confeature-x86_64": "b1", "confeature-aarch64": "b2" };
+  /** A scratch tree holding `rel/<name>` for each of `files`. */
+  const tree = (rel, files) => {
+    const ws = scratch();
+    mkdirSync(join(ws, rel), { recursive: true });
+    for (const [n, b] of Object.entries(files)) writeFileSync(join(ws, rel, n), b);
+    return ws;
+  };
+  it("Generate SHA256SUMS writes the digest the build job outputs, and both checks accept exactly it", () => {
+    const s = step(CLI, "build", "Generate SHA256SUMS");
+    // The wiring the digest travels: step id sums → jobs.build.outputs.sums-digest.
+    expect(CLI.jobs.build.steps.find((x) => x.name === "Generate SHA256SUMS").id).toBe("sums");
+    expect(CLI.jobs.build.outputs["sums-digest"]).toBe("${{ steps.sums.outputs.digest }}");
+    expect(s.run).toBe(CLI.jobs.build.steps.find((x) => x.id === "sums").run);
+    const ws = tree("apps/cli/dist", BINS);
+    const out = join(scratch(), "github-output");
+    writeFileSync(out, "");
+    const r = runBlock(
+      s,
+      join(ws, CLI.jobs.build.steps.find((x) => x.id === "sums")["working-directory"]),
+      resolveEnv(s, {}),
+      {
+        tools: ["sha256sum", "cat", "cut"],
+        test: { GITHUB_OUTPUT: out },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    const sumsFile = join(ws, "apps/cli/dist/SHA256SUMS");
+    expect(readFileSync(sumsFile, "utf8")).toBe(
+      Object.entries(BINS)
+        .map(([n, b]) => `${createHash("sha256").update(b).digest("hex")}  ${n}`)
+        .sort()
+        .join("\n") + "\n",
+    );
+    const m = /^digest=([0-9a-f]{64})$/m.exec(readFileSync(out, "utf8"));
+    expect(m, readFileSync(out, "utf8")).not.toBe(null);
+    expect(m[1]).toBe(sha256(sumsFile));
+    for (const jobId of ["release", "upload"]) {
+      const check = step(CLI, jobId, "Check the build against the build job's digest");
+      const dist = tree("dist", { ...BINS, SHA256SUMS: readFileSync(sumsFile, "utf8") });
+      const env = (digest) => resolveEnv(check, { "needs.build.outputs.sums-digest": digest });
+      expect(runBlock(check, dist, env(m[1])).status, jobId).toBe(0);
+      writeFileSync(join(dist, "dist/SHA256SUMS"), "0".repeat(64) + "  confeature-x86_64\n");
+      expect(runBlock(check, dist, env(m[1])).status, `${jobId}: a changed SHA256SUMS`).not.toBe(0);
+    }
+  });
+
+  describe("the on-main guard, verbatim, in each job that runs it", () => {
+    /** A checkout whose origin/main has commit `on`, and a commit `off` beside it. */
+    const repo = ({ withMain = true } = {}) => {
+      const ws = scratch();
+      git(ws, "init", "--quiet", "-b", "main");
+      mkdirSync(join(ws, "apps/cli/scripts"), { recursive: true });
+      copyFileSync(
+        join(ROOT, "apps/cli/scripts/check-on-main.sh"),
+        join(ws, "apps/cli/scripts/check-on-main.sh"),
+      );
+      git(ws, "add", ".");
+      git(ws, "commit", "--quiet", "-m", "on main");
+      const on = git(ws, "rev-parse", "HEAD");
+      if (withMain) git(ws, "update-ref", "refs/remotes/origin/main", on);
+      git(ws, "checkout", "--quiet", "-b", "side");
+      git(ws, "commit", "--quiet", "--allow-empty", "-m", "off main");
+      const off = git(ws, "rev-parse", "HEAD");
+      git(ws, "checkout", "--quiet", "main");
+      return { ws, on, off };
+    };
+    const guard = (jobId, ws, sha) => {
+      const s = step(CLI, jobId, "Refuse a tag that is not on main");
+      return runBlock(s, ws, resolveEnv(s, {}), {
+        tools: ["bash", "git"],
+        test: { GITHUB_SHA: sha, GITHUB_REF_NAME: "cli-v1.2.3" },
+      });
+    };
+    it.each(["build", "release", "upload"])(
+      "%s: a commit on main passes, one off main fails",
+      (jobId) => {
+        const { ws, on, off } = repo();
+        const ok = guard(jobId, ws, on);
+        expect(ok.status, ok.stderr).toBe(0);
+        const bad = guard(jobId, ws, off);
+        expect(bad.status).toBe(1);
+        expect(bad.stderr).toMatch(/cli-v1\.2\.3 points at a commit that is not on main/);
+      },
+    );
+    it("fails on a checkout with no origin/main (a shallow fetch)", () => {
+      const { ws, on } = repo({ withMain: false });
+      const r = guard("release", ws, on);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/no refs\/remotes\/origin\/main/);
+    });
+  });
+});

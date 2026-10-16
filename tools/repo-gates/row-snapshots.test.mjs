@@ -105,3 +105,26 @@ describe("rowSnapshots", () => {
     expect(read()).toEqual({ a: ["old"], b: ["old"] });
   });
 });
+
+describe("rowSnapshots under CI (round 10)", () => {
+  it("fails a registered row that never ran (a skipped table)", () => {
+    const s = rowSnapshots("snap.json", { env: { CI: "true" }, dir: fixtures({ a: [], b: [] }) });
+    s.rows([["a"], ["b"]]);
+    s.check("a", []);
+    expect(() => s.finish()).toThrow(/a registered row never ran under CI/);
+  });
+  it("passes under CI when every registered row ran", () => {
+    const s = rowSnapshots("snap.json", { env: { CI: "true" }, dir: fixtures({ a: [], b: [] }) });
+    s.rows([["a"], ["b"]]);
+    s.check("a", []);
+    s.check("b", []);
+    expect(() => s.finish()).not.toThrow();
+  });
+  it("fails a row that ran twice", () => {
+    const s = rowSnapshots("snap.json", { env: {}, dir: fixtures({ a: [] }) });
+    s.rows([["a"]]);
+    s.check("a", []);
+    s.check("a", []);
+    expect(() => s.finish()).toThrow(/a row ran twice/);
+  });
+});

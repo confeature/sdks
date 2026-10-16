@@ -17,7 +17,8 @@
  * before any test runs (round 9), so the set of rows is known whatever a
  * `-t` filter runs: finish() (in an afterAll) checks that no two rows share
  * a label, that every registered row has a snapshot and every snapshot a
- * registered row, and that every row that ran was registered. Recording
+ * registered row, and that every row that ran was registered; under CI,
+ * where nothing filters, also that every registered row ran. Recording
  * merges what ran into the stored map, keeps only registered labels, and
  * refuses to write when fewer rows ran than the stored map holds for them
  * (a filtered run would otherwise drop the rows it skipped).
@@ -94,6 +95,15 @@ export function rowSnapshots(file, { env = process.env, dir = FIXTURES } = {}) {
         Object.keys(stored).sort(byText),
         "a snapshot without a row, or a row without one",
       ).toEqual([...known].sort(byText));
+      // Under CI no filter runs, so a registered row that never ran was
+      // skipped (`it.skip.each`, `describe.skip`) and checks nothing (round 10).
+      if (env.CI) {
+        const ran = new Set(seen);
+        expect(
+          [...known].filter((l) => !ran.has(l)),
+          "a registered row never ran under CI (skipped?)",
+        ).toEqual([]);
+      }
     },
   };
 }
