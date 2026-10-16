@@ -88,6 +88,9 @@
  *      Below the workflow, a pack or credentialed job's or step's env: never
  *      redefines a workflow env name, and its *_VERSION values are exact (or
  *      the resolver's unit version).
+ *  16. EVERY REFERENCE NAMES SOMETHING (round 5). In the two release
+ *      workflows, each needs./steps./env./inputs. reference names a direct
+ *      need and its output, an earlier step id, an env name in scope, an input.
  *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
  *      only variables its step's, job's or workflow's env: defines, it assigns
  *      itself, or RUNNER_DEFAULTS lists.
@@ -1353,6 +1356,88 @@ function reportsGateFailure(file, id, job) {
   );
 }
 
+const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
+
+/**
+ * Why one context reference in an expression names nothing, or null (rule 16,
+ * round 5). `where` is { doc, jobId, step }: `step` the step object the
+ * expression sits in (null for job-level keys), `ownEnv` whether the step's
+ * own env is in scope (with, run, if: yes; the step's env values: no).
+ */
+export function referenceProblem(expr, { doc, jobId, step = null, ownEnv = false }) {
+  const job = doc?.jobs?.[jobId];
+  const needs = asList(job?.needs);
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  const before = step === null ? steps : steps.slice(0, Math.max(0, steps.indexOf(step)));
+  const env = new Set([
+    ...Object.keys(doc?.env ?? {}),
+    ...Object.keys(job?.env ?? {}),
+    ...(ownEnv ? Object.keys(step?.env ?? {}) : []),
+  ]);
+  const on = doc?.on ?? doc?.[true];
+  const inputs = new Set([
+    ...Object.keys(on?.workflow_dispatch?.inputs ?? {}),
+    ...Object.keys(on?.workflow_call?.inputs ?? {}),
+  ]);
+  for (const m of expr.matchAll(
+    /(?<![\w.])(needs|steps|env|inputs)\.([A-Za-z_][\w-]*)(?:\.([A-Za-z_][\w-]*))?(?:\.([A-Za-z_][\w-]*))?/g,
+  )) {
+    const [ref, ctxName, a, b, c] = m;
+    if (ctxName === "needs") {
+      if (!needs.includes(a)) return `${ref}: ${jobId} does not need ${a}`;
+      if (b === "outputs" && !Object.hasOwn(doc.jobs[a]?.outputs ?? {}, c ?? ""))
+        return `${ref}: job ${a} has no output ${String(c)}`;
+    } else if (ctxName === "steps") {
+      if (!before.some((s) => s?.id === a))
+        return `${ref}: no earlier step of ${jobId} has id ${a}`;
+    } else if (ctxName === "env") {
+      if (!env.has(a)) return `${ref}: no env: in scope defines ${a}`;
+    } else if (!inputs.has(a)) return `${ref}: the workflow declares no input ${a}`;
+  }
+  return null;
+}
+
+/**
+ * Rule 16 (round 5): every `needs.*`, `steps.*`, `env.*` and `inputs.*`
+ * reference in sdk-publish.yml and cli-release.yml names something: a direct
+ * need and its declared output, an earlier step's id, an env name in scope,
+ * a declared input. A renamed `setup.outputs.path` would otherwise hand every
+ * job an empty UNIT_PATH while every other check stays green.
+ */
+export function referenceFindings(workflows) {
+  const out = [];
+  const exprs = (v) => [...String(v).matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((m) => m[1]);
+  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
+    const doc = workflows[file];
+    for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
+      const check = (where, list, scope) => {
+        for (const e of list) {
+          const why = referenceProblem(e, { doc, jobId, ...scope });
+          if (why !== null) out.push({ file, job: where, why });
+        }
+      };
+      check(jobId, typeof job?.if === "string" ? [job.if, ...exprs(job.if)] : [], {});
+      for (const v of [
+        job?.name,
+        ...Object.values(job?.env ?? {}),
+        ...Object.values(job?.with ?? {}),
+      ])
+        check(jobId, exprs(v ?? ""), {});
+      for (const v of Object.values(job?.outputs ?? {})) check(jobId, exprs(v), { step: null });
+      for (const [i, s] of (Array.isArray(job?.steps) ? job.steps : []).entries()) {
+        const where = `${jobId} step ${s?.name ?? i + 1}`;
+        for (const v of Object.values(s?.env ?? {})) check(where, exprs(v), { step: s });
+        const own = [s?.name, s?.run, ...Object.values(s?.with ?? {})].flatMap((v) =>
+          exprs(v ?? ""),
+        );
+        if (typeof s?.if === "string") own.push(s.if);
+        check(where, own, { step: s, ownEnv: true });
+      }
+    }
+  }
+  return out;
+}
+
 /** The first job of each release workflow, which runs these rules over the tagged commit. */
 export const RELEASE_GATE_JOB = "workflow-rules";
 
@@ -1436,6 +1521,7 @@ export function verifyWorkflows(root) {
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
+    ...referenceFindings(workflows),
   ];
 }
 

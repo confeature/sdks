@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { referenceProblem } from "./verify-workflows.mjs";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -64,11 +65,20 @@ function step(doc, jobId, name) {
   const job = doc.jobs[jobId];
   const s = job.steps.find((x) => x.name === name);
   if (s === undefined) throw new Error(`${jobId} has no step "${name}"`);
-  return { run: s.run, env: { ...doc.env, ...job.env, ...s.env } };
+  return { run: s.run, env: { ...doc.env, ...job.env, ...s.env }, doc, jobId };
 }
 
-/** Replace every `${{ expr }}` from `table`; an unknown expression is a test failure. */
-function resolveEnv(env, table) {
+/**
+ * Replace every `${{ expr }}` of the step's env from `table`. An unknown
+ * expression fails the test, and so does a table key that names nothing in
+ * the workflow (rule 16's check): a renamed output cannot pass on test values.
+ */
+function resolveEnv({ env, doc, jobId }, table) {
+  // One table serves a job's steps, so each key is checked at job scope.
+  for (const key of Object.keys(table)) {
+    const why = referenceProblem(key, { doc, jobId });
+    if (why !== null) throw new Error(`test value for \${{ ${key} }} names nothing: ${why}`);
+  }
   const out = {};
   for (const [k, v] of Object.entries(env))
     out[k] = String(v).replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, expr) => {
@@ -166,7 +176,7 @@ describe.each([
       "Remove the deploy key",
     ]) {
       const s = step(PUBLISH, jobId, name);
-      const env = resolveEnv(s.env, table);
+      const env = resolveEnv(s, table);
       const r = runBlock(s, ws, env, name === "Upload" ? remote.env : {});
       results.push(r);
       if (r.status !== 0) return { ws, results, failed: name };
@@ -210,7 +220,7 @@ describe.each([
     const remote = redirect(url);
     const ws = workspace(src);
     const s = step(PUBLISH, jobId, "Check the artifact against the pack job's digest and split");
-    const env = resolveEnv(s.env, {
+    const env = resolveEnv(s, {
       [`needs.${packId}.outputs.sha256`]: "0".repeat(64),
       [`needs.${packId}.outputs.split`]: git(src, "rev-parse", "main"),
       "needs.setup.outputs.name": "x",
@@ -235,7 +245,7 @@ describe("publish-go tags the checkout's HEAD, verbatim", () => {
     };
     for (const name of ["Install the deploy key", "Upload", "Remove the deploy key"]) {
       const s = step(PUBLISH, "publish-go", name);
-      const r = runBlock(s, clone, resolveEnv(s.env, table), name === "Upload" ? remote.env : {});
+      const r = runBlock(s, clone, resolveEnv(s, table), name === "Upload" ? remote.env : {});
       expect(r.status, `${name}: ${r.stderr}`).toBe(0);
     }
     expect(git(remote.bare, "rev-parse", "refs/tags/apps/sdk-go/v1.2.3")).toBe(
@@ -285,7 +295,7 @@ d=""; while [ $# -gt 0 ]; do [ "$1" = --directory ] && d="$2"; shift; done
     const { bin, log } = stubs();
     for (const name of names) {
       const s = step(PUBLISH, jobId, name);
-      const r = runBlock(s, ROOT, resolveEnv(s.env, RESOLVED[jobId]), {
+      const r = runBlock(s, ROOT, resolveEnv(s, RESOLVED[jobId]), {
         PATH: `${bin}:${basePath()}`,
         ARGV_LOG: log,
       });
@@ -317,7 +327,7 @@ describe("the digest checks accept the pack job's artifact and refuse any other"
     const s = step(PUBLISH, jobId, "Check the artifact against the pack job's digest");
     const good = artifact({ [file]: "bytes" });
     const env = (ws) =>
-      resolveEnv(s.env, {
+      resolveEnv(s, {
         [`needs.${packId}.outputs.sha256`]: sha256(join(ws, "release", file)),
         [`needs.${packId}.outputs.file`]: file,
         "needs.setup.outputs.coordinates": "x",
@@ -340,7 +350,7 @@ describe("the digest checks accept the pack job's artifact and refuse any other"
   ])("%s: the file set and every digest", (jobId, packId, files) => {
     const s = step(PUBLISH, jobId, "Check the artifact against the pack job's digests");
     const env = (sums) =>
-      resolveEnv(s.env, {
+      resolveEnv(s, {
         [`needs.${packId}.outputs.sums`]: sums,
         "needs.setup.outputs.coordinates": "x",
         "needs.setup.outputs.version": "1.0.0",
@@ -361,7 +371,7 @@ describe("the digest checks accept the pack job's artifact and refuse any other"
     mkdirSync(join(ws, "dist"));
     writeFileSync(join(ws, "dist/SHA256SUMS"), "abc  confeature-x\n");
     const env = (digest) =>
-      resolveEnv(s.env, {
+      resolveEnv(s, {
         "needs.release.outputs.sums-digest": digest,
         "github.ref_name": "cli-v1.0.0",
       });

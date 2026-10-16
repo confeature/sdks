@@ -5,7 +5,8 @@
 // attacker or a mistake would, and the real verifier, with the real settings,
 // manifest and per-environment command table, must report a new finding.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -17,7 +18,9 @@ import {
   WORKFLOWS,
   findings,
   publicGateFindings,
+  referenceFindings,
   releaseGateFindings,
+  verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
 
@@ -35,6 +38,7 @@ const all = (w) =>
     ...findings({ settings, manifest, workflows: w }),
     ...publicGateFindings(w),
     ...releaseGateFindings(w),
+    ...referenceFindings(w),
   ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
@@ -217,5 +221,95 @@ describe("ENVIRONMENT_COMMANDS lists exactly what each job runs", () => {
         env,
       ).toEqual([]);
     expect([...used.keys()].filter((e) => !(e in ENVIRONMENT_COMMANDS))).toEqual([]);
+  });
+});
+
+describe("16 every expression reference names something (round 5)", () => {
+  const job = (w, id) => w[P].jobs[id];
+  it.each([
+    [
+      "a renamed setup output (the UNIT_PATH bug's other door)",
+      (w) => {
+        const o = job(w, "setup").outputs;
+        o.unitPath = o.path;
+        delete o.path;
+      },
+      /needs\.setup\.outputs\.path: job setup has no output path/,
+    ],
+    [
+      "a need the job does not declare",
+      (w) => {
+        job(w, "publish-crates").env.UNIT_PATH = "${{ needs.pack-npm.outputs.file }}";
+      },
+      /publish-crates does not need pack-npm/,
+    ],
+    [
+      "a step output of a later step",
+      (w) => {
+        const s = job(w, "publish-crates").steps;
+        s[0].with = { ...s[0].with, x: "${{ steps.auth.outputs.token }}" };
+      },
+      /no earlier step of publish-crates has id auth/,
+    ],
+    [
+      "an env name nothing defines",
+      (w) => {
+        job(w, "pack-npm").steps.find((s) => s.uses?.startsWith("actions/setup-node")).with[
+          "node-version"
+        ] = "${{ env.NODE_VER }}";
+      },
+      /no env: in scope defines NODE_VER/,
+    ],
+    [
+      "an input the workflow does not declare",
+      (w) => {
+        job(w, "setup").steps.find((s) => s.id === "resolve").env.UNIT = "${{ inputs.unitName }}";
+      },
+      /declares no input unitName/,
+    ],
+    [
+      "a job if: on an undeclared need",
+      (w) => {
+        job(w, "publish-npm").if = "needs.pack-pypi.result == 'success'";
+      },
+      /publish-npm does not need pack-pypi/,
+    ],
+    [
+      "cli-release: an output the release job does not declare",
+      (w) => {
+        w[C].jobs.upload.steps.find((s) => s.env?.EXPECTED).env.EXPECTED =
+          "${{ needs.release.outputs.digest }}";
+      },
+      /job release has no output digest/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n"),
+    ).toBe(true);
+  });
+});
+
+describe("the gate itself runs rule 16", () => {
+  it("verifyWorkflows reports a renamed setup output in a copy of the repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-workflows-"));
+    try {
+      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS])
+        cpSync(join(ROOT, rel), join(dir, rel), { recursive: true });
+      const f = join(dir, WORKFLOWS, P);
+      writeFileSync(
+        f,
+        readFileSync(f, "utf8").replace(
+          "      path: ${{ steps.resolve.outputs.path }}",
+          "      unitPath: ${{ steps.resolve.outputs.path }}",
+        ),
+      );
+      expect(verifyWorkflows(dir).map((x) => x.why)).toContainEqual(
+        expect.stringMatching(/needs\.setup\.outputs\.path: job setup has no output path/),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
