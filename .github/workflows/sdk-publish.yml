@@ -235,8 +235,11 @@ jobs:
       - name: Every manifest names MakerLabs (verify:manifest-author)
         run: pnpm run verify:manifest-author
 
+      # `<unit>...` builds the unit's workspace dependencies first: sdk-react
+      # and sdk-angular compile against sdk-browser-js's dist/, which a fresh
+      # checkout does not have (#899's first dry runs failed on exactly that).
       - name: Build the unit
-        run: pnpm --filter "$UNIT_COORDINATES" run build
+        run: pnpm --filter "${UNIT_COORDINATES}..." run build
 
       # pnpm rewrites `workspace:` ranges into real versions while packing; the
       # tarball is exactly what the publish job uploads.
