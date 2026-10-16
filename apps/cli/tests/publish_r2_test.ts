@@ -27,6 +27,23 @@ cp "$file" "$BUCKET_DIR/$key"
 echo "$key|$ct|$cc" >> "$PUT_LOG"
 `;
 
+const AWS_STUB = `#!/usr/bin/env bash
+# aws s3api put-object --endpoint-url U --bucket B --key K --body F --content-type T --cache-control C
+[ "$1 $2" = "s3api put-object" ] || { echo "unexpected aws call: $*" >&2; exit 2; }
+shift 2
+key=""; file=""; ct=""; cc=""; ep=""
+while [ $# -gt 0 ]; do case "$1" in
+  --endpoint-url) ep="$2"; shift 2;; --bucket) shift 2;; --key) key="$2"; shift 2;;
+  --body) file="$2"; shift 2;; --content-type) ct="$2"; shift 2;;
+  --cache-control) cc="$2"; shift 2;; *) shift;; esac; done
+[ "$AWS_ACCESS_KEY_ID" = "$EXPECT_KEY_ID" ] || { echo "wrong key id" >&2; exit 3; }
+[ "$ep" = "https://acct.r2.cloudflarestorage.com" ] || { echo "wrong endpoint $ep" >&2; exit 3; }
+[ -f "$file" ] || { echo "no such file: $file" >&2; exit 1; }
+mkdir -p "$BUCKET_DIR/$(dirname "$key")"
+cp "$file" "$BUCKET_DIR/$key"
+echo "$key|$ct|$cc|s3" >> "$PUT_LOG"
+`;
+
 const CURL_STUB = `#!/usr/bin/env bash
 url=""; out=""; head=0; wfmt=""
 while [ $# -gt 0 ]; do case "$1" in
@@ -59,6 +76,7 @@ function fixture(): Fixture {
   for (const d of [bin, bucket, dist]) Deno.mkdirSync(d);
   Deno.writeTextFileSync(`${bin}/wrangler`, WRANGLER_STUB, { mode: 0o755 });
   Deno.writeTextFileSync(`${bin}/curl`, CURL_STUB, { mode: 0o755 });
+  Deno.writeTextFileSync(`${bin}/aws`, AWS_STUB, { mode: 0o755 });
   const log = `${dir}/puts.log`;
   Deno.writeTextFileSync(log, "");
   Deno.writeTextFileSync(`${dir}/curl.log`, "");
@@ -287,4 +305,38 @@ Deno.test("a relative dist dir still uploads when wrangler runs from another dir
   if (!puts(f).some((p) => p.startsWith("v1.2.3/SHA256SUMS|"))) {
     throw new Error("SHA256SUMS was not put");
   }
+});
+
+Deno.test("with R2 S3 credentials, every put goes through the S3 API, never wrangler", async () => {
+  const f = fixture();
+  await build(f);
+  const env = {
+    ...f.env,
+    R2_ACCESS_KEY_ID: "kid",
+    R2_SECRET_ACCESS_KEY: "secret",
+    CLOUDFLARE_ACCOUNT_ID: "acct",
+    EXPECT_KEY_ID: "kid",
+    WRANGLER: "false",
+  };
+  const { code, stdout, stderr } = new Deno.Command("bash", {
+    args: [SCRIPT, "upload", "1.2.3", "dist"],
+    cwd: f.dir,
+    env,
+  }).outputSync();
+  const dec = new TextDecoder();
+  if (code !== 0) throw new Error(dec.decode(stdout) + dec.decode(stderr));
+  const all = puts(f);
+  if (all.length === 0 || !all.every((p) => p.endsWith("|s3"))) throw new Error(all.join("\n"));
+});
+
+Deno.test("an S3 key id without its secret is refused before any put", async () => {
+  const f = fixture();
+  await build(f);
+  const { code } = new Deno.Command("bash", {
+    args: [SCRIPT, "upload", "1.2.3", f.dist],
+    cwd: ROOT,
+    env: { ...f.env, R2_ACCESS_KEY_ID: "kid", CLOUDFLARE_ACCOUNT_ID: "acct" },
+  }).outputSync();
+  if (code === 0) throw new Error("accepted a half-set credential");
+  if (puts(f).length !== 0) throw new Error("put something");
 });

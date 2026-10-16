@@ -24,9 +24,18 @@
 # Environment:
 #   CLI_R2_BUCKET   bucket name             (default confeature-cli-releases)
 #   CLI_BASE_URL    public host, for checks (default: install.sh's BASE_URL — the one home)
-#   WRANGLER        wrangler command        (default: the workspace's, from the lockfile;
-#                   the live-contract harness carries it, a package that ships
-#                   with the CLI, #858)
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID
+#                   when set (the release workflow), every put goes through R2's
+#                   S3-compatible API with `aws s3api put-object`: the CI token is
+#                   an R2 "Object Read & Write" token scoped to this ONE bucket, and
+#                   Cloudflare honours such a token on the S3 API only, never on
+#                   the REST API wrangler uses (#794: cli-v0.3.1's upload got a
+#                   403 there). Nothing is installed for it: the runner image
+#                   carries the AWS CLI.
+#   WRANGLER        wrangler command, when the R2_* variables are absent (the
+#                   operator's local backfill or rollback, logged in with
+#                   wrangler; default: the workspace's, from the lockfile — the
+#                   live-contract harness carries it, #858)
 set -euo pipefail
 
 # The repository root, from this file's location — no git needed (the Dagger
@@ -88,6 +97,19 @@ put() { # <key> <file> <content-type> <cache-control>
   # first upload failed on exactly that, before any put).
   local file
   file="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")" || die "cannot resolve $2"
+  if [ -n "${R2_ACCESS_KEY_ID:-}" ]; then
+    [ -n "${R2_SECRET_ACCESS_KEY:-}" ] && [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] ||
+      die "R2_ACCESS_KEY_ID is set without R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID"
+    # Checksums only when the API requires them: newer AWS CLIs add CRC
+    # headers by default, which an S3-compatible endpoint need not accept.
+    AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
+      AWS_DEFAULT_REGION=auto AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
+      AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AWS_PAGER="" \
+      aws s3api put-object --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+      --bucket "$BUCKET" --key "$1" --body "$file" \
+      --content-type "$3" --cache-control "$4" >/dev/null
+    return
+  fi
   "${WRANGLER_CMD[@]}" r2 object put "$BUCKET/$1" --file "$file" \
     --content-type "$3" --cache-control "$4" --remote
 }

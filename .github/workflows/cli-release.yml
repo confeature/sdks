@@ -32,9 +32,12 @@
 #
 # Credentials:
 #   - `GITHUB_TOKEN` (`contents: write`, release job only) for the GitHub release.
-#   - `CLI_R2_API_TOKEN` (Object Read & Write on the one bucket, created by the
-#     operator; see the runbook) read ONLY by the upload and promote steps, in
-#     `contents: read` jobs whose installs run with --ignore-scripts.
+#   - `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`: the S3 credentials of an R2
+#     Object Read & Write token on the one bucket (created by the operator; see
+#     the runbook), read ONLY by the upload and promote steps, in
+#     `contents: read` jobs that install nothing: publish-r2.sh puts through
+#     R2's S3 API with the runner's AWS CLI. Cloudflare honours a bucket-scoped
+#     token on the S3 API only, not on the REST API wrangler and `cf` call.
 #   - No `secrets: inherit`.
 #
 # Spec 183 (CLI distribution docs) and #801's plan.
@@ -201,20 +204,10 @@ jobs:
           [ -n "$EXPECTED" ] && [ "$actual" = "$EXPECTED" ] ||
             { echo "::error::SHA256SUMS digest $actual != release job's $EXPECTED"; exit 1; }
 
-      - name: Setup pnpm (wrangler, from the lockfile)
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install wrangler (no lifecycle scripts)
-        run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/test-harness-live-contract
-
       - name: Upload v<ver>/ to R2
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLI_R2_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TAG: ${{ github.ref_name }}
         run: bash apps/cli/scripts/publish-r2.sh upload "${TAG#cli-v}" dist
@@ -248,20 +241,10 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Setup pnpm (wrangler, from the lockfile)
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install wrangler (no lifecycle scripts)
-        run: pnpm install --frozen-lockfile --ignore-scripts --filter @confeature/test-harness-live-contract
-
       - name: Promote
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLI_R2_API_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TAG: ${{ github.ref_name }}
         run: bash apps/cli/scripts/publish-r2.sh promote "${TAG#cli-v}"

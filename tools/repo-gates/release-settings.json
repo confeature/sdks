@@ -69,9 +69,15 @@
       "tagPatterns": ["cli-v*"],
       "secrets": [
         {
-          "name": "CLI_R2_API_TOKEN",
+          "name": "R2_ACCESS_KEY_ID",
+          "kind": "key-id",
+          "issuer": "Cloudflare R2 (MakerLabs account): the S3 Access Key ID of an Object Read & Write token on confeature-cli-releases only",
+          "rotateBy": "2027-10-16"
+        },
+        {
+          "name": "R2_SECRET_ACCESS_KEY",
           "kind": "token",
-          "issuer": "Cloudflare R2 (MakerLabs account): Object Read & Write on confeature-cli-releases only",
+          "issuer": "Cloudflare R2 (MakerLabs account): the S3 Secret Access Key of the same token",
           "rotateBy": "2027-10-16"
         },
         {

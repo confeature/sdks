@@ -47,11 +47,17 @@ No CORS is configured: `curl` and `irm` are not browsers.
 `https://docs.confeature.io/cli/installation/` with a 302. An R2 bucket has no index, and the docs
 name the host itself.
 
-**Publishing token (operator, in the dashboard).** Go to R2, then _Manage API tokens_, then _Create
-API token_. Choose _Object Read & Write_, applied to **`confeature-cli-releases` only**. Then run:
+**Publishing credentials (operator, in the dashboard).** Go to R2, then _Manage API tokens_, then
+_Create Account API token_. Choose _Object Read & Write_, applied to **`confeature-cli-releases`
+only**, with a TTL of one year. The release workflow uses the token's **S3 credentials** (the
+_Access Key ID_ and _Secret Access Key_ shown once after creation), never its token value:
+Cloudflare honours a bucket-scoped token on R2's S3-compatible API only, and refuses it on the REST
+API that `wrangler r2 object put` and `cf r2 objects put` call (cli-v0.3.1's upload failed on
+exactly that, a 403). Then run, in your own terminal:
 
 ```bash
-gh secret set CLI_R2_API_TOKEN --env cli-release --repo confeature/sdks   # paste the token value when prompted
+gh secret set R2_ACCESS_KEY_ID --env cli-release --repo confeature/sdks       # paste the Access Key ID
+gh secret set R2_SECRET_ACCESS_KEY --env cli-release --repo confeature/sdks   # paste the Secret Access Key
 ```
 
 It is an **environment** secret of `cli-release`, never a repository secret: only the upload and
@@ -60,9 +66,9 @@ is the release-tag ruleset's decision), and the environment accepts `cli-v*` tag
 is declared, with its rotation date, in `tools/repo-gates/release-settings.json`; a secret that is
 not declared there fails the operator's read-back, and so does one past its rotation date.
 
-The token must not reach any other bucket. Check with
-`pnpm exec wrangler r2 object get <another-bucket>/<any-key> --remote` using that token: it must be
-refused.
+The credentials must not reach any other bucket: an S3 `GetObject` on another bucket with them must
+be refused. A local backfill or rollback by the operator still uses wrangler with the operator's own
+login (no `R2_*` variables set).
 
 ## Backfill of cli-v0.2.0 (done once, 2026-09-28)
 
