@@ -22,7 +22,8 @@
 #                cache restore. It installs, runs the author rule, builds and
 #                packs the artifact, checks the artifact's own name and version
 #                against the resolver's, runs the registry's credential-free dry
-#                run, and hands the artifact on with its sha256.
+#                run, and hands the artifact on with its sha256 (go hands on
+#                nothing: its registry builds the module from the tag).
 #   4. publish-* ONE per registry, a top-level job bound to environment
 #                `sdk-publish-<registry>` (a tag-only
 #                deployment policy). It runs NO project code: it downloads the
@@ -30,6 +31,8 @@
 #                pinned upload command. OIDC trusted publishing wherever the
 #                registry has it; the trust configuration names this file AND
 #                the environment, so a job outside the environment gets nothing.
+#                The three git registries have no OIDC: they push with an SSH
+#                deploy key held by their environment, and run only git.
 #   5. conclude  fails unless the registry's pack job (and, for a tag, its
 #                publish job) actually succeeded: a registry with no jobs here
 #                yet is a red run, never a green one that published nothing.
@@ -43,7 +46,8 @@
 # tools/repo-gates/verify-workflows.mjs; the environments, their rules and
 # tag policies are declared in tools/repo-gates/release-settings.json.
 #
-# Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900).
+# Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900);
+# go, packagist, swiftpm (#901). Hex waits on #805, Maven on its builds.
 # Two publish jobs package from source because their registry accepts nothing
 # else: publish-crates (`cargo publish --no-verify`, nothing compiled) and
 # publish-pubdev (`dart pub publish --force`, which pub.dev requires in the
@@ -87,6 +91,10 @@ env:
   RUBY_VERSION: "3.3.9"
   DOTNET_VERSION: "10.0.400"
   DART_VERSION: "3.11.6"
+  GO_VERSION: "1.27.2"
+  # github.com's published ed25519 host key (docs.github.com, "GitHub's SSH key
+  # fingerprints"), so a deploy-key push trusts no key it is shown (#901).
+  GITHUB_SSH_KNOWN_HOST: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
 
 jobs:
   setup:
@@ -874,6 +882,449 @@ jobs:
         working-directory: ${{ needs.setup.outputs.path }}
         run: dart pub publish --force
 
+  # ----------------------------------------------------------------- go ----
+  # A Go module is published by its tag: proxy.golang.org builds the module zip
+  # from `apps/sdk-go/v<X.Y.Z>` on the first request, so nothing is uploaded
+  # and nothing is handed on. The pack job builds the zip the proxy would,
+  # with golang.org/x/mod/zip (tools/sdk-pack/gozip), and fails where the proxy
+  # would refuse it, before the tag exists. The publish job pushes the module
+  # tag at this run's commit with a deploy key that may create only those tags
+  # (the go module tags ruleset), then asks the proxy for the version.
+
+  pack-go:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'go' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      # The pinned toolchain and the committed go.sum files, nothing else.
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      # setup-go restores a module cache unless told not to.
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      # `go mod verify` checks every dependency against go.sum; the zip is the
+      # one the proxy would build from the tag, checked as the proxy checks it.
+      - name: Pack the release artifact
+        run: |
+          grep -qxF "const Version = \"${UNIT_VERSION}\"" "$UNIT_PATH/version.go" ||
+            { echo "::error::$UNIT_PATH/version.go does not declare ${UNIT_VERSION}"; exit 1; }
+          go -C "$UNIT_PATH" mod verify
+          mkdir -p "$RUNNER_TEMP/release"
+          go -C tools/sdk-pack/gozip run . -dir "$GITHUB_WORKSPACE/$UNIT_PATH" -module "$UNIT_COORDINATES" -version "v${UNIT_VERSION}" -out "$RUNNER_TEMP/release/module.zip"
+
+      - name: Record the artifact digest
+        run: |
+          {
+            echo "### Go module ${UNIT_COORDINATES}@v${UNIT_VERSION}"
+            echo "- $(go version)"
+            echo "- module zip sha256: $(sha256sum -- "$RUNNER_TEMP/release/module.zip" | cut -d' ' -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-go:
+    name: publish ${{ needs.setup.outputs.coordinates }}@v${{ needs.setup.outputs.version }}
+    needs: [setup, pack-go]
+    if: >-
+      always() &&
+      needs.pack-go.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-go
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ needs.setup.outputs.releaseTag }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      # Only for the commit object the tag points at; the push uses the key.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.GO_TAG_DEPLOY_KEY }}
+        run: |
+          [ -n "$DEPLOY_KEY" ] || { echo "::error::GO_TAG_DEPLOY_KEY is not set in environment sdk-publish-go"; exit 1; }
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+
+      # Never forced: a module tag that already exists is refused, and a
+      # published Go version can never change (the checksum database keeps it).
+      - name: Upload
+        run: |
+          [ -n "$RELEASE_TAG" ] || { echo "::error::the resolver gave no module tag"; exit 1; }
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
+          git push git@github.com:confeature/sdks.git "${GITHUB_SHA}:refs/tags/${RELEASE_TAG}"
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"
+
+      # The first request makes the proxy fetch the tag; a version it cannot
+      # serve turns this run red instead of failing a user's `go get`.
+      - name: Ask the Go proxy for the release
+        run: curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/${UNIT_COORDINATES}/@v/v${UNIT_VERSION}.info"
+
+  # ---------------------------------------------------------- packagist ----
+  # Packagist and SwiftPM read a whole repository, with its manifest at the
+  # root, so the PHP and Swift SDKs are published as mirror repositories
+  # (mirrors[] in release-settings.json). The pack job splits the unit's
+  # history with tools/sdk-pack/split-mirror.sh, which refuses any commit that
+  # carries a personal address, bundles it and dry-runs the mirror. The publish
+  # job checks the bundle and pushes `main` and the release tag with the
+  # mirror's deploy key, never forced: the same history splits to the same
+  # commit, so `main` only fast-forwards, and a tag is never moved. Packagist
+  # picks the tag up through the mirror's GitHub hook.
+
+  pack-packagist:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'packagist' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.split.outputs.sha256 }}
+      split: ${{ steps.split.outputs.split }}
+    env:
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+    steps:
+      # The whole history: a shallow clone splits to another commit.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Pack the release artifact
+        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/$UNIT_NAME.bundle" > "$RUNNER_TEMP/split.out"
+
+      - name: Check the artifact against the resolved unit
+        id: split
+        run: |
+          file="$RUNNER_TEMP/release/$UNIT_NAME.bundle"
+          split="$(tail -n 1 "$RUNNER_TEMP/split.out")"
+          head="$(git bundle list-heads "$file" refs/heads/main | cut -d' ' -f1)"
+          [ -n "$split" ] && [ "$split" = "$head" ] ||
+            { echo "::error::the bundle's main is ${head}, the split printed ${split}"; exit 1; }
+          git clone --quiet --branch main "$file" "$RUNNER_TEMP/mirror"
+          name="$(jq -r .name "$RUNNER_TEMP/mirror/composer.json")"
+          [ "$name" = "$UNIT_COORDINATES" ] ||
+            { echo "::error::the mirror's composer.json names ${name}, not ${UNIT_COORDINATES}"; exit 1; }
+          echo "split=${split}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      # The runner's own PHP and Composer: validating installs nothing.
+      - name: composer validate --strict (no credentials)
+        run: |
+          cd "$RUNNER_TEMP/mirror"
+          { echo "### Mirror dry run"; php --version | head -n 1; composer --version; } >> "$GITHUB_STEP_SUMMARY"
+          composer validate --strict
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-packagist
+          path: ${{ runner.temp }}/release/*.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-packagist:
+    name: publish ${{ needs.setup.outputs.mirrorRepository }}@${{ needs.setup.outputs.mirrorTag }}
+    needs: [setup, pack-packagist]
+    if: >-
+      always() &&
+      needs.pack-packagist.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-packagist
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-packagist.outputs.sha256 }}
+      SPLIT_SHA: ${{ needs.pack-packagist.outputs.split }}
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
+      MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-packagist
+          path: release
+
+      - name: Check the artifact against the pack job's digest and split
+        run: |
+          file="$GITHUB_WORKSPACE/release/$UNIT_NAME.bundle"
+          actual="$(sha256sum -- "$file" | cut -d' ' -f1)"
+          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
+            { echo "::error::$file is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+          git init --quiet --bare "$RUNNER_TEMP/mirror.git"
+          cd "$RUNNER_TEMP/mirror.git"
+          git bundle verify --quiet "$file"
+          git fetch --quiet "$file" refs/heads/main:refs/heads/main
+          got="$(git rev-parse refs/heads/main)"
+          [ -n "$SPLIT_SHA" ] && [ "$got" = "$SPLIT_SHA" ] ||
+            { echo "::error::the received main is $got, the pack job split $SPLIT_SHA"; exit 1; }
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+        run: |
+          [ -n "$DEPLOY_KEY" ] || { echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-packagist"; exit 1; }
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+
+      # Never forced, and atomic: git refuses a main that does not fast-forward
+      # and a tag that already exists, and then pushes neither.
+      - name: Upload
+        run: |
+          [ -n "$MIRROR_REPOSITORY" ] && [ -n "$MIRROR_TAG" ] ||
+            { echo "::error::the resolver gave no mirror repository or tag"; exit 1; }
+          cd "$RUNNER_TEMP/mirror.git"
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
+          git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main" "${SPLIT_SHA}:refs/tags/${MIRROR_TAG}"
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"
+
+  # ------------------------------------------------------------ swiftpm ----
+  # The Swift SDK's mirror, exactly as Packagist's above. SwiftPM has no
+  # registry: the mirror's tag IS the release. The dry run needs Apple's
+  # toolchain, so the pack job runs on macOS (free for a public repository).
+
+  pack-swiftpm:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'swiftpm' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: macos-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.split.outputs.sha256 }}
+      split: ${{ steps.split.outputs.split }}
+    env:
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
+    steps:
+      # The whole history: a shallow clone splits to another commit.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Pack the release artifact
+        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/$UNIT_NAME.bundle" > "$RUNNER_TEMP/split.out"
+
+      # The coordinates users write in Package.swift must be the mirror's URL.
+      # macOS has no sha256sum; `shasum -a 256` prints the same digest.
+      - name: Check the artifact against the resolved unit
+        id: split
+        run: |
+          [ "$UNIT_COORDINATES" = "https://github.com/$MIRROR_REPOSITORY" ] ||
+            { echo "::error::the unit's coordinates ${UNIT_COORDINATES} are not its mirror ${MIRROR_REPOSITORY}"; exit 1; }
+          file="$RUNNER_TEMP/release/$UNIT_NAME.bundle"
+          split="$(tail -n 1 "$RUNNER_TEMP/split.out")"
+          head="$(git bundle list-heads "$file" refs/heads/main | cut -d' ' -f1)"
+          [ -n "$split" ] && [ "$split" = "$head" ] ||
+            { echo "::error::the bundle's main is ${head}, the split printed ${split}"; exit 1; }
+          git clone --quiet --branch main "$file" "$RUNNER_TEMP/consume/${MIRROR_REPOSITORY#*/}"
+          [ -f "$RUNNER_TEMP/consume/${MIRROR_REPOSITORY#*/}/Package.swift" ] ||
+            { echo "::error::the mirror has no Package.swift at its root"; exit 1; }
+          echo "split=${split}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      # A scratch package that depends on the mirror the way a user's does, by
+      # its identity (the repository's name), and imports its library.
+      - name: swift build against the mirror (no credentials)
+        run: |
+          mirror="${MIRROR_REPOSITORY#*/}"
+          mkdir -p "$RUNNER_TEMP/consume/consumer/Sources/Consumer"
+          cd "$RUNNER_TEMP/consume/consumer"
+          cat > Package.swift <<SWIFT
+          // swift-tools-version: 5.9
+          import PackageDescription
+
+          let package = Package(
+              name: "Consumer",
+              platforms: [.macOS(.v10_15)],
+              dependencies: [.package(path: "../${mirror}")],
+              targets: [
+                  .executableTarget(
+                      name: "Consumer",
+                      dependencies: [.product(name: "Confeature", package: "${mirror}")]
+                  )
+              ]
+          )
+          SWIFT
+          printf 'import Confeature\n\nprint(String(describing: ConfeatureClient.self))\n' > Sources/Consumer/main.swift
+          { echo "### Mirror dry run"; swift --version 2>&1; } >> "$GITHUB_STEP_SUMMARY"
+          swift package resolve
+          swift build
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-swiftpm
+          path: ${{ runner.temp }}/release/*.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-swiftpm:
+    name: publish ${{ needs.setup.outputs.mirrorRepository }}@${{ needs.setup.outputs.mirrorTag }}
+    needs: [setup, pack-swiftpm]
+    if: >-
+      always() &&
+      needs.pack-swiftpm.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-swiftpm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-swiftpm.outputs.sha256 }}
+      SPLIT_SHA: ${{ needs.pack-swiftpm.outputs.split }}
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
+      MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-swiftpm
+          path: release
+
+      - name: Check the artifact against the pack job's digest and split
+        run: |
+          file="$GITHUB_WORKSPACE/release/$UNIT_NAME.bundle"
+          actual="$(sha256sum -- "$file" | cut -d' ' -f1)"
+          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
+            { echo "::error::$file is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+          git init --quiet --bare "$RUNNER_TEMP/mirror.git"
+          cd "$RUNNER_TEMP/mirror.git"
+          git bundle verify --quiet "$file"
+          git fetch --quiet "$file" refs/heads/main:refs/heads/main
+          got="$(git rev-parse refs/heads/main)"
+          [ -n "$SPLIT_SHA" ] && [ "$got" = "$SPLIT_SHA" ] ||
+            { echo "::error::the received main is $got, the pack job split $SPLIT_SHA"; exit 1; }
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+        run: |
+          [ -n "$DEPLOY_KEY" ] || { echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-swiftpm"; exit 1; }
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+
+      # Never forced, and atomic: git refuses a main that does not fast-forward
+      # and a tag that already exists, and then pushes neither.
+      - name: Upload
+        run: |
+          [ -n "$MIRROR_REPOSITORY" ] && [ -n "$MIRROR_TAG" ] ||
+            { echo "::error::the resolver gave no mirror repository or tag"; exit 1; }
+          cd "$RUNNER_TEMP/mirror.git"
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i $RUNNER_TEMP/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/ssh/known_hosts"
+          git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main" "${SPLIT_SHA}:refs/tags/${MIRROR_TAG}"
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"
+
   # ------------------------------------------------------------ conclude ----
 
   conclude:
@@ -893,6 +1344,12 @@ jobs:
       - publish-nuget
       - pack-pubdev
       - publish-pubdev
+      - pack-go
+      - publish-go
+      - pack-packagist
+      - publish-packagist
+      - pack-swiftpm
+      - publish-swiftpm
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

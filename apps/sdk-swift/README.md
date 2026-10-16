@@ -18,10 +18,23 @@ swap (a project rule, checked by its conformance tests).
 
 ## Install
 
-Not available through Swift Package Manager yet: SwiftPM needs a `Package.swift` at the root of
-the repository, and this package lives in `apps/sdk-swift/`. The distribution is being settled
-(#794). Until then, add this directory as a local package (`.package(path: "<checkout>/apps/sdk-swift")`)
-and depend on `"Confeature"`.
+Add the package to your `Package.swift`, and depend on its `Confeature` library:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/confeature/confeature-swift", from: "0.1.0"),
+],
+targets: [
+    .target(
+        name: "YourApp",
+        dependencies: [.product(name: "Confeature", package: "confeature-swift")]
+    ),
+]
+```
+
+In Xcode, use File > Add Package Dependencies… with the same URL. The repository is a read-only
+mirror of `apps/sdk-swift/` in [confeature/sdks](https://github.com/confeature/sdks), where changes
+are made.
 
 ## Quickstart
 

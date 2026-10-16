@@ -1,5 +1,5 @@
 {
-  "$comment": "The release settings of confeature/sdks, as data (#794). One home for: the publish environments and their review and admin-bypass rules, the secrets each may hold (with a rotation date), the OIDC trust bindings entered on each registry, the third-party actions any workflow may use, the protected release-tag patterns (who may create a tag that publishes), and the release-shaped branch names nobody may create. The tag deployment policy of a registry environment is NOT written here: it is derived from publish[] in dagger/sdk-manifest.json (one sdk-<name>-v* pattern per unit of that registry). tools/repo-gates/verify-workflows.mjs holds the workflows to this file; the operator's tooling applies it to GitHub and reads it back.",
+  "$comment": "The release settings of confeature/sdks, as data (#794). One home for: the publish environments and their review and admin-bypass rules, the secrets each may hold (with a rotation date), the OIDC trust bindings entered on each registry, the third-party actions any workflow may use, the protected release-tag patterns (who may create a tag that publishes), the release-shaped branch names nobody may create, the Go module tags only the sdk-publish-go deploy key may create (goModuleTags), and the mirror repositories the PHP and Swift SDKs are published through, each with its environment, tag patterns and deploy key (mirrors). The tag deployment policy of a registry environment is NOT written here: it is derived from publish[] in dagger/sdk-manifest.json (one sdk-<name>-v* pattern per unit of that registry). tools/repo-gates/verify-workflows.mjs holds the workflows to this file; the operator's tooling applies it to GitHub and reads it back.",
   "reviewerTeam": "sdk-maintainers",
   "environmentRules": {
     "requireReviewers": false,
@@ -52,17 +52,38 @@
     {
       "name": "sdk-publish-go",
       "registry": "go",
-      "secrets": []
+      "secrets": [
+        {
+          "name": "GO_TAG_DEPLOY_KEY",
+          "kind": "deploy-key",
+          "issuer": "SSH deploy key (write) on confeature/sdks, created by the operator's applier; it may only create apps/sdk-go/v* tags (go module tags ruleset)",
+          "rotateBy": "2027-10-16"
+        }
+      ]
     },
     {
       "name": "sdk-publish-packagist",
       "registry": "packagist",
-      "secrets": []
+      "secrets": [
+        {
+          "name": "MIRROR_DEPLOY_KEY",
+          "kind": "deploy-key",
+          "issuer": "SSH deploy key (write) on confeature/confeature-php-sdk, created by the operator's applier (mirrors[])",
+          "rotateBy": "2027-10-16"
+        }
+      ]
     },
     {
       "name": "sdk-publish-swiftpm",
       "registry": "swiftpm",
-      "secrets": []
+      "secrets": [
+        {
+          "name": "MIRROR_DEPLOY_KEY",
+          "kind": "deploy-key",
+          "issuer": "SSH deploy key (write) on confeature/confeature-swift, created by the operator's applier (mirrors[])",
+          "rotateBy": "2027-10-16"
+        }
+      ]
     },
     {
       "name": "cli-release",
@@ -140,5 +161,27 @@
   "releaseBranchNames": {
     "name": "release-shaped branch names",
     "include": ["refs/heads/sdk-*", "refs/heads/cli-v*", "refs/heads/apps/sdk-go/*"]
-  }
+  },
+  "goModuleTags": {
+    "name": "go module tags",
+    "include": ["refs/tags/apps/sdk-go/v*"],
+    "environment": "sdk-publish-go",
+    "deployKeyTitle": "sdk-publish-go"
+  },
+  "mirrors": [
+    {
+      "repository": "confeature/confeature-php-sdk",
+      "unit": "php",
+      "environment": "sdk-publish-packagist",
+      "tags": ["refs/tags/v*"],
+      "deployKeyTitle": "sdk-publish-packagist"
+    },
+    {
+      "repository": "confeature/confeature-swift",
+      "unit": "swift",
+      "environment": "sdk-publish-swiftpm",
+      "tags": ["refs/tags/*"],
+      "deployKeyTitle": "sdk-publish-swiftpm"
+    }
+  ]
 }

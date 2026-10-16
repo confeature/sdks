@@ -56,10 +56,10 @@ const GOOD = `  pack-npm:
       - run: npm publish "./release/$ARTIFACT"
 `;
 const flow = (jobs, head = HEAD) => parseYaml(`${head}jobs:\n${jobs}`);
-const run = (jobs, { s = settings(), extra = {}, head = HEAD } = {}) =>
+const run = (jobs, { s = settings(), m = manifest, extra = {}, head = HEAD } = {}) =>
   findings({
     settings: s,
-    manifest,
+    manifest: m,
     workflows: { "sdk-publish.yml": flow(jobs, head), ...extra },
   }).map((f) => f.why);
 const fires = (got, re) => expect(got).toContainEqual(expect.stringMatching(re));
@@ -69,6 +69,34 @@ const swap = (from, to) => {
 };
 const PUBLISH_STEP = '      - run: npm publish "./release/$ARTIFACT"';
 const INSTALL_STEP = "      - run: pnpm install --frozen-lockfile";
+
+/** A Packagist mirror and a Go module tag, declared the way release-settings.json does. */
+const withMirrors = () => {
+  const m = {
+    ...manifest,
+    publish: [
+      ...manifest.publish,
+      { name: "p", registry: "packagist", mirror: { repository: "o/p", releaseTag: "v{version}" } },
+      { name: "g", registry: "go", releaseTag: "apps/g/v{version}" },
+    ],
+  };
+  const s = settings();
+  s.environments.push(
+    { name: "sdk-publish-packagist", registry: "packagist", secrets: [] },
+    { name: "sdk-publish-go", registry: "go", secrets: [] },
+  );
+  s.mirrors = [
+    { repository: "o/p", unit: "p", environment: "sdk-publish-packagist", tags: ["refs/tags/v*"] },
+  ];
+  s.goModuleTags = { include: ["refs/tags/apps/g/v*"], environment: "sdk-publish-go" };
+  return { m, s };
+};
+/** A publish job of the fixture that reads one secret through its env. */
+const READS_SECRET = (name) =>
+  GOOD.replace(
+    "      - run: npm publish",
+    `      - env:\n          K: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
+  );
 
 describe("the real repository", () => {
   it("is clean", () => expect(verifyWorkflows(ROOT)).toEqual([]));
@@ -81,6 +109,10 @@ describe("globMatches", () => {
   });
   it("`*` does not cross a slash", () =>
     expect(globMatches("refs/tags/sdk-*", "refs/tags/sdk-a/x")).toBe(false));
+  it("`**` crosses a slash, and a literal dot stays literal", () => {
+    expect(globMatches("refs/tags/**", "refs/tags/apps/sdk-go/v1.0.0")).toBe(true);
+    expect(globMatches("refs/tags/v*.0", "refs/tags/v1x0")).toBe(false);
+  });
   it("refuses a glob character it does not implement", () =>
     expect(() => globMatches("sdk-?", "sdk-a")).toThrow());
 });
@@ -342,6 +374,125 @@ describe("each rule fires on a fixture that breaks only it", () => {
     const variant = own.replace(cmd, `${cmd} && cargo build`);
     fires(run(variant), PROJECT);
   });
+  it("1 a secret its environment does not declare", () =>
+    fires(
+      run(READS_SECRET("DEPLOY_KEY")),
+      /reads secret DEPLOY_KEY, which environment sdk-publish-npm does not declare/,
+    ));
+  it("1 a secret its environment declares", () => {
+    const s = settings();
+    s.environments[0].secrets.push({ name: "DEPLOY_KEY", kind: "deploy-key" });
+    expect(run(READS_SECRET("DEPLOY_KEY"), { s })).toEqual([]);
+  });
+
+  it.each([
+    [
+      "no cache input on an action that caches by default",
+      `      - uses: actions/setup-go@${SHA}\n`,
+    ],
+    [
+      "cache: true",
+      `      - uses: actions/setup-go@${SHA}\n        with:\n          cache: true\n`,
+    ],
+    [
+      "a cache path",
+      `      - uses: actions/setup-node@${SHA}\n        with:\n          node-version: \${{ env.NODE_VERSION }}\n          cache: pnpm\n`,
+    ],
+  ])("3 a pack job's cache: %s", (_, step) =>
+    fires(run(GOOD.replace(INSTALL_STEP, `${step}${INSTALL_STEP}`)), /restores a cache/),
+  );
+  it("3 `cache: false` restores nothing", () =>
+    expect(
+      run(
+        GOOD.replace(
+          INSTALL_STEP,
+          `      - uses: actions/setup-go@${SHA}\n        with:\n          cache: false\n${INSTALL_STEP}`,
+        ),
+      ),
+    ).toEqual([]));
+  it.each(["bundle install", "bundle exec rake release", "(bundle exec rake)"])(
+    "3 a publish job running bundler (%s)",
+    (cmd) =>
+      fires(
+        run(swap(PUBLISH_STEP, `      - run: ${cmd}`)),
+        /runs a package manager or repository code/,
+      ),
+  );
+  it.each([
+    'git bundle verify "$RUNNER_TEMP/release/php.bundle"',
+    'git fetch --quiet "$GITHUB_WORKSPACE/release/${UNIT_NAME}.bundle" refs/heads/main:refs/heads/main',
+    'git push --atomic "git@github.com:${MIRROR_REPOSITORY}.git" "${SPLIT_SHA}:refs/heads/main"',
+  ])("3 accepts the git command %s", (cmd) =>
+    expect(run(swap(PUBLISH_STEP, `      - run: ${cmd}`))).toEqual([]),
+  );
+
+  it("11 control: a declared mirror and Go module tags are clean", () => {
+    const { m, s } = withMirrors();
+    expect(run(GOOD, { m, s })).toEqual([]);
+  });
+  it("11 a mirror in an undeclared environment", () => {
+    const { m, s } = withMirrors();
+    s.mirrors[0].environment = "sdk-publish-mirror";
+    fires(
+      run(GOOD, { m, s }),
+      /mirror o\/p names environment sdk-publish-mirror, which is not unit p's registry's/,
+    );
+  });
+  it("11 a mirror in another registry's environment", () => {
+    const { m, s } = withMirrors();
+    s.mirrors[0].environment = "sdk-publish-npm";
+    fires(
+      run(GOOD, { m, s }),
+      /names environment sdk-publish-npm, which is not unit p's registry's/,
+    );
+  });
+  it("11 a mirror whose unit mirrors another repository", () => {
+    const { m, s } = withMirrors();
+    s.mirrors[0].repository = "o/other";
+    fires(run(GOOD, { m, s }), /mirror o\/other names unit p, whose manifest mirror is o\/p/);
+  });
+  it("11 a mirror naming no unit", () => {
+    const { m, s } = withMirrors();
+    s.mirrors[0].unit = "gone";
+    fires(run(GOOD, { m, s }), /mirror o\/p names unit gone, whose manifest mirror is undefined/);
+  });
+  it("11 a unit's mirror that the settings do not declare", () => {
+    const { m, s } = withMirrors();
+    s.mirrors = [];
+    fires(run(GOOD, { m, s }), /unit p has a mirror \(o\/p\) that .* does not declare/);
+  });
+  it("11 a mirror whose tag patterns miss the unit's release tag", () => {
+    const { m, s } = withMirrors();
+    s.mirrors[0].tags = ["refs/tags/release-*"];
+    fires(run(GOOD, { m, s }), /mirror o\/p's tag patterns do not cover refs\/tags\/v1.0.0/);
+  });
+  it("11 Go module tags bound to another registry's environment", () => {
+    const { m, s } = withMirrors();
+    s.goModuleTags.environment = "sdk-publish-npm";
+    fires(
+      run(GOOD, { m, s }),
+      /goModuleTags names environment sdk-publish-npm, which is not the go registry's/,
+    );
+  });
+  it("11 Go module tags that miss a Go unit's tag", () => {
+    const { m, s } = withMirrors();
+    s.goModuleTags.include = ["refs/tags/v*"];
+    fires(
+      run(GOOD, { m, s }),
+      /goModuleTags does not cover unit g's module tag \(refs\/tags\/apps\/g\/v1.0.0\)/,
+    );
+  });
+  it("11 a Go unit with no module tag", () => {
+    const { m, s } = withMirrors();
+    delete m.publish.find((u) => u.name === "g").releaseTag;
+    fires(run(GOOD, { m, s }), /go unit g has no releaseTag/);
+  });
+  it("11 Go units with no goModuleTags at all", () => {
+    const { m, s } = withMirrors();
+    delete s.goModuleTags;
+    fires(run(GOOD, { m, s }), /goModuleTags names environment undefined/);
+  });
+
   it("9 every *_VERSION pin is exact", () =>
     fires(
       run(GOOD, {

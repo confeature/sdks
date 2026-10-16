@@ -12,7 +12,9 @@
  * The rules, each a finding `file: job: why`:
  *   1. ENVIRONMENTS. A job binds only an environment declared in
  *      tools/repo-gates/release-settings.json. GitHub creates a missing one,
- *      unprotected, the first time a job names it.
+ *      unprotected, the first time a job names it. Every secret a job reads is
+ *      declared in its environment's `secrets`, so the applier knows it exists
+ *      and when it must be rotated (#901).
  *   2. NO CREDENTIALS OUTSIDE AN ENVIRONMENT. A job that binds no environment
  *      requests no `id-token: write` and reads no `secrets` context, and no
  *      workflow grants either at the top level, where every job would inherit
@@ -25,6 +27,8 @@
  *      `bundler-cache:` input — nor does a pack job, whose artifact the publish
  *      job uploads. A dependency that runs in the job holding the OIDC token or
  *      a key can publish or steal it; a poisoned cache is such a dependency.
+ *      `cache: false` restores nothing, and an action that caches unless told
+ *      not to (DEFAULT_CACHE: actions/setup-go) must say it.
  *      PUBLISH_EXCEPTIONS names the one command each source-only registry
  *      (crates.io, pub.dev) needs instead, exact and for its job only.
  *   4. NO UNTRUSTED TRIGGERS. No workflow runs on `pull_request_target` or
@@ -56,6 +60,12 @@
  *      with `./`, `/` or a `$` variable: npm reads `release/x.tgz` as the
  *      GitHub repository `release/x.tgz`, so that publish fails after the tag
  *      is pushed (#899, caught by a local dry run).
+ *  11. MIRRORS AND MODULE TAGS (#901). Every `mirrors[]` entry names a unit
+ *      whose manifest `mirror.repository` is that repository, an environment
+ *      of that unit's registry, and tag patterns covering its mirror tag; every
+ *      unit with a mirror has an entry. `goModuleTags` names the go registry's
+ *      environment and covers every go unit's `releaseTag`, which each has.
+ *      The operator's applier creates the deploy keys and rulesets from them.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -75,11 +85,11 @@ const EXACT = /^\d+\.\d+\.\d+$/;
 /** GitHub's filter-pattern semantics for the patterns used here: `*` matches anything but `/`. */
 export function globMatches(glob, ref) {
   if (/[?[\]!+]/.test(glob)) throw new Error(`unsupported glob character in ${glob}`);
+  // `**` first, so its two stars are never read as two single ones.
   const body = glob
-    .replace(/[.^$()|\\{}]/g, "\\$&")
-    .replace(/\*\*/g, "\u0000")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\u0000/g, ".*");
+    .split("**")
+    .map((part) => part.replace(/[.^$()|\\{}]/g, "\\$&").replace(/\*/g, "[^/]*"))
+    .join(".*");
   return new RegExp(`^${body}$`).test(ref);
 }
 
@@ -92,9 +102,13 @@ const triggersOf = (doc) => {
   return typeof on === "string" ? [on] : Array.isArray(on) ? on : Object.keys(on ?? {});
 };
 
-/** A shell line that runs repository code or a package manager: forbidden in a publish job. */
+/**
+ * A shell line that runs repository code or a package manager: forbidden in a
+ * publish job. `bundle` is bundler, not `git bundle` and not a `*.bundle` file
+ * (the mirror publish jobs verify one, #901).
+ */
 const PROJECT_CODE =
-  /\b(?:pnpm|yarn|bun|npx|make|gradle|mvn|mix|bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
+  /\b(?:pnpm|yarn|bun|npx|make|gradle|mvn|mix|(?<!\bgit\s+|[.$/{-])bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
 /**
  * Rule 3's recorded exceptions: the one command a registry that takes no
  * prebuilt archive needs in the job holding its credential (#900). crates.io:
@@ -106,6 +120,8 @@ export const PUBLISH_EXCEPTIONS = {
   "publish-crates": [/^cargo "\+\$\{RUST_VERSION\}" publish --no-verify$/],
   "publish-pubdev": [/^dart pub publish --force$/],
 };
+/** Actions that restore a cache unless their `cache` input is false. */
+const DEFAULT_CACHE = new Set(["actions/setup-go"]);
 const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?NPM_VERSION\}?"?$/;
 
 /** Rules 4 and 6 (workflow scope) and the workflow-level half of rule 2. */
@@ -124,7 +140,7 @@ function workflowPins(file, doc, add) {
   const pins = { NODE_VERSION: doc?.env?.NODE_VERSION, NPM_VERSION: doc?.env?.NPM_VERSION };
   // Every tool pin in the top-level env, not only node and npm (#900).
   for (const [k, v] of Object.entries(doc?.env ?? {}))
-    if (/_VERSION$/.test(k) && !EXACT.test(String(v)))
+    if (k.endsWith("_VERSION") && !EXACT.test(String(v)))
       add(file, "-", `env ${k} is ${String(v)}, not an exact version`);
   return pins;
 }
@@ -176,8 +192,13 @@ function usesRules(file, where, step, ctx) {
       add(file, where, `uses ${repo}, which ${SETTINGS} does not allow`);
   }
   const w = step.with ?? {};
-  if (isPackOrPublish && (repo === "actions/cache" || "cache" in w || "bundler-cache" in w))
-    add(file, where, "a pack or credentialed job restores a cache");
+  const noCache = w.cache === false || w.cache === "false";
+  const caches =
+    repo === "actions/cache" ||
+    ("cache" in w && !noCache) ||
+    (DEFAULT_CACHE.has(repo) && !noCache) ||
+    "bundler-cache" in w;
+  if (isPackOrPublish && caches) add(file, where, "a pack or credentialed job restores a cache");
   if (isPublish && repo === "actions/checkout" && w["persist-credentials"] !== false)
     add(file, where, "a publish job's checkout keeps its credential (persist-credentials: false)");
   if (isPackOrPublish && repo === "actions/setup-node") {
@@ -201,13 +222,22 @@ function jobRules({ file, jobId, job, reusable, envs, allowed, used, pins, add }
     add(file, jobId, `binds environment "${env}", which ${SETTINGS} does not declare`);
   if (credentialed && reusable) add(file, jobId, `a reusable workflow binds environment "${env}"`);
   if (job?.secrets === "inherit") add(file, jobId, "passes `secrets: inherit`");
+  if (declared !== undefined) {
+    const have = new Set((declared.secrets ?? []).map((x) => x?.name));
+    const text = JSON.stringify(job ?? null);
+    for (const m of text.matchAll(/\bsecrets(?:\.([A-Za-z_]\w*)|\[\\?['"]([^'"\\]+)\\?['"]\])/g)) {
+      const name = m[1] ?? m[2];
+      if (name !== "GITHUB_TOKEN" && !have.has(name))
+        add(file, jobId, `reads secret ${name}, which environment ${env} does not declare`);
+    }
+  }
   if (!credentialed) {
     if (grantsIdToken(job?.permissions))
       add(file, jobId, "requests id-token: write outside an environment");
     if (readsSecrets(job)) add(file, jobId, "reads the secrets context outside an environment");
   }
   const isPublish = typeof declared?.registry === "string";
-  const isPackOrPublish = isPublish || /^pack-/.test(jobId) || declared !== undefined;
+  const isPackOrPublish = isPublish || jobId.startsWith("pack-") || declared !== undefined;
   const ctx = { jobId, credentialed, isPublish, isPackOrPublish, allowed, used, pins, add };
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;
@@ -276,6 +306,59 @@ function shapeRules({ settings, manifest, workflows, envs, add }) {
   }
 }
 
+/** Rule 11, over the settings and the manifest: what the applier builds deploy keys from. */
+function mirrorRules({ settings, manifest, envs, add }) {
+  const units = (manifest.publish ?? []).filter((u) => u?.registry !== "none");
+  const mirrors = settings.mirrors ?? [];
+  const sample = (template) => `refs/tags/${String(template).replace("{version}", "1.0.0")}`;
+  for (const m of mirrors) {
+    const unit = units.find((u) => u.name === m.unit);
+    if (unit?.mirror?.repository !== m.repository)
+      add(
+        SETTINGS,
+        "-",
+        `mirror ${m.repository} names unit ${m.unit}, whose manifest mirror is ${String(unit?.mirror?.repository)}`,
+      );
+    const e = envs.get(m.environment);
+    if (e === undefined || unit === undefined || e.registry !== unit.registry)
+      add(
+        SETTINGS,
+        "-",
+        `mirror ${m.repository} names environment ${m.environment}, which is not unit ${m.unit}'s registry's`,
+      );
+    if (unit?.mirror !== undefined) {
+      const tag = sample(unit.mirror.releaseTag);
+      if (!(m.tags ?? []).some((g) => globMatches(g, tag)))
+        add(SETTINGS, "-", `mirror ${m.repository}'s tag patterns do not cover ${tag}`);
+    }
+  }
+  for (const u of units.filter((x) => x.mirror !== undefined))
+    if (!mirrors.some((m) => m.unit === u.name))
+      add(
+        SETTINGS,
+        "-",
+        `unit ${u.name} has a mirror (${u.mirror.repository}) that ${SETTINGS} does not declare`,
+      );
+  const goUnits = units.filter((u) => u.registry === "go");
+  const g = settings.goModuleTags;
+  if (goUnits.length === 0 && g === undefined) return;
+  if (envs.get(g?.environment)?.registry !== "go")
+    add(
+      SETTINGS,
+      "-",
+      `goModuleTags names environment ${String(g?.environment)}, which is not the go registry's`,
+    );
+  for (const u of goUnits) {
+    if (typeof u.releaseTag !== "string") {
+      add(MANIFEST, "-", `go unit ${u.name} has no releaseTag: its module tag would be empty`);
+      continue;
+    }
+    const ref = sample(u.releaseTag);
+    if (!(g?.include ?? []).some((p) => globMatches(p, ref)))
+      add(SETTINGS, "-", `goModuleTags does not cover unit ${u.name}'s module tag (${ref})`);
+  }
+}
+
 /** Every finding over parsed inputs. Pure: the tests feed it fixtures. */
 export function findings({ settings, manifest, workflows }) {
   const out = [];
@@ -293,6 +376,7 @@ export function findings({ settings, manifest, workflows }) {
   for (const a of allowed)
     if (!used.has(a)) add(SETTINGS, "-", `allows ${a}, which no workflow uses`);
   shapeRules({ settings, manifest, workflows, envs, add });
+  mirrorRules({ settings, manifest, envs, add });
   return out;
 }
 

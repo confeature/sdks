@@ -31,15 +31,19 @@ the evaluation rules is tested across every language at once.
 | Kotlin             | `io.confeature:confeature-kotlin-mp-sdk` (Maven) | not published yet: see the note below                                                                               |
 | Dart / Flutter     | `confeature` (pub.dev)                           | `dart pub add confeature`                                                                                           |
 | Elixir             | `confeature_client` (Hex)                        | `{:confeature_client, "~> 0.1"}` in `mix.exs`                                                                       |
-| Swift              | `Confeature`                                     | not available yet: see the note below                                                                               |
+| Swift              | `Confeature` (SwiftPM)                           | `.package(url: "https://github.com/confeature/confeature-swift", from: "0.1.0")` in `Package.swift`                 |
 | C++                | `confeature::confeature` (CMake)                 | `FetchContent_Declare(confeature GIT_REPOSITORY https://github.com/confeature/sdks.git SOURCE_SUBDIR apps/sdk-cpp)` |
 | Unreal Engine      | the `Confeature` plugin                          | copy `apps/sdk-unreal/Plugins/Confeature` into your project's `Plugins/`                                            |
 
-**Not installable yet.** Two distributions are still being settled (#794): the Swift package — Swift
-Package Manager needs a `Package.swift` at the repository root, and the Swift SDK lives under
-`apps/sdk-swift/` — and the Maven releases of the Java, Android and Kotlin SDKs, whose builds do not
-publish yet. Until then, build them from source in their directories. The Maven coordinates above are
-the ones their builds produce.
+**Not published yet.** The Maven releases of the Java, Android and Kotlin SDKs are still being
+settled (#794): their builds do not publish yet. Until then, build them from source in their
+directories. The Maven coordinates above are the ones their builds produce.
+
+The PHP and Swift SDKs are published from read-only mirrors of their directories here,
+[`confeature/confeature-php-sdk`](https://github.com/confeature/confeature-php-sdk) and
+[`confeature/confeature-swift`](https://github.com/confeature/confeature-swift): Packagist and Swift
+Package Manager read a repository whose manifest sits at its root. Changes are made here, in
+`apps/sdk-php/` and `apps/sdk-swift/`.
 
 Each SDK's own README, under `apps/sdk-<name>/`, covers its options, its examples and the details of
 moving from ConfigCat.

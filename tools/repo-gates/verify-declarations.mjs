@@ -115,6 +115,26 @@ export const DECLARED_GATES = {
       },
     ],
   },
+  "split-mirror": {
+    // The PHP and Swift SDKs are published as mirror repositories whose
+    // history is this split of the unit's directory, and a pushed history
+    // cannot be taken back: the split is refused when any commit in it carries
+    // an author, committer or message address that is not a noreply one
+    // (#901). Each mirror's pack job runs it, before its dry run.
+    script: "tools/sdk-pack/split-mirror.sh",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "composer validate --strict (no credentials)",
+        perJob: true,
+      },
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "swift build against the mirror (no credentials)",
+        perJob: true,
+      },
+    ],
+  },
   "dagger-precheck": {
     // The precondition in front of every containerised suite: it fails fast
     // when the Dagger CLI is missing or the Docker daemon is unreachable, so a

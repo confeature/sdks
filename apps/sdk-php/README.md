@@ -16,6 +16,11 @@ composer require confeature/confeature-php-sdk
 
 Requires PHP 8.1+.
 
+The package is published from
+[confeature/confeature-php-sdk](https://github.com/confeature/confeature-php-sdk), a read-only
+mirror of `apps/sdk-php/` in [confeature/sdks](https://github.com/confeature/sdks), where changes
+are made.
+
 ## Quickstart
 
 ```php
