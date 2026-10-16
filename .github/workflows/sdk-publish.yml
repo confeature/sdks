@@ -1020,7 +1020,6 @@ jobs:
       contents: read
     env:
       RELEASE_TAG: ${{ needs.setup.outputs.releaseTag }}
-      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
       UNIT_VERSION: ${{ needs.setup.outputs.version }}
       # git reads no global or system configuration (rule 3, round 4).
       GIT_CONFIG_GLOBAL: /dev/null
@@ -1060,7 +1059,7 @@ jobs:
       # The first request makes the proxy fetch the tag; a version it cannot
       # serve turns this run red instead of failing a user's `go get`.
       - name: Ask the Go proxy for the release
-        run: curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/${UNIT_COORDINATES}/@v/v${UNIT_VERSION}.info"
+        run: curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info"
 
   # ---------------------------------------------------------- packagist ----
   # Packagist and SwiftPM read a whole repository, with its manifest at the

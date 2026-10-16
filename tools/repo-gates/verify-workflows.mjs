@@ -457,7 +457,7 @@ export const CREDENTIALED_COMMANDS = {
     a.length === 1 && !a[0].hasExpansion && SED_SCRIPT.test(a[0].text)
       ? null
       : "sed runs one single-quoted s/…/…/ script (flag g at most)",
-  curl: (a) =>
+  curl: (a, ctx) =>
     argsProblem("curl", a, {
       options: {
         "-fsS": FLAG,
@@ -468,10 +468,12 @@ export const CREDENTIALED_COMMANDS = {
         "--retry-all-errors": FLAG,
       },
       positional: "any",
+      // Literal up to the module's /@v/: the proxy fetches whatever origin a
+      // path names, so an expansion before it could carry a secret anywhere.
       check: (ops) =>
-        ops.length === 1 && ops[0].text.startsWith("https://proxy.golang.org/")
+        ops.length === 1 && ctx.goProxyPrefixes.some((p) => ops[0].text.startsWith(p))
           ? null
-          : "curl reaches https://proxy.golang.org/ only",
+          : `curl reaches only ${ctx.goProxyPrefixes.join(", ") || "no URL"} (literal up to /@v/)`,
     }),
   git: gitProblem,
   npm: (a, ctx) => {
@@ -510,6 +512,121 @@ export const CREDENTIALED_COMMANDS = {
       : "rustup runs only `toolchain install`",
 };
 
+/**
+ * Rule 3, per environment (round 5): the commands each credentialed job may
+ * run, exactly the ones it uses (a recorded exception aside). A secret can
+ * leave a job only through a tool that talks to the network, so curl is the
+ * Go job's alone, git the three git jobs', and each registry client its own
+ * job's. An environment not listed runs nothing.
+ */
+export const ENVIRONMENT_COMMANDS = {
+  "sdk-publish-npm": ["npm", "printf", "sha256sum"],
+  "sdk-publish-pypi": [
+    "cmp",
+    "cut",
+    "echo",
+    "exit",
+    "ls",
+    "mkdir",
+    "printf",
+    "sed",
+    "sha256sum",
+    "sort",
+  ],
+  "sdk-publish-crates": ["rustup"],
+  "sdk-publish-rubygems": ["gem", "printf", "sha256sum"],
+  "sdk-publish-nuget": [
+    "cmp",
+    "cut",
+    "dotnet",
+    "echo",
+    "exit",
+    "ls",
+    "mkdir",
+    "printf",
+    "sed",
+    "sha256sum",
+    "sort",
+  ],
+  "sdk-publish-pubdev": [],
+  "sdk-publish-go": ["[", "curl", "echo", "exit", "git", "mkdir", "printf", "rm", "umask"],
+  "sdk-publish-packagist": [
+    "[",
+    "cmp",
+    "echo",
+    "exit",
+    "git",
+    "mkdir",
+    "printf",
+    "rm",
+    "sha256sum",
+    "umask",
+  ],
+  "sdk-publish-swiftpm": [
+    "[",
+    "cmp",
+    "echo",
+    "exit",
+    "git",
+    "mkdir",
+    "printf",
+    "rm",
+    "sha256sum",
+    "umask",
+  ],
+  "sdk-publish-maven": [
+    "cmp",
+    "cut",
+    "echo",
+    "exit",
+    "find",
+    "mkdir",
+    "printf",
+    "sed",
+    "sha256sum",
+    "sort",
+  ],
+  "cli-release": ["printf", "sha256sum"],
+};
+
+/**
+ * Why a command reads a credential outside its recorded position, or null
+ * (round 5). A credential (an env value from `secrets.*`, a step output such
+ * as an OIDC exchange's token, or github.token) may be read only as the
+ * operand of an emptiness test, as dotnet's --api-key, or, for a deploy key,
+ * by the one write that installs it: `printf '%s\n' "$KEY" > publish-tmp/ssh/key`.
+ */
+function credentialProblem(cmd, redirects, ctx) {
+  const reads = (w) =>
+    [...w.text.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)/g)]
+      .map((m) => m[1])
+      .filter((n) => ctx.creds.has(n));
+  const name = cmd[0]?.text;
+  for (const [k, w] of cmd.entries()) {
+    for (const n of reads(w)) {
+      const alone = w.text === `\${${n}}`;
+      const prev = cmd[k - 1]?.text;
+      if (alone && (name === "[" || name === "test") && (prev === "-z" || prev === "-n")) continue;
+      if (alone && name === "dotnet" && prev === "--api-key") continue;
+      if (
+        alone &&
+        name === "printf" &&
+        ctx.deployKeys.has(n) &&
+        cmd.length === 3 &&
+        k === 2 &&
+        cmd[1].text === "%s\\n" &&
+        redirects.length === 1 &&
+        redirects[0].op === ">" &&
+        redirects[0].word.text === "publish-tmp/ssh/key"
+      )
+        continue;
+      return `it reads the credential ${n} outside its recorded position`;
+    }
+  }
+  // A redirection target is never an expansion (refused above), so it reads none.
+  return null;
+}
+
 /** The grammar keywords a credentialed run block may use: a plain if, nothing else. */
 const KEYWORDS = new Set(["if", "then", "else", "fi"]);
 
@@ -544,6 +661,8 @@ function commandProblem({ words, redirects }, exceptions, ctx) {
   if (cmd.some((w) => w.opExpansion))
     return "an operator expansion (${NAME…}) is allowed only in a recorded exception";
   const name = cmd[0].text;
+  const leak = credentialProblem(cmd, redirects, ctx);
+  if (leak !== null) return leak;
   if (
     /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/.test(cmd[0].raw) ||
     /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(name)
@@ -551,6 +670,8 @@ function commandProblem({ words, redirects }, exceptions, ctx) {
     return "a credentialed job assigns no variable";
   if (!Object.hasOwn(CREDENTIALED_COMMANDS, name))
     return `${name} is not a command a credentialed job runs`;
+  if (!(ctx.commands[ctx.environment] ?? []).includes(name))
+    return `${name} is not a command environment ${ctx.environment}'s job runs`;
   return CREDENTIALED_COMMANDS[name](cmd.slice(1), { ...ctx, text });
 }
 
@@ -576,13 +697,14 @@ function workflowPins(file, doc, add) {
 }
 
 /** Rule 3's grammar and allowlist over one `run:` block of a job bound to an environment. */
-function credentialedRun(file, where, run, { jobId, remotes, add }) {
+function credentialedRun(file, where, run, ctx) {
+  const { jobId, add } = ctx;
   const { commands, problems } = lexStrict(run);
   for (const p of problems) add(file, where, `a credentialed job's run: block has ${p}`);
   if (problems.length > 0) return;
   const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
   for (const c of commands) {
-    const why = commandProblem(c, exceptions, { remotes });
+    const why = commandProblem(c, exceptions, ctx);
     if (why !== null)
       add(
         file,
@@ -870,6 +992,36 @@ function pinScopeRules(file, jobId, job, doc, add) {
     }
 }
 
+/**
+ * The credential names a step can read: every env name, at any scope, whose
+ * value comes from `secrets.*`, a step output, github.token, or another
+ * credential through `env.`; and the deploy keys among them (a secret the
+ * environment declares with kind deploy-key). Derived, never listed.
+ */
+export function credentialsOf(maps, declared) {
+  const creds = new Set();
+  const deployKeys = new Set();
+  const kinds = new Map((declared?.secrets ?? []).map((s) => [s?.name, s?.kind]));
+  const entries = maps.flatMap((m) => Object.entries(m ?? {}));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [k, v] of entries) {
+      const s = String(v);
+      const isCred =
+        /\$\{\{[^}]*\b(?:secrets|steps)\./.test(s) ||
+        /\$\{\{[^}]*\bgithub\.token\b/.test(s) ||
+        [...s.matchAll(/\benv\.([A-Za-z_]\w*)/g)].some((m) => creds.has(m[1]));
+      if (isCred && !creds.has(k)) {
+        creds.add(k);
+        grew = true;
+      }
+      const m = /^\$\{\{\s*secrets\.([A-Za-z_]\w*)\s*\}\}$/.exec(s);
+      if (m !== null && kinds.get(m[1]) === "deploy-key") deployKeys.add(k);
+    }
+  }
+  return { creds, deployKeys };
+}
+
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
 function jobRules(args) {
   const {
@@ -884,6 +1036,8 @@ function jobRules(args) {
     used,
     pins,
     remotesByEnv,
+    commands,
+    goProxyPrefixes,
     add,
   } = args;
   const env = envName(job);
@@ -920,6 +1074,9 @@ function jobRules(args) {
     used,
     pins,
     remotes: remotesByEnv.get(envName(job)) ?? new Set(),
+    environment: envName(job),
+    commands,
+    goProxyPrefixes,
     add,
   };
   if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
@@ -930,6 +1087,7 @@ function jobRules(args) {
     if (typeof step?.run === "string")
       runRules(file, where, step.run, {
         ...ctx,
+        ...credentialsOf([doc?.env, job?.env, step?.env], declared),
         defined: new Set([
           ...Object.keys(doc?.env ?? {}),
           ...Object.keys(job?.env ?? {}),
@@ -1054,7 +1212,11 @@ function mirrorRules({ settings, manifest, envs, add }) {
 }
 
 /** Every finding over parsed inputs. Pure: the tests feed it fixtures. */
-export function findings({ settings, manifest, workflows }) {
+export function findings({ settings, manifest, workflows, commands = ENVIRONMENT_COMMANDS }) {
+  // The only URLs curl may name: each Go unit's module on the proxy, literal to /@v/.
+  const goProxyPrefixes = (manifest.publish ?? [])
+    .filter((u) => u?.registry === "go" && typeof u.coordinates === "string")
+    .map((u) => `https://proxy.golang.org/${u.coordinates}/@v/`);
   const out = [];
   const add = (file, job, why) => out.push({ file, job, why });
   const envs = new Map((settings.environments ?? []).map((e) => [e.name, e]));
@@ -1088,6 +1250,8 @@ export function findings({ settings, manifest, workflows }) {
         used,
         pins,
         remotesByEnv,
+        commands,
+        goProxyPrefixes,
         add,
       });
   }

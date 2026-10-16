@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import {
+  CREDENTIALED_COMMANDS,
+  ENVIRONMENT_COMMANDS,
   findings,
   globMatches,
   publicGateFindings,
@@ -76,11 +78,21 @@ const GOOD = `  pack-npm:
       - run: npm publish --ignore-scripts "./release/$ARTIFACT"
 `;
 const flow = (jobs, head = HEAD) => parseYaml(`${head}jobs:\n${jobs}`);
-const run = (jobs, { s = settings(), m = manifest, extra = {}, head = HEAD } = {}) =>
+/**
+ * The grammar and allowlist rows run their commands in publish-npm, so the
+ * fixture lets every environment run every allowlisted command; the real
+ * per-environment table (ENVIRONMENT_COMMANDS) has its own describe below.
+ */
+const ANY_COMMAND = new Proxy({}, { get: () => Object.keys(CREDENTIALED_COMMANDS) });
+const run = (
+  jobs,
+  { s = settings(), m = manifest, extra = {}, head = HEAD, commands = ANY_COMMAND } = {},
+) =>
   findings({
     settings: s,
     manifest: m,
     workflows: { "sdk-publish.yml": flow(jobs, head), ...extra },
+    commands,
   }).map((f) => f.why);
 const fires = (got, re) => expect(got).toContainEqual(expect.stringMatching(re));
 const swap = (from, to) => {
@@ -785,7 +797,8 @@ const REASONS = {
   "gem push --host": "gem push: --host is not an option it may take",
   "curl -o": "curl: -o is not an option it may take",
   "curl -K": "curl: -K is not an option it may take",
-  "curl to another host": "curl reaches https://proxy.golang.org/ only",
+  "curl to another host":
+    "curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/ (literal up to /@v/)",
   "aws (only the reviewed Maven script uploads to R2)":
     "aws is not a command a credentialed job runs",
   "rustup run": "rustup runs only `toolchain install`",
@@ -807,8 +820,16 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     s.mirrors = [{ repository: "o/p", unit: "p", environment: "sdk-publish-npm", tags: [] }];
     return s;
   };
+  /** A Go unit, so the proxy URL prefix exists (its settings findings are filtered as above). */
+  const withGo = {
+    ...manifest,
+    publish: [
+      ...manifest.publish,
+      { name: "go", registry: "go", coordinates: "github.com/confeature/sdks/apps/sdk-go" },
+    ],
+  };
   const inPublish = (cmd, opts = {}) =>
-    run(swap(PUBLISH_STEP, block(cmd)), { s: reach(), ...opts });
+    run(swap(PUBLISH_STEP, block(cmd)), { s: reach(), m: withGo, ...opts });
   const credOnly = (got) => got.filter((w) => CRED.test(w));
   const CRED = /a credentialed job/;
   const PUSH = "git push --atomic --end-of-options";
@@ -1026,7 +1047,7 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
     ],
     [
       "the Go proxy warm-up",
-      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/\${UNIT_COORDINATES}/@v/v\${UNIT_VERSION}.info"`,
+      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v\${UNIT_VERSION}.info"`,
     ],
     [
       "the NuGet upload",
