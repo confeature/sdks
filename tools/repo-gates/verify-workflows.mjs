@@ -646,15 +646,19 @@ function commandProblem({ words, redirects }, exceptions, ctx) {
       return `a redirection target must be a literal path (${tgt.raw})`;
     if (r.op !== "<" && tgt.text !== "/dev/null" && !SCRATCH.test(tgt.text))
       return `a credentialed job writes only publish-tmp/ or /dev/null (${tgt.raw})`;
-    // Input only from what the job received or wrote: never a device (bash
-    // opens /dev/tcp/<host>/<port> as a socket), never the checkout's files.
+    // Input only from what the job wrote (publish-tmp/) or received (the
+    // path of a download-artifact step of this job): never a device (bash
+    // opens /dev/tcp/<host>/<port> as a socket), never the checkout's files,
+    // which a symlink in the checkout could point anywhere (round 5).
     if (
       r.op === "<" &&
       tgt.text !== "/dev/null" &&
       !SCRATCH.test(tgt.text) &&
-      !/^(?:release|dist)\/[A-Za-z0-9._/-]+$/.test(tgt.text)
+      !(ctx.downloads ?? []).some(
+        (d) => tgt.text.startsWith(`${d}/`) && /^[A-Za-z0-9._/-]+$/.test(tgt.text),
+      )
     )
-      return `a credentialed job reads input only from publish-tmp/, release/ or dist/ (${tgt.raw})`;
+      return `a credentialed job reads input only from publish-tmp/ or a path this job downloads to (${tgt.raw})`;
   }
   if (cmd.length === 0) return null;
   // The exceptions match the raw words: an exact spelling, quotes included,
@@ -1193,6 +1197,9 @@ function jobRules(args) {
     used,
     pins,
     remotes: remotesByEnv.get(envName(job)) ?? new Set(),
+    downloads: steps
+      .filter((s) => typeof s?.uses === "string" && s.uses.startsWith("actions/download-artifact@"))
+      .map((s) => String(s?.with?.path ?? "")),
     environment: envName(job),
     commands,
     goProxyPrefixes,

