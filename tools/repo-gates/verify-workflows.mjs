@@ -135,30 +135,47 @@ const envName = (job) =>
   typeof job?.environment === "string" ? job.environment : job?.environment?.name;
 const grantsIdToken = (perms) => perms === "write-all" || perms?.["id-token"] === "write";
 /**
- * The bodies of every `${{ … }}` in `text`, read the way GitHub reads them
- * (round 7): a `'…'` string (with its `''` escape) may hold `}}`, so a regex
- * that stops at the first `}}` let `${{ ('}}' && '') || toJSON(secrets) }}`
- * hide its tail. An unterminated expression runs to the end of the text.
+ * The one expression lexer (round 8): from `from`, read an expression's text
+ * the way GitHub does, `'…'` strings (and their `''` escape, which toggles
+ * twice) included, up to its closing `}}` (when `untilClose`) or the end. It
+ * returns the body and the body with its strings' contents removed, which is
+ * what the name checks read.
  */
-export function expressionBodies(text) {
+function readExpression(s, from, untilClose) {
+  let inString = false;
+  let body = "";
+  let stripped = "";
+  let j = from;
+  for (; j < s.length; j += 1) {
+    const c = s[j];
+    if (c === "'") inString = !inString;
+    else if (!inString && untilClose && s.startsWith("}}", j)) break;
+    body += c;
+    if (c === "'" || !inString) stripped += c;
+  }
+  return { body, stripped, end: j };
+}
+
+/**
+ * Every `${{ … }}` in `text`, as { body, stripped } (round 7: a regex that
+ * stopped at the first `}}` let `${{ ('}}' && '') || toJSON(secrets) }}` hide
+ * its tail). An unterminated expression runs to the end of the text.
+ */
+export function expressions(text) {
   const s = String(text ?? "");
   const out = [];
   let i = s.indexOf("${{");
   while (i !== -1) {
-    let j = i + 3;
-    let inString = false;
-    for (; j < s.length; j += 1) {
-      // The `''` escape toggles twice, so it needs no case of its own.
-      if (s[j] === "'") inString = !inString;
-      else if (!inString && s.startsWith("}}", j)) break;
-    }
-    out.push(s.slice(i + 3, j));
-    i = s.indexOf("${{", j + 2);
+    const { body, stripped, end } = readExpression(s, i + 3, true);
+    out.push({ body, stripped });
+    i = s.indexOf("${{", end + 2);
   }
   return out;
 }
-/** An expression with its string literals emptied, for judging its names. */
-export const withoutStrings = (e) => e.replace(/'(?:[^']|'')*'/g, "''");
+/** The bodies of every `${{ … }}` in `text`. */
+export const expressionBodies = (text) => expressions(text).map((x) => x.body);
+/** An expression with its string literals' contents removed, for judging its names. */
+export const withoutStrings = (e) => readExpression(String(e), 0, false).stripped;
 /** A key's expressions: an `if:` without `${{ }}` is one bare expression. */
 const exprsOf = (key, value) =>
   key === "if" && !String(value).includes("${{") ? [String(value)] : expressionBodies(value);
@@ -477,7 +494,8 @@ export const PINNED_ENV = {
   EXPECTED_SUMS: (j) => PACK(j, "sums"),
   SPLIT_SHA: (j) => PACK(j, "split"),
   EXPECTED: () => EXPR("needs\\.release\\.outputs\\.sums-digest"),
-  DEPLOY_KEY: (j) => SECRET(DEPLOY_KEY_SECRET[j] ?? "NO_DEPLOY_KEY_FOR_THIS_JOB"),
+  // A job with no recorded deploy key matches nothing.
+  DEPLOY_KEY: (j) => (Object.hasOwn(DEPLOY_KEY_SECRET, j) ? SECRET(DEPLOY_KEY_SECRET[j]) : /(?!)/),
   R2_ACCESS_KEY_ID: () => SECRET("R2_ACCESS_KEY_ID"),
   R2_SECRET_ACCESS_KEY: () => SECRET("R2_SECRET_ACCESS_KEY"),
   CLOUDFLARE_ACCOUNT_ID: () => SECRET("CLOUDFLARE_ACCOUNT_ID"),
@@ -497,10 +515,20 @@ export const PINNED_ENV = {
   GIT_CONFIG_NOSYSTEM: () => LIT("1"),
 };
 export const CREDENTIALED_ENV = new Set(Object.keys(PINNED_ENV));
-/** The names pinned to a secret or a step output: the credentials themselves. */
-export const CREDENTIAL_ENV = new Set(
-  Object.keys(PINNED_ENV).filter((k) => /secrets|steps/.test(PINNED_ENV[k]("publish-x").source)),
-);
+/**
+ * The names pinned to a secret or a step output: the credentials themselves,
+ * listed (a test holds every PINNED_ENV pin to secrets.* or steps.* to it).
+ */
+export const CREDENTIAL_ENV = new Set([
+  "CARGO_REGISTRY_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "DEPLOY_KEY",
+  "MAVEN_R2_ACCESS_KEY_ID",
+  "MAVEN_R2_SECRET_ACCESS_KEY",
+  "NUGET_API_KEY",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+]);
 const SSH_COMMAND_RUNS =
   /ProxyCommand|LocalCommand|KnownHostsCommand|ProxyJump|-F\s+(?!\/dev\/null(?:\s|$))/i;
 
@@ -2238,7 +2266,11 @@ export function releaseGateFindings(workflows) {
   return out;
 }
 
-/** The outputs each OUTPUT_SCRIPTS script emits: its exported OUTPUT_KEYS, which it enforces. */
+/**
+ * The outputs each OUTPUT_SCRIPTS script emits, keyed by its path: the
+ * script's own exported OUTPUT_KEYS (imported, not parsed; the script refuses
+ * to emit any other set). Rule 16 checks `steps.<id>.outputs.*` against them.
+ */
 export function readScriptOutputs() {
   return Object.fromEntries(OUTPUT_SCRIPTS.map((f) => [f, [...SCRIPT_OUTPUT_KEYS[f]]]));
 }

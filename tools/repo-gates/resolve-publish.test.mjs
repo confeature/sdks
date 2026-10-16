@@ -4,11 +4,11 @@
 // - the REAL manifest: every unit resolves or is refused for its declared reason;
 // - a fixture manifest: one case per refusal, so each rule is seen to fail closed.
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import {
   InputError,
@@ -98,8 +98,13 @@ describe("tagFormat", () => {
 });
 
 /** A minimal repository: a manifest and the files its units read their versions from. */
+const roots = [];
+afterAll(() => {
+  for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
+});
 function fixture(publish, sdks, files = {}) {
   const root = mkdtempSync(join(tmpdir(), "resolve-publish-"));
+  roots.push(root);
   mkdirSync(join(root, "dagger"));
   writeFileSync(
     join(root, MANIFEST),

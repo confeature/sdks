@@ -12,8 +12,10 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  CREDENTIAL_ENV,
   ENVIRONMENT_COMMANDS,
   MANIFEST,
+  PINNED_ENV,
   commandName,
   SETTINGS,
   WORKFLOWS,
@@ -1003,6 +1005,12 @@ describe("expressions are read as GitHub reads them: case-folded, with their str
       got.join("\n") || "no finding",
     ).toBe(true);
   });
+  it("a context named only inside a string literal is no read", () =>
+    expect(
+      added((w) => {
+        resolveEnv(w).UNIT = "${{ 'toJSON(secrets) and secrets.X' }}";
+      }),
+    ).toEqual([]));
   it("splits expressions only outside strings", async () => {
     const { expressionBodies } = await import("./verify-workflows.mjs");
     expect(expressionBodies("a ${{ ('}}' && x) }} b ${{ y }}")).toEqual([" ('}}' && x) ", " y "]);
@@ -1452,5 +1460,41 @@ describe("a step output is written by the command that redirects it (round 8, F6
     expect(referenceFindings(w, SCRIPTS, settings).map((f) => f.why)).toContainEqual(
       expect.stringMatching(/step digest writes no sha256= to \$GITHUB_OUTPUT/),
     );
+  });
+});
+
+describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
+  it("names exactly these credentials", () =>
+    expect([...CREDENTIAL_ENV].sort()).toEqual([
+      "CARGO_REGISTRY_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID",
+      "DEPLOY_KEY",
+      "MAVEN_R2_ACCESS_KEY_ID",
+      "MAVEN_R2_SECRET_ACCESS_KEY",
+      "NUGET_API_KEY",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+    ]));
+  it("holds every PINNED_ENV name pinned to secrets.* or steps.*, for every job that has a pin", () => {
+    const jobs = [
+      "publish-go",
+      "publish-packagist",
+      "publish-swiftpm",
+      "publish-maven",
+      "publish-npm",
+      "upload",
+    ];
+    for (const [name, pin] of Object.entries(PINNED_ENV))
+      for (const j of jobs)
+        if (/secrets|steps/.test(pin(j).source))
+          expect(CREDENTIAL_ENV.has(name), `${name} (${j})`).toBe(true);
+  });
+  it("a job with no recorded deploy key accepts none", () => {
+    expect(PINNED_ENV.DEPLOY_KEY("publish-npm").test("${{ secrets.MIRROR_DEPLOY_KEY }}")).toBe(
+      false,
+    );
+    expect(
+      PINNED_ENV.DEPLOY_KEY("publish-npm").test("${{ secrets.NO_DEPLOY_KEY_FOR_THIS_JOB }}"),
+    ).toBe(false);
   });
 });
