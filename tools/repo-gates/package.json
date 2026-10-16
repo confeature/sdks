@@ -13,7 +13,7 @@
   "type": "module",
   "scripts": {
     "test": "vp test",
-    "record:row-counts": "RECORD_ROW_COUNTS=1 vp test release-workflows verify-workflows"
+    "record:row-findings": "RECORD_ROW_FINDINGS=1 vp test release-workflows verify-workflows"
   },
   "devDependencies": {
     "vitest": "catalog:",

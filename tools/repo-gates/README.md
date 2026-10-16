@@ -18,11 +18,15 @@ row's own reason, and also every finding the row produces, sorted, against
 change that adds or removes findings changes these snapshots:
 
 ```sh
-pnpm --filter @confeature/repo-gates record:row-counts
+pnpm --filter @confeature/repo-gates record:row-findings
 git diff tools/repo-gates/fixtures/
 ```
 
 Review the diff before committing it: it shows exactly which findings
-appeared or disappeared, row by row. Recording is refused when `CI` is set.
-Each suite checks, after all its rows ran, that every row has a snapshot and
-no snapshot is left over.
+appeared or disappeared, row by row. Recording (`RECORD_ROW_FINDINGS=1`) is
+refused when `CI` is set, and refused on a filtered run that saw fewer rows
+than the snapshot holds; it merges what ran into the stored map. Every table
+registers its labels when the suite is collected (`rows()`), so each suite
+checks, after its rows ran, that no two rows share a label, that every
+registered row has a snapshot and no snapshot is left over, whatever subset
+ran.

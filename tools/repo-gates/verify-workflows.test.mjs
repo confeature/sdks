@@ -970,7 +970,7 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
   afterAll(() => RULE3.finish());
   it("records a reason for exactly the rows of the table, and none left over", () =>
     expect(Object.keys(REASONS).sort()).toEqual(RULE3_ROWS.map(([label]) => label).sort()));
-  it.each(RULE3_ROWS)("refuses %s, for its own reason", (label, cmd) => {
+  it.each(RULE3.rows(RULE3_ROWS))("refuses %s, for its own reason", (label, cmd) => {
     const got = inPublish(cmd);
     // And with exactly its recorded number of rule-3 findings (round 7).
     const cred = got.filter((w) => CRED.test(w));
