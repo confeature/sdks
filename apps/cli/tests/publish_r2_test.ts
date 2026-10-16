@@ -13,6 +13,7 @@ const ROOT = new URL("../../../", import.meta.url).pathname;
 
 const WRANGLER_STUB = `#!/usr/bin/env bash
 # r2 object put <bucket>/<key> --file F --content-type T --cache-control C --remote
+echo wrangler >> "$CALL_LOG"
 # STUB_CWD mimics the real default, \`pnpm --dir … exec wrangler\`, which changes directory.
 [ -n "$STUB_CWD" ] && cd "$STUB_CWD"
 key="\${4#*/}"; file=""; ct=""; cc=""
@@ -29,6 +30,7 @@ echo "$key|$ct|$cc" >> "$PUT_LOG"
 
 const AWS_STUB = `#!/usr/bin/env bash
 # aws s3api put-object --endpoint-url U --bucket B --key K --body F --content-type T --cache-control C
+echo aws >> "$CALL_LOG"
 [ "$1 $2" = "s3api put-object" ] || { echo "unexpected aws call: $*" >&2; exit 2; }
 shift 2
 key=""; file=""; ct=""; cc=""; ep=""
@@ -80,6 +82,7 @@ function fixture(): Fixture {
   const log = `${dir}/puts.log`;
   Deno.writeTextFileSync(log, "");
   Deno.writeTextFileSync(`${dir}/curl.log`, "");
+  Deno.writeTextFileSync(`${dir}/calls.log`, "");
   return {
     dir,
     bucket,
@@ -90,6 +93,7 @@ function fixture(): Fixture {
       BUCKET_DIR: bucket,
       PUT_LOG: log,
       CURL_LOG: `${dir}/curl.log`,
+      CALL_LOG: `${dir}/calls.log`,
       CLI_BASE_URL: "https://cli.test",
       WRANGLER: `${bin}/wrangler`,
     },
@@ -329,14 +333,31 @@ Deno.test("with R2 S3 credentials, every put goes through the S3 API, never wran
   if (all.length === 0 || !all.every((p) => p.endsWith("|s3"))) throw new Error(all.join("\n"));
 });
 
-Deno.test("an S3 key id without its secret is refused before any put", async () => {
-  const f = fixture();
-  await build(f);
-  const { code } = new Deno.Command("bash", {
-    args: [SCRIPT, "upload", "1.2.3", f.dist],
-    cwd: ROOT,
-    env: { ...f.env, R2_ACCESS_KEY_ID: "kid", CLOUDFLARE_ACCOUNT_ID: "acct" },
-  }).outputSync();
-  if (code === 0) throw new Error("accepted a half-set credential");
-  if (puts(f).length !== 0) throw new Error("put something");
-});
+// The stub aws would ACCEPT these puts (EXPECT_KEY_ID matches): without the
+// guard in put(), the upload goes through the S3 API with a half-set
+// credential, so this fails on the guard's absence, not on a stub mismatch
+// (#794 review: the old version passed with the guard deleted).
+for (
+  const [what, half] of [
+    ["the secret", { R2_ACCESS_KEY_ID: "kid", CLOUDFLARE_ACCOUNT_ID: "acct" }],
+    ["the account id", { R2_ACCESS_KEY_ID: "kid", R2_SECRET_ACCESS_KEY: "secret" }],
+  ] as const
+) {
+  Deno.test(`an S3 key id without ${what} is refused before aws or wrangler runs`, async () => {
+    const f = fixture();
+    await build(f);
+    const { code, stdout, stderr } = new Deno.Command("bash", {
+      args: [SCRIPT, "upload", "1.2.3", f.dist],
+      cwd: ROOT,
+      env: { ...f.env, ...half, EXPECT_KEY_ID: "kid" },
+    }).outputSync();
+    const dec = new TextDecoder();
+    assertEquals(code, 1);
+    assertStringIncludes(
+      dec.decode(stdout) + dec.decode(stderr),
+      "R2_ACCESS_KEY_ID is set without R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID",
+    );
+    assertEquals(Deno.readTextFileSync(f.env.CALL_LOG), "");
+    assertEquals(puts(f), []);
+  });
+}
