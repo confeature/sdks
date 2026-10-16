@@ -70,11 +70,28 @@ const FIXTURE_GIT_ENV = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
 };
+/**
+ * The repository-locating variables a parent git (a hook, a worktree) can
+ * export: inherited, they would point every fixture command at that
+ * repository instead of `cwd` (round 11).
+ */
+const GIT_LOCATION_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+];
+const gitEnv = () => {
+  const env = { ...process.env, ...FIXTURE_GIT_ENV };
+  for (const k of GIT_LOCATION_ENV) delete env[k];
+  return env;
+};
 const git = (cwd, ...args) => {
   const r = spawnSync("git", args, {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...FIXTURE_GIT_ENV },
+    env: gitEnv(),
   });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
   return r.stdout.trim();
@@ -1066,4 +1083,31 @@ describe("cli-release's build hands release and upload the digest they check (ro
       expect(r.stderr).toMatch(/no refs\/remotes\/origin\/main/);
     });
   });
+});
+
+describe("the fixture git ignores a parent repository's location variables (round 11)", () => {
+  it.each(["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"])(
+    "git() works in its own cwd with %s inherited",
+    (name) => {
+      const elsewhere = scratch();
+      git(elsewhere, "init", "--quiet");
+      const saved = process.env[name];
+      process.env[name] = join(elsewhere, name === "GIT_INDEX_FILE" ? ".git/index" : ".git");
+      try {
+        const ws = scratch();
+        git(ws, "init", "--quiet");
+        writeFileSync(join(ws, "f"), "x");
+        git(ws, "add", "f");
+        git(ws, "commit", "--quiet", "-m", "own");
+        expect(git(ws, "log", "--format=%s")).toBe("own");
+        expect(gitEnv()[name]).toBeUndefined();
+        expect(
+          spawnSync("git", ["-C", elsewhere, "rev-parse", "--verify", "--quiet", "HEAD"]).status,
+        ).not.toBe(0);
+      } finally {
+        if (saved === undefined) delete process.env[name];
+        else process.env[name] = saved;
+      }
+    },
+  );
 });
