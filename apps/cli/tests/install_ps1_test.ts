@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
+import { scratchDir } from "./scratch.ts";
 
 // install.ps1 run END TO END under pwsh (#801 review) against a stub host: a
 // stub `Invoke-WebRequest` (a function shadows the cmdlet inside the script)
@@ -36,7 +37,8 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 }
 
 async function host(latest: string | null) {
-  const dir = Deno.makeTempDirSync({ prefix: "install-ps1-" });
+  const scratch = scratchDir("install-ps1-");
+  const dir = scratch.path;
   const hostDir = `${dir}/host`;
   const appData = `${dir}/appdata`;
   Deno.mkdirSync(`${hostDir}/v0.2.0`, { recursive: true });
@@ -50,7 +52,7 @@ async function host(latest: string | null) {
   for (const f of Deno.readDirSync(`${hostDir}/v0.2.0`)) {
     Deno.copyFileSync(`${hostDir}/v0.2.0/${f.name}`, `${hostDir}/v0.2.0-evil/${f.name}`);
   }
-  return { hostDir, appData };
+  return { hostDir, appData, [Symbol.dispose]: () => scratch[Symbol.dispose]() };
 }
 
 function install(h: { hostDir: string; appData: string }, version = "") {
@@ -78,7 +80,7 @@ Deno.test({
   name: `install.ps1 installs latest when latest is exactly X.Y.Z${skip}`,
   ignore: !hasPwsh,
   async fn() {
-    const h = await host("0.2.0\r\n");
+    using h = await host("0.2.0\r\n");
     const r = install(h);
     assertEquals(r.code, 0, r.out);
     assertStringIncludes(r.out, "checksum verified");
@@ -99,7 +101,7 @@ for (
     name: `install.ps1: ${label} aborts and installs nothing${skip}`,
     ignore: !hasPwsh,
     async fn() {
-      const h = await host(latest);
+      using h = await host(latest);
       const r = install(h);
       assertEquals(r.code !== 0, true, r.out);
       assertEquals(installed(h), false);
@@ -111,7 +113,7 @@ Deno.test({
   name: `install.ps1: a tampered binary aborts on the checksum and installs nothing${skip}`,
   ignore: !hasPwsh,
   async fn() {
-    const h = await host("0.2.0");
+    using h = await host("0.2.0");
     Deno.writeTextFileSync(`${h.hostDir}/v0.2.0/${ASSET}`, "tampered");
     const r = install(h);
     assertEquals(r.code !== 0, true);
@@ -124,7 +126,7 @@ Deno.test({
   name: `install.ps1: a manifest with no line for this asset installs nothing${skip}`,
   ignore: !hasPwsh,
   async fn() {
-    const h = await host("0.2.0");
+    using h = await host("0.2.0");
     Deno.writeTextFileSync(`${h.hostDir}/v0.2.0/SHA256SUMS`, "deadbeef  other\n");
     const r = install(h);
     assertEquals(r.code !== 0, true);
@@ -158,7 +160,7 @@ for (const [i, block] of ARG_BLOCKS.entries()) {
       async fn() {
         // `latest` names a version that is NOT served: a pinned run that
         // ignored its pin, or an unpinned one handed a pin, cannot install.
-        const h = await host(pinned ? "0.9.9" : "0.2.0");
+        using h = await host(pinned ? "0.9.9" : "0.2.0");
         const { code, stdout, stderr } = new Deno.Command("pwsh", {
           args: [
             "-NoProfile",

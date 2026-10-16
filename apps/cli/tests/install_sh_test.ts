@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
+import { scratchDir } from "./scratch.ts";
 import { assetName } from "../scripts/compile.ts";
 
 // install.sh run END TO END (#801 review) against a stub host: a stub `curl`
@@ -41,8 +42,9 @@ interface Host {
 }
 
 /** A published v0.2.0 for every non-Windows target, and `latest` as given (or none). */
-async function host(latest: string | null): Promise<Host> {
-  const dir = Deno.makeTempDirSync({ prefix: "install-sh-" });
+async function host(latest: string | null): Promise<Host & Disposable> {
+  const scratch = scratchDir("install-sh-");
+  const dir = scratch.path;
   const bin = `${dir}/bin`;
   const hostDir = `${dir}/host`;
   const home = `${dir}/home`;
@@ -69,6 +71,7 @@ async function host(latest: string | null): Promise<Host> {
     host: hostDir,
     home,
     env: { PATH: `${bin}:${Deno.env.get("PATH")}`, HOST_DIR: hostDir, HOME: home },
+    [Symbol.dispose]: () => scratch[Symbol.dispose](),
   };
 }
 
@@ -91,7 +94,7 @@ const installed = (h: Host) => {
 };
 
 Deno.test("installs latest when latest is exactly X.Y.Z", async () => {
-  const h = await host("0.2.0");
+  using h = await host("0.2.0");
   const r = install(h);
   assertEquals(r.code, 0, r.out);
   assertStringIncludes(r.out, "checksum verified");
@@ -99,13 +102,13 @@ Deno.test("installs latest when latest is exactly X.Y.Z", async () => {
 });
 
 Deno.test("a CRLF-terminated latest still installs (\\r is stripped)", async () => {
-  const h = await host("0.2.0\r\n");
+  using h = await host("0.2.0\r\n");
   assertEquals(install(h).code, 0);
   assertEquals(installed(h), true);
 });
 
 Deno.test("a pinned version installs without reading latest", async () => {
-  const h = await host(null);
+  using h = await host(null);
   assertEquals(install(h, "--version", "0.2.0").code, 0);
   assertEquals(installed(h), true);
 });
@@ -122,7 +125,7 @@ for (
   ] as const
 ) {
   Deno.test(`${label} aborts and installs nothing`, async () => {
-    const h = await host(latest);
+    using h = await host(latest);
     const r = install(h);
     assertEquals(r.code !== 0, true, r.out);
     assertEquals(installed(h), false);
@@ -130,7 +133,7 @@ for (
 }
 
 Deno.test("a tampered binary aborts on the checksum and installs nothing", async () => {
-  const h = await host("0.2.0");
+  using h = await host("0.2.0");
   for (const t of TARGETS) Deno.writeTextFileSync(`${h.host}/v0.2.0/${assetName(t)}`, "tampered");
   const r = install(h);
   assertEquals(r.code !== 0, true);
@@ -139,7 +142,7 @@ Deno.test("a tampered binary aborts on the checksum and installs nothing", async
 });
 
 Deno.test("a manifest with no line for this host aborts and installs nothing", async () => {
-  const h = await host("0.2.0");
+  using h = await host("0.2.0");
   Deno.writeTextFileSync(`${h.host}/v0.2.0/SHA256SUMS`, "deadbeef  some-other-asset\n");
   const r = install(h);
   assertEquals(r.code !== 0, true);
@@ -148,14 +151,14 @@ Deno.test("a manifest with no line for this host aborts and installs nothing", a
 });
 
 Deno.test("a missing binary aborts and installs nothing", async () => {
-  const h = await host("0.2.0");
+  using h = await host("0.2.0");
   for (const t of TARGETS) Deno.removeSync(`${h.host}/v0.2.0/${assetName(t)}`);
   assertEquals(install(h).code !== 0, true);
   assertEquals(installed(h), false);
 });
 
 Deno.test("latest is fetched with a 32-byte cap", async () => {
-  const h = await host("0.2.0");
+  using h = await host("0.2.0");
   install(h);
   const log = Deno.readTextFileSync(`${h.host}/../curl.log`);
   const line = log.split("\n").find((l) => l.includes("/latest"));

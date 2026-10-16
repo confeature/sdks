@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
+import { scratchDir } from "./scratch.ts";
 
 // publish-r2.sh (#801) against a fake bucket: a stub `wrangler` writes objects
 // into a directory and logs each put, a stub `curl` serves that directory as the
@@ -70,8 +71,9 @@ interface Fixture {
   env: Record<string, string>;
 }
 
-function fixture(): Fixture {
-  const dir = Deno.makeTempDirSync({ prefix: "publish-r2-" });
+function fixture(): Fixture & Disposable {
+  const scratch = scratchDir("publish-r2-");
+  const dir = scratch.path;
   const bin = `${dir}/bin`;
   const bucket = `${dir}/bucket`;
   const dist = `${dir}/dist`;
@@ -97,6 +99,7 @@ function fixture(): Fixture {
       CLI_BASE_URL: "https://cli.test",
       WRANGLER: `${bin}/wrangler`,
     },
+    [Symbol.dispose]: () => scratch[Symbol.dispose](),
   };
 }
 
@@ -136,7 +139,7 @@ const puts = (f: Fixture) => Deno.readTextFileSync(f.log).trim().split("\n").fil
 const keys = (f: Fixture) => puts(f).map((l) => l.split("|")[0]);
 
 Deno.test("upload puts every binary, then SHA256SUMS last, all immutable", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   assertEquals(run(f, "upload", "0.2.0", f.dist).code, 0);
   const k = keys(f);
@@ -151,7 +154,7 @@ Deno.test("upload puts every binary, then SHA256SUMS last, all immutable", async
 });
 
 Deno.test("upload refuses a binary that does not match its own SHA256SUMS, before any put", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   Deno.writeTextFileSync(`${f.dist}/confeature-aarch64-apple-darwin`, "tampered");
   const r = run(f, "upload", "0.2.0", f.dist);
@@ -161,7 +164,7 @@ Deno.test("upload refuses a binary that does not match its own SHA256SUMS, befor
 });
 
 Deno.test("a byte-identical re-run resumes with no put; a different build is refused", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   assertEquals(run(f, "upload", "0.2.0", f.dist).code, 0);
   Deno.writeTextFileSync(f.log, "");
@@ -178,7 +181,7 @@ Deno.test("a byte-identical re-run resumes with no put; a different build is ref
 });
 
 Deno.test("promote refuses while an asset is not served, and writes no latest", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   run(f, "upload", "0.2.0", f.dist);
   Deno.removeSync(`${f.bucket}/v0.2.0/confeature-aarch64-apple-darwin`);
@@ -190,7 +193,7 @@ Deno.test("promote refuses while an asset is not served, and writes no latest", 
 });
 
 Deno.test("promote refuses a version never uploaded", () => {
-  const f = fixture();
+  using f = fixture();
   const r = run(f, "promote", "9.9.9");
   assertEquals(r.code, 1);
   assertStringIncludes(r.out, "not published");
@@ -198,7 +201,7 @@ Deno.test("promote refuses a version never uploaded", () => {
 });
 
 Deno.test("promote puts the checkout's scripts, then latest LAST, exactly X.Y.Z, no-cache", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   run(f, "upload", "0.2.0", f.dist);
   Deno.writeTextFileSync(f.log, "");
@@ -213,7 +216,7 @@ Deno.test("promote puts the checkout's scripts, then latest LAST, exactly X.Y.Z,
 });
 
 Deno.test("a failed put stops the run before latest moves", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   run(f, "upload", "0.2.0", f.dist);
   f.env.FAIL_PUT = "install.ps1";
@@ -223,7 +226,7 @@ Deno.test("a failed put stops the run before latest moves", async () => {
 });
 
 Deno.test("invalid versions and arguments are refused with 2", () => {
-  const f = fixture();
+  using f = fixture();
   for (const args of [["upload", "0.2", f.dist], ["promote", "../x"], ["promote"], ["nope"]]) {
     assertEquals(run(f, ...args).code, 2, JSON.stringify(args));
   }
@@ -231,7 +234,7 @@ Deno.test("invalid versions and arguments are refused with 2", () => {
 });
 
 Deno.test("a failed put during upload resumes on re-run, keeping identical stored assets", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   f.env.FAIL_PUT = "v0.2.0/confeature-x86_64-pc-windows-msvc.exe";
   assertEquals(run(f, "upload", "0.2.0", f.dist).code !== 0, true);
@@ -246,7 +249,7 @@ Deno.test("a failed put during upload resumes on re-run, keeping identical store
 });
 
 Deno.test("a stored asset with different bytes is refused — the number is taken", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   Deno.mkdirSync(`${f.bucket}/v0.2.0`, { recursive: true });
   Deno.writeTextFileSync(
@@ -259,7 +262,7 @@ Deno.test("a stored asset with different bytes is refused — the number is take
 });
 
 Deno.test("a 5xx is never read as 'not published'", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   f.env.STATUS_5XX = "/v0.2.0/SHA256SUMS";
   const r = run(f, "upload", "0.2.0", f.dist);
@@ -269,7 +272,7 @@ Deno.test("a 5xx is never read as 'not published'", async () => {
 });
 
 Deno.test("promote never moves latest backwards; rollback does, and only backwards", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   run(f, "upload", "0.2.0", f.dist);
   await build(f, "b");
@@ -286,7 +289,7 @@ Deno.test("promote never moves latest backwards; rollback does, and only backwar
 });
 
 Deno.test("with no CLI_BASE_URL, the host comes from install.sh's BASE_URL", () => {
-  const f = fixture();
+  using f = fixture();
   delete f.env.CLI_BASE_URL;
   run(f, "promote", "9.9.9");
   const urls = Deno.readTextFileSync(`${f.dir}/curl.log`);
@@ -297,7 +300,7 @@ Deno.test("with no CLI_BASE_URL, the host comes from install.sh's BASE_URL", () 
 Deno.test("a relative dist dir still uploads when wrangler runs from another directory", async () => {
   // cli-v0.3.0's first run: the workflow passes \`dist\` relative to the
   // checkout, and the real wrangler runs under \`pnpm --dir\`, elsewhere.
-  const f = fixture();
+  using f = fixture();
   await build(f);
   const { code, stdout, stderr } = new Deno.Command("bash", {
     args: [SCRIPT, "upload", "1.2.3", "dist"],
@@ -312,7 +315,7 @@ Deno.test("a relative dist dir still uploads when wrangler runs from another dir
 });
 
 Deno.test("with R2 S3 credentials, every put goes through the S3 API, never wrangler", async () => {
-  const f = fixture();
+  using f = fixture();
   await build(f);
   const env = {
     ...f.env,
@@ -344,7 +347,7 @@ for (
   ] as const
 ) {
   Deno.test(`an S3 key id without ${what} is refused before aws or wrangler runs`, async () => {
-    const f = fixture();
+    using f = fixture();
     await build(f);
     const { code, stdout, stderr } = new Deno.Command("bash", {
       args: [SCRIPT, "upload", "1.2.3", f.dist],
