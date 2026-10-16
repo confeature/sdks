@@ -1665,15 +1665,30 @@ describe("14 a status function cannot run a job past a failed workflow-rules (#7
   ])("accepts %s", (_, cond) =>
     expect(pub(`  pack-x:\n    needs: setup\n    if: ${cond}\n`)).toEqual([]),
   );
-  it("conclude runs always() only while its script fails on the gate", () => {
-    const conclude = (run) =>
+  describe("conclude runs always() only while its first statements fail on the gate", () => {
+    const conclude = (run, env = "    env:\n      NEEDS: ${{ toJSON(needs) }}\n") =>
       pub(
-        `  conclude:\n    needs: [workflow-rules, setup]\n    if: always()\n    steps:\n      - run: ${JSON.stringify(run)}\n`,
+        `  conclude:\n    needs: [workflow-rules, setup]\n    if: always()\n${env}    steps:\n      - run: ${JSON.stringify(run)}\n`,
       );
-    expect(conclude('if (needs["workflow-rules"]?.result !== "success") process.exit(1)')).toEqual(
-      [],
-    );
-    expect(conclude("echo ok").join()).toMatch(/conclude: can run when/);
+    const PARSE = "const needs = JSON.parse(process.env.NEEDS);";
+    const GATE =
+      'if (needs["workflow-rules"]?.result !== "success") { console.error("::error::refused"); process.exit(1); }';
+    const ok = `node -e '\n  ${PARSE}\n  ${GATE}\n  report();\n'`;
+    it("accepts the real shape", () => expect(conclude(ok)).toEqual([]));
+    it.each([
+      ["a check that does not exit", ok.replace(" process.exit(1);", "")],
+      ["exit 0", ok.replace("process.exit(1)", "process.exit(0)")],
+      [
+        "the check after another statement",
+        ok.replace(`  ${PARSE}\n`, `  ${PARSE}\n  report();\n`),
+      ],
+      ["the comparison only mentioned", `node -e '\n  ${PARSE}\n  // ${GATE}\n'`],
+      ["another command first", `echo hi\n${ok}`],
+    ])("refuses %s", (_, run) => expect(conclude(run).join()).toMatch(/conclude: can run when/));
+    it("refuses a NEEDS that is not toJSON(needs)", () =>
+      expect(conclude(ok, "    env:\n      NEEDS: '{}'\n").join()).toMatch(
+        /conclude: can run when/,
+      ));
   });
   it.each(["if: false", "continue-on-error: true"])("refuses a gate step with %s", (kv) =>
     expect(

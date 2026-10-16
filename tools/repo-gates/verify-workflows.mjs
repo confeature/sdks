@@ -1465,13 +1465,22 @@ function reportsGateFailure(file, id, job) {
     file === PUBLISH_WORKFLOW &&
     id === "conclude" &&
     envName(job) === undefined &&
-    (job?.steps ?? []).some(
-      (s) =>
-        typeof s?.run === "string" &&
-        s.run.includes(`needs["${RELEASE_GATE_JOB}"]?.result !== "success"`),
-    )
+    /^\$\{\{\s*toJSON\(needs\)\s*\}\}$/.test(String(job?.env?.NEEDS)) &&
+    Array.isArray(job?.steps) &&
+    job.steps.length === 1 &&
+    job.steps[0]?.if === undefined &&
+    job.steps[0]?.["continue-on-error"] === undefined &&
+    CONCLUDE_GATE.test(String(job.steps[0]?.run))
   );
 }
+
+/**
+ * conclude's one step, as its first statements must read (round 5): parse
+ * NEEDS, then exit 1 unless workflow-rules succeeded. A `.includes()` of the
+ * comparison alone let a block mention it and carry on.
+ */
+const CONCLUDE_GATE =
+  /^node -e '\s*const needs = JSON\.parse\(process\.env\.NEEDS\);\s*if \(needs\["workflow-rules"\]\?\.result !== "success"\) \{ console\.error\("[^"\\]*"\); process\.exit\(1\); \}\n/;
 
 const asList = (n) => (Array.isArray(n) ? n : n === undefined ? [] : [n]);
 
