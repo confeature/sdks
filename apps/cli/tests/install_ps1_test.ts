@@ -131,3 +131,54 @@ Deno.test({
     assertEquals(installed(h), false);
   },
 });
+
+// The verify workflow builds the installer's arguments itself. Run ITS lines,
+// not a copy: an array splat (`@("-Version", "X.Y.Z")`) binds by position and
+// passed "-Version" as the version, which failed cli-v0.3.2's pinned verify on
+// the Windows runner (#898) — a path no release had exercised before.
+const VERIFY = new URL("../../../.github/workflows/cli-windows-install-verify.yml", import.meta.url)
+  .pathname;
+const ARG_BLOCKS = [
+  ...Deno.readTextFileSync(VERIFY).matchAll(
+    /^[ \t]*\$installArgs = [\s\S]*?(?=^.*& \.\/apps\/cli\/install\.ps1 @installArgs)/gm,
+  ),
+].map(([block]) => block.split("\n").map((l) => l.trim()).join("\n"));
+
+Deno.test("the verify workflow builds the installer arguments in both install steps", () => {
+  assertEquals(ARG_BLOCKS.length, 2);
+});
+
+for (const [i, block] of ARG_BLOCKS.entries()) {
+  for (const pinned of [true, false]) {
+    Deno.test({
+      name: `verify workflow install step ${
+        i + 1
+      } (pinned: ${pinned}) installs the version it names${skip}`,
+      ignore: !hasPwsh,
+      async fn() {
+        // `latest` names a version that is NOT served: a pinned run that
+        // ignored its pin, or an unpinned one handed a pin, cannot install.
+        const h = await host(pinned ? "0.9.9" : "0.2.0");
+        const { code, stdout, stderr } = new Deno.Command("pwsh", {
+          args: [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `${STUB}\n${block}\n& '${SCRIPT}' @installArgs`,
+          ],
+          env: {
+            HOST_DIR: h.hostDir,
+            LOCALAPPDATA: h.appData,
+            PROCESSOR_ARCHITECTURE: "AMD64",
+            PINNED: String(pinned),
+            VERSION: pinned ? "0.2.0" : "",
+          },
+        }).outputSync();
+        const out = new TextDecoder().decode(stdout) + new TextDecoder().decode(stderr);
+        assertEquals(code, 0, out);
+        assertStringIncludes(out, "checksum verified");
+        assertEquals(installed(h), true);
+      },
+    });
+  }
+}

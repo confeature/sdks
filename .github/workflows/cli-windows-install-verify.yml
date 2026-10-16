@@ -110,8 +110,10 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           # Run the WORKING-TREE installer against the real host, pinned or not.
           # *>&1 merges Write-Host (stream 6) so we can assert on the output.
-          $installArgs = @()
-          if ($env:PINNED -eq "true") { $installArgs = @("-Version", $env:VERSION) }
+          # A hashtable splat binds by name; an array splat binds by position,
+          # so @("-Version", "X.Y.Z") passed "-Version" AS the version (#898).
+          $installArgs = @{}
+          if ($env:PINNED -eq "true") { $installArgs = @{ Version = $env:VERSION } }
           $log = & ./apps/cli/install.ps1 @installArgs *>&1 | Out-String
           Write-Host $log
           if ($log -notmatch 'checksum verified') {
@@ -155,8 +157,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           $installDir = Join-Path $env:LOCALAPPDATA "Programs\confeature"
-          $installArgs = @()
-          if ($env:PINNED -eq "true") { $installArgs = @("-Version", $env:VERSION) }
+          # A hashtable splat binds by name; an array splat binds by position,
+          # so @("-Version", "X.Y.Z") passed "-Version" AS the version (#898).
+          $installArgs = @{}
+          if ($env:PINNED -eq "true") { $installArgs = @{ Version = $env:VERSION } }
           & ./apps/cli/install.ps1 @installArgs *>&1 | Out-String | Write-Host
           $user = [Environment]::GetEnvironmentVariable("Path", "User")
           $hits = @($user -split ';' | Where-Object { $_.TrimEnd('\') -eq $installDir.TrimEnd('\') })
