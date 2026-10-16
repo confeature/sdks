@@ -682,18 +682,34 @@ exit 0`;
         "gh release view cli-v1.2.3",
         "gh release create cli-v1.2.3 --title Confeature CLI 1.2.3 --generate-notes --verify-tag",
         "gh release view cli-v1.2.3 --json assets --jq .assets[].name",
-        "gh release upload cli-v1.2.3 dist/confeature-aarch64 dist/confeature-x86_64 dist/SHA256SUMS",
+        "gh release upload cli-v1.2.3 dist/confeature-aarch64 dist/confeature-x86_64",
+        "gh release upload cli-v1.2.3 dist/SHA256SUMS",
       ]);
       expect(remote).toEqual(ALL);
     });
     it("a partial upload: checks what is there, uploads only the missing assets", () => {
       const { r, argv, remote } = gh({ remote: { "confeature-x86_64": "b1" } });
       expect(r.status, r.stderr).toBe(0);
-      expect(argv.at(-1)).toBe(
-        "gh release upload cli-v1.2.3 dist/confeature-aarch64 dist/SHA256SUMS",
-      );
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([
+        "gh release upload cli-v1.2.3 dist/confeature-aarch64",
+        "gh release upload cli-v1.2.3 dist/SHA256SUMS",
+      ]);
       expect(argv).toContain("gh release download cli-v1.2.3 --dir publish-tmp/gh-assets");
       expect(remote).toEqual(ALL);
+    });
+    it("uploads SHA256SUMS alone when only it is missing", () => {
+      const { r, argv } = gh({ remote: BIN });
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([
+        "gh release upload cli-v1.2.3 dist/SHA256SUMS",
+      ]);
+    });
+    it("uploads the missing binary alone when SHA256SUMS is already there", () => {
+      const { r, argv } = gh({ remote: { "confeature-x86_64": "b1", SHA256SUMS: "SUMS" } });
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv.filter((a) => / upload /.test(a))).toEqual([
+        "gh release upload cli-v1.2.3 dist/confeature-aarch64",
+      ]);
     });
     it("replaces nothing on a release that already carries exactly this build", () => {
       const { r, argv } = gh({ remote: { ...BIN, SHA256SUMS: "SUMS" } });

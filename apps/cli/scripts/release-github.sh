@@ -19,7 +19,8 @@
 #   3. the release's assets are compared by name with the binaries and
 #      SHA256SUMS: an asset it should not have fails the run; every asset it
 #      already has is downloaded (to publish-tmp/) and must match SHA256SUMS
-#      byte for byte; only the missing ones are uploaded. Never --clobber, so a
+#      byte for byte; only the missing ones are uploaded, the binaries first,
+#      then SHA256SUMS in a call of its own. Never --clobber, so a
 #      re-run completes a partial upload and never replaces the GitHub copy
 #      with bytes other than those R2 serves.
 #
@@ -76,16 +77,20 @@ if [ -s publish-tmp/gh-have ]; then
     fi
   done < publish-tmp/gh-have
 fi
-# The binaries first and SHA256SUMS last, so a listing that has the manifest
-# has the binaries it names.
-missing=()
+# The missing binaries in one upload, then SHA256SUMS alone, only if missing
+# (round 11): a listing that has the manifest has every binary it names.
+binaries_missing=()
 sums_missing=no
 while read -r name; do
-  if [ "$name" = SHA256SUMS ]; then sums_missing=yes; else missing+=("$dist/$name"); fi
+  if [ "$name" = SHA256SUMS ]; then sums_missing=yes; else binaries_missing+=("$dist/$name"); fi
 done < <(comm -13 publish-tmp/gh-have publish-tmp/gh-want)
-[ "$sums_missing" = no ] || missing+=("$dist/SHA256SUMS")
-if [ "${#missing[@]}" -eq 0 ]; then
+if [ "${#binaries_missing[@]}" -eq 0 ] && [ "$sums_missing" = no ]; then
   echo "the GitHub release already carries this build's $(wc -l < publish-tmp/gh-want | tr -d ' ') assets"
   exit 0
 fi
-gh release upload "$tag" "${missing[@]}"
+if [ "${#binaries_missing[@]}" -gt 0 ]; then
+  gh release upload "$tag" "${binaries_missing[@]}"
+fi
+if [ "$sums_missing" = yes ]; then
+  gh release upload "$tag" "$dist/SHA256SUMS"
+fi
