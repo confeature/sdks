@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   ENVIRONMENT_COMMANDS,
   MANIFEST,
+  commandName,
   SETTINGS,
   WORKFLOWS,
   findings,
@@ -213,8 +214,8 @@ describe("ENVIRONMENT_COMMANDS lists exactly what each job runs", () => {
         for (const s of job.steps ?? [])
           if (typeof s.run === "string")
             for (const c of lexStrict(s.run).commands) {
-              const w = c.words.find((x) => !["if", "then", "else", "fi"].includes(x.raw));
-              if (w !== undefined) used.get(env).add(w.text);
+              const name = commandName(c);
+              if (name !== undefined) used.get(env).add(name);
             }
       }
     for (const [env, cmds] of Object.entries(ENVIRONMENT_COMMANDS))

@@ -667,15 +667,28 @@ function credentialProblem(cmd, redirects, ctx) {
 }
 
 /** The grammar keywords a credentialed run block may use: a plain if, nothing else. */
-const KEYWORDS = new Set(["if", "then", "else", "fi"]);
+export const KEYWORDS = new Set(["if", "then", "else", "fi"]);
+/** Every reserved word a pack block's commands can start with (rule 15 reads those too). */
+const SHELL_KEYWORDS = new Set([...KEYWORDS, "elif", "do", "done", "while", "until", "!"]);
+
+/**
+ * Where a lexed command's program starts: after its leading reserved words.
+ * `.raw` on purpose: bash recognises a reserved word only unquoted, and a
+ * quoted `'if'` is then judged as a command name (by .text). The one home of
+ * this rule; commandName is its usual use.
+ */
+export function commandStart(c, keywords = KEYWORDS) {
+  let k = 0;
+  while (k < c.words.length && keywords.has(c.words[k].raw)) k += 1;
+  return k;
+}
+/** The program a lexed command runs (its first word after reserved words), or undefined. */
+export const commandName = (c, keywords = KEYWORDS) => c.words[commandStart(c, keywords)]?.text;
 
 /** Why one lexed command may not run in a credentialed job, or null. */
-function commandProblem({ words, redirects }, exceptions, ctx) {
-  let k = 0;
-  // `.raw` on purpose, the one place: bash recognises a reserved word only
-  // unquoted, and a quoted `'if'` is then judged as a command name (by .text).
-  while (k < words.length && KEYWORDS.has(words[k].raw)) k += 1;
-  const cmd = words.slice(k);
+function commandProblem(c, exceptions, ctx) {
+  const { words, redirects } = c;
+  const cmd = words.slice(commandStart(c));
   for (const r of redirects) {
     const tgt = r.word;
     if (tgt.hasExpansion || tgt.text.split("/").includes(".."))
@@ -798,10 +811,8 @@ export function assignedNames(run) {
   const out = new Set();
   const lexed = lexStrict(run);
   if (lexed.problems.length === 0) {
-    const KW = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!"]);
     for (const c of lexed.commands) {
-      let k = 0;
-      while (k < c.words.length && KW.has(c.words[k].raw)) k += 1;
+      let k = commandStart(c, SHELL_KEYWORDS);
       for (; k < c.words.length; k += 1) {
         const m = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(c.words[k].raw);
         if (m === null) break;
@@ -1150,9 +1161,7 @@ function gitConfigRules(file, jobId, job, doc, credentialed, add) {
   if (!credentialed) return;
   for (const s of steps) {
     if (typeof s?.run !== "string") continue;
-    const runsGit = lexStrict(s.run).commands.some(
-      (c) => c.words.find((w) => !["if", "then", "else", "fi"].includes(w.raw))?.text === "git",
-    );
+    const runsGit = lexStrict(s.run).commands.some((c) => commandName(c) === "git");
     if (!runsGit) continue;
     for (const [k, v] of Object.entries(GIT_ISOLATION))
       if (String(s?.env?.[k]) !== v)
