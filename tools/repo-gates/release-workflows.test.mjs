@@ -313,3 +313,88 @@ describe("the gate itself runs rule 16", () => {
     }
   });
 });
+
+describe("the values an exception trusts are pinned (round 5, MED)", () => {
+  const stepWith = (w, file, job, pred) => w[file].jobs[job].steps.find(pred);
+  it.each([
+    [
+      "N2 a step-level UNIT_PATH on the cargo step",
+      (w) => {
+        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+        s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
+      },
+      /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
+    ],
+    [
+      "N2b a literal job-level UNIT_PATH",
+      (w) => {
+        w[P].jobs["publish-crates"].env.UNIT_PATH = "publish-tmp/evil";
+      },
+      /UNIT_PATH is publish-tmp\/evil, not its pinned expression/,
+    ],
+    [
+      "H4 UNIT_PATH to publish-tmp plus the token in a forged crate",
+      (w) => {
+        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+        s.env = { ...s.env, UNIT_PATH: "publish-tmp/evil" };
+        s.run =
+          "printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\" > publish-tmp/evil/src/lib.rs\n" + s.run;
+      },
+      /not its pinned expression|credential CARGO_REGISTRY_TOKEN/,
+    ],
+    [
+      "T1 cli upload: a step-level TAG",
+      (w) => {
+        const s = stepWith(
+          w,
+          C,
+          "upload",
+          (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
+        );
+        s.env = { ...s.env, TAG: "cli-v0.0.1" };
+      },
+      /TAG is cli-v0\.0\.1, not its pinned expression/,
+    ],
+    [
+      "T2 cli upload: a job-level TAG",
+      (w) => {
+        w[C].jobs.upload.env = { ...(w[C].jobs.upload.env ?? {}), TAG: "cli-v0.0.1" };
+      },
+      /TAG is cli-v0\.0\.1, not its pinned expression/,
+    ],
+    [
+      "N10 a TAG from the event's commit message",
+      (w) => {
+        const s = stepWith(
+          w,
+          C,
+          "upload",
+          (x) => typeof x.run === "string" && x.run.includes("publish-r2"),
+        );
+        s.env = { ...s.env, TAG: "${{ github.event.head_commit.message }}" };
+      },
+      /TAG is \$\{\{ github\.event\.head_commit\.message \}\}, not its pinned expression/,
+    ],
+    [
+      "a step that redefines its job's value with the same expression",
+      (w) => {
+        const s = stepWith(w, P, "publish-crates", (x) => x.name === "Upload");
+        s.env = { ...s.env, UNIT_PATH: "${{ needs.setup.outputs.path }}" };
+      },
+      /redefines the job's UNIT_PATH/,
+    ],
+    [
+      "an artifact name from another output",
+      (w) => {
+        w[P].jobs["publish-npm"].env.ARTIFACT = "${{ needs.pack-npm.outputs.sha256 }}";
+      },
+      /ARTIFACT is .*, not its pinned expression/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n"),
+    ).toBe(true);
+  });
+});

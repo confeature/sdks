@@ -44,16 +44,16 @@ const HEAD = `on:
 env:
   NODE_VERSION: "22.23.3"
   NPM_VERSION: "11.20.0"
-  # What the fixtures' run blocks read (rule 15), as the real jobs define it.
-  ARTIFACT: x.tgz
-  EXPECTED_SHA256: "0"
-  EXPECTED_SUMS: "0"
+  # What the fixtures' run blocks read (rule 15), each pinned value with its
+  # pinned expression (PINNED_ENV), as the real jobs define it.
+  ARTIFACT: \${{ needs.pack-npm.outputs.file }}
+  EXPECTED_SHA256: \${{ needs.pack-npm.outputs.sha256 }}
+  EXPECTED_SUMS: \${{ needs.pack-npm.outputs.sums }}
   DEPLOY_KEY: k
-  RELEASE_TAG: apps/sdk-go/v1.0.0
-  MIRROR_TAG: v1.0.0
-  UNIT_COORDINATES: x
-  UNIT_VERSION: 1.0.0
-  UNIT_PATH: apps/x
+  RELEASE_TAG: \${{ needs.setup.outputs.releaseTag }}
+  MIRROR_TAG: \${{ needs.setup.outputs.mirrorTag }}
+  UNIT_COORDINATES: \${{ needs.setup.outputs.coordinates }}
+  UNIT_PATH: \${{ needs.setup.outputs.path }}
   RUST_VERSION: "1.88.0"
   NUGET_API_KEY: k
 `;
@@ -552,7 +552,7 @@ const CLI = `on:
   push:
     tags: ["cli-v*"]
 env:
-  TAG: cli-v1.0.0
+  TAG: \${{ github.ref_name }}
 jobs:
   upload:
     runs-on: ubuntu-latest
@@ -1047,7 +1047,7 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
     ],
     [
       "the Go proxy warm-up",
-      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v\${UNIT_VERSION}.info"`,
+      `curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list"`,
     ],
     [
       "the NuGet upload",
@@ -1506,7 +1506,7 @@ describe("14 every release job waits on workflow-rules (#794 review, round 3)", 
 
 describe("15 a run block reads only variables something defines (#794 review, round 4)", () => {
   it("would have caught publish-crates and publish-pubdev reading an undefined UNIT_PATH", () => {
-    const head = HEAD.replace("  UNIT_PATH: apps/x\n", "");
+    const head = HEAD.replace("  UNIT_PATH: ${{ needs.setup.outputs.path }}\n", "");
     const crates = swap("  publish-npm:\n", "  publish-crates:\n").replace(
       PUBLISH_STEP,
       '      - run: cargo "+${RUST_VERSION}" publish --no-verify --manifest-path "${UNIT_PATH}/Cargo.toml"',
@@ -1517,12 +1517,13 @@ describe("15 a run block reads only variables something defines (#794 review, ro
     );
   });
   it("accepts a variable the step, the job or the workflow defines", () => {
-    const head = HEAD.replace("  UNIT_PATH: apps/x\n", "");
-    const step = '      - env:\n          UNIT_PATH: apps/x\n        run: echo "$UNIT_PATH"';
+    const head = HEAD.replace("  UNIT_PATH: ${{ needs.setup.outputs.path }}\n", "");
+    const step =
+      '      - env:\n          UNIT_PATH: \${{ needs.setup.outputs.path }}\n        run: echo "$UNIT_PATH"';
     expect(run(swap(PUBLISH_STEP, step), { head })).toEqual([]);
     const job = swap(
       "    environment: sdk-publish-npm\n",
-      "    environment: sdk-publish-npm\n    env:\n      UNIT_PATH: apps/x\n",
+      "    environment: sdk-publish-npm\n    env:\n      UNIT_PATH: \${{ needs.setup.outputs.path }}\n",
     ).replace(PUBLISH_STEP, '      - run: echo "$UNIT_PATH"');
     expect(run(job, { head })).toEqual([]);
   });

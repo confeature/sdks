@@ -916,6 +916,27 @@ export function requiresTagPush(cond) {
   );
 }
 
+/**
+ * The values the exceptions and the credentialed blocks trust, each pinned to
+ * the one expression that may set it (round 5): `UNIT_PATH: publish-tmp/evil`
+ * at step level turned cargo's --manifest-path to a crate of the job's own.
+ */
+const EXPR = (e) => new RegExp(`^\\$\\{\\{\\s*${e}\\s*\\}\\}$`);
+export const PINNED_ENV = {
+  UNIT_PATH: EXPR("needs\\.setup\\.outputs\\.path"),
+  UNIT_VERSION: EXPR("needs\\.setup\\.outputs\\.version"),
+  UNIT_COORDINATES: EXPR("needs\\.setup\\.outputs\\.coordinates"),
+  UNIT_NAME: EXPR("needs\\.setup\\.outputs\\.name"),
+  RELEASE_TAG: EXPR("needs\\.setup\\.outputs\\.releaseTag"),
+  MIRROR_TAG: EXPR("needs\\.setup\\.outputs\\.mirrorTag"),
+  TAG: EXPR("github\\.ref_name"),
+  ARTIFACT: EXPR("needs\\.pack-[a-z]+\\.outputs\\.file"),
+  EXPECTED_SHA256: EXPR("needs\\.pack-[a-z]+\\.outputs\\.sha256"),
+  EXPECTED_SUMS: EXPR("needs\\.pack-[a-z]+\\.outputs\\.sums"),
+  SPLIT_SHA: EXPR("needs\\.pack-[a-z]+\\.outputs\\.split"),
+  EXPECTED: EXPR("needs\\.release\\.outputs\\.sums-digest"),
+};
+
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
 function credentialedJobRules(file, jobId, job, doc, add) {
   if (job?.container !== undefined || job?.services !== undefined)
@@ -960,7 +981,18 @@ function credentialedJobRules(file, jobId, job, doc, add) {
     for (const [k, v] of Object.entries(map ?? {})) {
       const why = envProblem(k, String(v));
       if (why !== null) add(file, jobId, `a credentialed job's env: ${why}`);
+      if (Object.hasOwn(PINNED_ENV, k) && !PINNED_ENV[k].test(String(v)))
+        add(
+          file,
+          jobId,
+          `a credentialed job's env: ${k} is ${String(v)}, not its pinned expression`,
+        );
     }
+  // One scope per name: a step never redefines what its job sets.
+  for (const s of steps)
+    for (const k of Object.keys(s?.env ?? {}))
+      if (Object.hasOwn(job?.env ?? {}, k))
+        add(file, jobId, `a credentialed job's step ${s?.name ?? "?"} redefines the job's ${k}`);
   if (RUNNER_FILES.test(JSON.stringify(job ?? null)))
     add(
       file,
