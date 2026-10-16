@@ -1421,3 +1421,36 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
       ),
     ).toContainEqual("ACTION_SURFACE records a credentialed job the workflow does not have"));
 });
+
+describe("a step output is written by the command that redirects it (round 8, F6)", () => {
+  it.each([
+    ['echo "sha256=$(sha256sum x | cut -d" " -f1)" >> "$GITHUB_OUTPUT"', true],
+    ['{ echo "sums<<SUMS"; sha256sum -- *; echo "SUMS"; } >> "$GITHUB_OUTPUT"', true],
+    ['echo "file=${file}" >> "$GITHUB_OUTPUT"', true],
+    ['echo "sha256=" >/dev/null; printf "%s\\n" x >> "$GITHUB_OUTPUT"', false],
+    ['echo "sha256=" && echo x >> "$GITHUB_OUTPUT"', false],
+    ['# echo "sha256=x" >> "$GITHUB_OUTPUT"', false],
+    ['echo "x sha256=y" >> "$GITHUB_OUTPUT"', false],
+    ['{ echo x; echo "sha256=y"; } >> "$GITHUB_OUTPUT"', false],
+    ['echo "sha256=y" >> "$GITHUB_STEP_SUMMARY"', false],
+  ])("%s writes sha256: %s", async (line, want) => {
+    const { writesOutput } = await import("./verify-workflows.mjs");
+    expect(
+      writesOutput(
+        line,
+        line.includes("sums<<") ? "sums" : line.includes("file=") ? "file" : "sha256",
+      ),
+    ).toBe(want);
+  });
+  it("D1: a decoy beside the real write is refused in the real workflow", () => {
+    const w = structuredClone(BASE);
+    const s = w[P].jobs["pack-npm"].steps.find((x) => x.id === "digest");
+    s.run = `${s.run
+      .split("\n")
+      .filter((l) => !/sha256=/.test(l))
+      .join("\n")}\necho "sha256=" >/dev/null; printf "%s\\n" x >> "$GITHUB_OUTPUT"\n`;
+    expect(referenceFindings(w, SCRIPTS, settings).map((f) => f.why)).toContainEqual(
+      expect.stringMatching(/step digest writes no sha256= to \$GITHUB_OUTPUT/),
+    );
+  });
+});

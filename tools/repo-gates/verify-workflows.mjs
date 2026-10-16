@@ -2072,6 +2072,63 @@ export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
 const SCRIPT_OUTPUT_KEYS = { "tools/sdk-pack/resolve-publish.mjs": RESOLVER_OUTPUT_KEYS };
 
 /**
+ * Split shell text at its top-level `;`, `&&` and `||` (outside quotes and
+ * `$( )`), keeping the pieces. Enough for one line of a pack job's block.
+ */
+function topLevelCommands(text) {
+  const out = [];
+  let cur = "";
+  let q = null;
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (q !== null) {
+      if (c === q) q = null;
+      cur += c;
+    } else if (c === "'" || c === '"') {
+      q = c;
+      cur += c;
+    } else if (text.startsWith("$(", i)) {
+      depth += 1;
+      cur += "$(";
+      i += 1;
+    } else if (c === ")" && depth > 0) {
+      depth -= 1;
+      cur += c;
+    } else if (depth === 0 && (c === ";" || text.startsWith("&&", i) || text.startsWith("||", i))) {
+      out.push(cur.trim());
+      cur = "";
+      if (c !== ";") i += 1;
+    } else cur += c;
+  }
+  out.push(cur.trim());
+  return out.filter((x) => x !== "");
+}
+
+/**
+ * Whether one line writes `<name>` to $GITHUB_OUTPUT (round 8): the command
+ * that redirects `>> "$GITHUB_OUTPUT"` (or the first command of the `{ … }`
+ * group that does) is an echo or printf whose first argument starts with
+ * `<name>=` or `<name><<`. A decoy `echo "name=" >/dev/null; printf x >>
+ * "$GITHUB_OUTPUT"` or a comment writes nothing.
+ */
+export function writesOutput(line, name) {
+  const m = /^(.*?)>>\s*"?\$\{?GITHUB_OUTPUT\}?"?\s*$/.exec(line.trim());
+  if (m === null || m[1].trimStart().startsWith("#")) return false;
+  const cmds = topLevelCommands(m[1]);
+  let cmd = cmds.at(-1) ?? "";
+  if (cmd.endsWith("}") && cmd.startsWith("{")) cmd = topLevelCommands(cmd.slice(1, -1))[0] ?? "";
+  else if (cmd.endsWith("}")) {
+    const open = m[1].lastIndexOf("{");
+    cmd =
+      open === -1 ? "" : (topLevelCommands(m[1].slice(open + 1, m[1].lastIndexOf("}")))[0] ?? "");
+  }
+  const w = /^(echo|printf)\s+(['"]?)(.*)$/.exec(cmd);
+  if (w === null) return false;
+  return w[3].startsWith(`${name}=`) || w[3].startsWith(`${name}<<`);
+}
+
+/**
  * Why `steps.<id>.outputs.<name>` names nothing the step writes, or null
  * (rule 16, round 6): a run step must write `<name>=` (or `<name><<`) to
  * $GITHUB_OUTPUT, or run a recorded script that emits it; an action step
@@ -2091,18 +2148,7 @@ function stepOutputProblem(s, name, scriptOutputs) {
     return (scriptOutputs[script] ?? []).includes(name)
       ? null
       : `${script} emits no output ${name}`;
-  // The write itself: a line that redirects to $GITHUB_OUTPUT and, before
-  // the redirection, writes `<name>=` or `<name><<` (round 7: a comment or a
-  // line that only mentions the name passed a text search).
-  const writes = run
-    .split("\n")
-    .map((l) => /^(.*?)>>\s*"?\$\{?GITHUB_OUTPUT\}?"?\s*$/.exec(l.trim()))
-    .some(
-      (m) =>
-        m !== null &&
-        !m[1].trimStart().startsWith("#") &&
-        new RegExp(`(?:^|[\\s"'{;])${name}(?:=|<<)`).test(m[1]),
-    );
+  const writes = run.split("\n").some((l) => writesOutput(l, name));
   return writes ? null : `step ${s?.id} writes no ${name}= to $GITHUB_OUTPUT`;
 }
 
