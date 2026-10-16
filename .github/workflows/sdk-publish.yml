@@ -1438,8 +1438,10 @@ jobs:
 
       # The live metadata is read with a query string no cache has seen, so it
       # is R2's object, never an edge copy (R2 ignores the query). A 404 is a
-      # first release; any other answer stops the run, since guessing "first
-      # release" would publish metadata that lists no earlier version.
+      # first release, recorded as <aid>.absent; any other answer stops the
+      # run, since guessing "first release" would publish metadata that lists
+      # no earlier version. check:maven-release refuses an artifact with
+      # neither <aid>.xml nor <aid>.absent, so a skipped fetch fails too.
       # `-PenableAndroid=true` turns on kotlin-mp's opt-in Android target; the
       # Java and Android builds have no such property and ignore it.
       - name: Pack the release artifact
@@ -1462,7 +1464,7 @@ jobs:
             code="$(curl --proto '=https' --tlsv1.2 -sS -o "$live/$aid.xml" -w '%{http_code}' "$url?pack=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" || echo 000)"
             case "$code" in
               200) cp "$live/$aid.xml" "$dir/maven-metadata.xml" && merged=1 ;;
-              404) rm -f "$live/$aid.xml" ;;
+              404) rm -f "$live/$aid.xml" && : > "$live/$aid.absent" ;;
               *) echo "::error::cannot read $url (HTTP $code): refusing to guess whether $aid has releases"; exit 1 ;;
             esac
           done

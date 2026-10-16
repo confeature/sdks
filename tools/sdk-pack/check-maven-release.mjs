@@ -5,12 +5,13 @@
  * Whether a Maven release directory is exactly the release of one unit, and
  * may be uploaded to https://maven.confeature.io as it is (#902).
  *
- *   node tools/sdk-pack/check-maven-release.mjs <repo-dir> <group:artifactId> <version> [<live-dir>]
+ *   node tools/sdk-pack/check-maven-release.mjs <repo-dir> <group:artifactId> <version> <live-dir>
  *
  * `<repo-dir>` is what the unit's `publishAllPublicationsToReleaseRepository`
- * wrote (a Maven layout); `<live-dir>` holds `<artifactId>.xml`, the
- * `maven-metadata.xml` each artifact had on the live repository before the
- * build, when it had one. sdk-publish.yml's Maven pack job runs this on the
+ * wrote (a Maven layout); `<live-dir>` holds the live repository's answer for
+ * each artifact before the build: `<artifactId>.xml`, its `maven-metadata.xml`
+ * (a 200), or `<artifactId>.absent` (a 404, a first release). An artifact with
+ * neither is refused: the live state is never assumed. sdk-publish.yml's Maven pack job runs this on the
  * directory its publish job uploads, file for file, so it refuses, before any
  * credential exists, a release that:
  *   - carries a file outside the unit's group, or an artifact id that is
@@ -27,7 +28,9 @@
  *     `@` or an `<email>` anywhere: no address is ever published;
  *   - has metadata that does not list the version, names another artifact,
  *     drops a version the live metadata lists (it would vanish from the
- *     listing), or a version that is already live.
+ *     listing), or a version that is already live;
+ *   - has an artifact the live repository gave no answer for, or whose live
+ *     answer is not that artifact's metadata listing a version.
  *
  * There is no registry to refuse a bad upload here: R2 stores what it is
  * given. So every rule a registry would enforce is enforced before the upload.
@@ -99,9 +102,19 @@ function pomProblems(where, pomText, group, aid, version) {
   return problems;
 }
 
+/** Whether `xml` is a maven-metadata.xml document naming exactly `group:aid`. */
+const isMetadataOf = (xml, group, aid) =>
+  /<metadata[\s>]/.test(xml) &&
+  /<groupId>([^<]*)</.exec(xml)?.[1] === group &&
+  /<artifactId>([^<]*)</.exec(xml)?.[1] === aid;
+
 /**
  * The problems with a release tree (relative path → content) of the unit at
- * `coordinates` and `version`, given the live metadata per artifact id.
+ * `coordinates` and `version`, given the live repository's answer per artifact
+ * id: its maven-metadata.xml, or null for a 404 (a first release). An artifact
+ * with NO answer is refused, never read as a 404: a failed or skipped fetch
+ * would otherwise publish metadata that drops every earlier version, and so
+ * is a 200 whose body is not that artifact's metadata (#794 review).
  * Empty when it may be uploaded.
  */
 export function releaseProblems(tree, coordinates, version, live = {}) {
@@ -183,8 +196,21 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
       problems.push(`${metaPath}: names ${named}, not ${group}:${aid}`);
     const listed = versionsOf(meta);
     if (!listed.includes(version)) problems.push(`${metaPath}: does not list ${version}`);
-    if (aid in live) {
-      const was = versionsOf(text(live[aid]));
+    if (!Object.hasOwn(live, aid)) {
+      problems.push(
+        `${aid}: no answer from the live repository (neither ${aid}.xml nor ${aid}.absent): refusing to guess whether it has releases`,
+      );
+      continue;
+    }
+    if (live[aid] !== null) {
+      const liveXml = text(live[aid]);
+      const was = versionsOf(liveXml);
+      if (!isMetadataOf(liveXml, group, aid) || was.length === 0) {
+        problems.push(
+          `${aid}: the live maven-metadata.xml is not metadata of ${group}:${aid} listing a version: refusing to guess`,
+        );
+        continue;
+      }
       if (was.includes(version))
         problems.push(`${dir}: ${version} is already published (live ${METADATA} lists it)`);
       for (const v of was.filter((x) => !listed.includes(x)))
@@ -213,9 +239,9 @@ function readTree(dir) {
 
 function main(argv) {
   const [repo, coordinates, version, liveDir] = argv;
-  if (!repo || !version || !/^[^:]+:[^:]+$/.test(coordinates ?? "")) {
+  if (!repo || !version || !liveDir || !/^[^:]+:[^:]+$/.test(coordinates ?? "")) {
     console.error(
-      "usage: check-maven-release.mjs <repo-dir> <group:artifactId> <version> [<live-dir>]",
+      "usage: check-maven-release.mjs <repo-dir> <group:artifactId> <version> <live-dir>",
     );
     return 2;
   }
@@ -223,9 +249,10 @@ function main(argv) {
   const live = {};
   try {
     tree = readTree(repo);
-    if (liveDir)
-      for (const f of readdirSync(liveDir).filter((n) => n.endsWith(".xml")))
-        live[f.slice(0, -4)] = readFileSync(join(liveDir, f), "utf8");
+    for (const f of readdirSync(liveDir)) {
+      if (f.endsWith(".xml")) live[f.slice(0, -4)] = readFileSync(join(liveDir, f), "utf8");
+      else if (f.endsWith(".absent")) live[f.slice(0, -7)] = null;
+    }
   } catch (e) {
     console.error(`check-maven-release: cannot read the release (${e?.message ?? e})`);
     return 2;

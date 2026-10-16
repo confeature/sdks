@@ -91,7 +91,16 @@ function release(aids = [ROOT_ID], versions = [VERSION]) {
   return withSums(files);
 }
 
-const check = (tree, live = {}) => releaseProblems(tree, COORDINATES, VERSION, live);
+/** Every artifact id of a tree, answered "absent" (a 404) by the live repository. */
+const absent = (tree) =>
+  Object.fromEntries(
+    Object.keys(tree)
+      .filter((p) => p.startsWith("io/confeature/"))
+      .map((p) => [p.split("/")[2], null]),
+  );
+/** The tree's artifacts, each a first release unless `live` answers for it. */
+const check = (tree, live = {}) =>
+  releaseProblems(tree, COORDINATES, VERSION, { ...absent(tree), ...live });
 const P = `io/confeature/${ROOT_ID}/${VERSION}/${ROOT_ID}-${VERSION}`;
 
 describe("releaseProblems", () => {
@@ -324,6 +333,32 @@ describe("releaseProblems", () => {
     ]);
   });
 
+  it("refuses an artifact the live repository gave no answer for: never guessed a first release", () => {
+    // A fetch that failed, or a step that skipped one, leaves no file: that is
+    // not a 404, and reading it as one publishes metadata that drops every
+    // earlier version (#794 review).
+    const t = release([ROOT_ID, `${ROOT_ID}-jvm`]);
+    expect(releaseProblems(t, COORDINATES, VERSION, { [ROOT_ID]: null })).toEqual([
+      `${ROOT_ID}-jvm: no answer from the live repository (neither ${ROOT_ID}-jvm.xml nor ${ROOT_ID}-jvm.absent): refusing to guess whether it has releases`,
+    ]);
+    expect(releaseProblems(t, COORDINATES, VERSION)).toHaveLength(2);
+  });
+
+  it.each([
+    ["an empty body", ""],
+    ["an error page", "<html><body>502 Bad Gateway</body></html>"],
+    ["another artifact's metadata", metadata("other", ["0.1.0"])],
+    [
+      "metadata listing no version",
+      metadata(ROOT_ID, []).replace(/<version>[^<]*<\/version>/g, ""),
+    ],
+  ])("refuses a live answer that is %s: a 200 is not proof of metadata", (_, body) => {
+    const problems = check(release([ROOT_ID], ["0.1.0", VERSION]), { [ROOT_ID]: body });
+    expect(problems).toContain(
+      `${ROOT_ID}: the live maven-metadata.xml is not metadata of ${COORDINATES} listing a version: refusing to guess`,
+    );
+  });
+
   it("refuses live metadata for an artifact the release does not carry", () => {
     expect(check(release(), { [`${ROOT_ID}-jvm`]: metadata(`${ROOT_ID}-jvm`, ["0.1.0"]) })).toEqual(
       [`${ROOT_ID}-jvm: live metadata for an artifact this release does not publish`],
@@ -342,29 +377,44 @@ describe("the CLI", () => {
   };
   const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 
-  it("exits 0 on a complete release, with or without live metadata", () => {
+  it("exits 0 on a complete release, its live answer a 404 marker or the live metadata", () => {
+    const first = run(tree(release()), COORDINATES, VERSION, tree({ [`${ROOT_ID}.absent`]: "" }));
+    expect(first.status, first.stderr).toBe(0);
     const repo = tree(release([ROOT_ID], ["0.1.0", VERSION]));
-    expect(run(repo, COORDINATES, VERSION).status).toBe(0);
     const live = tree({ [`${ROOT_ID}.xml`]: metadata(ROOT_ID, ["0.1.0"]) });
     const r = run(repo, COORDINATES, VERSION, live);
     expect(r.status, r.stderr).toBe(0);
   });
 
+  it("exits 1 when the live directory holds no answer for an artifact (a failed fetch)", () => {
+    const r = run(tree(release()), COORDINATES, VERSION, tree({ "unrelated.txt": "" }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("no answer from the live repository");
+  });
+
+  it("exits 2 without a live directory: the live state is never assumed", () => {
+    expect(run(tree(release()), COORDINATES, VERSION).status).toBe(2);
+  });
+
   it("exits 1 and names each problem", () => {
     const files = release();
     delete files[`${P}.jar.sha1`];
-    const r = run(tree(files), COORDINATES, VERSION);
+    const r = run(tree(files), COORDINATES, VERSION, tree({ [`${ROOT_ID}.absent`]: "" }));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(`::error::${P}.jar: no .sha1 checksum`);
   });
 
   it("exits 1 on an empty tree", () => {
-    expect(run(tree({}), COORDINATES, VERSION).status).toBe(1);
+    expect(run(tree({}), COORDINATES, VERSION, tree({})).status).toBe(1);
   });
 
   it("exits 2 on a missing argument, bad coordinates or an unreadable directory", () => {
+    const live = tree({});
     expect(run(tree(release()), COORDINATES).status).toBe(2);
-    expect(run(tree(release()), "no-colon", VERSION).status).toBe(2);
-    expect(run(join(tmpdir(), "no-such-dir-maven"), COORDINATES, VERSION).status).toBe(2);
+    expect(run(tree(release()), "no-colon", VERSION, live).status).toBe(2);
+    expect(run(join(tmpdir(), "no-such-dir-maven"), COORDINATES, VERSION, live).status).toBe(2);
+    expect(run(tree(release()), COORDINATES, VERSION, join(tmpdir(), "no-such-live")).status).toBe(
+      2,
+    );
   });
 });
