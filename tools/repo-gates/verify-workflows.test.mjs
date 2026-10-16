@@ -398,6 +398,10 @@ describe("each rule fires on a fixture that breaks only it", () => {
       "a cache path",
       `      - uses: actions/setup-node@${SHA}\n        with:\n          node-version: \${{ env.NODE_VERSION }}\n          cache: pnpm\n`,
     ],
+    [
+      "a JDK cache (setup-java's cache-jdk)",
+      `      - uses: actions/setup-java@${SHA}\n        with:\n          distribution: temurin\n          cache-jdk: true\n`,
+    ],
   ])("3 a pack job's cache: %s", (_, step) =>
     fires(run(GOOD.replace(INSTALL_STEP, `${step}${INSTALL_STEP}`)), /restores a cache/),
   );
@@ -410,6 +414,36 @@ describe("each rule fires on a fixture that breaks only it", () => {
         ),
       ),
     ).toEqual([]));
+  it("3 setup-java with no cache input, or cache-jdk: false, restores nothing (#902)", () => {
+    for (const extra of ["", "          cache-jdk: false\n"])
+      expect(
+        run(
+          GOOD.replace(
+            INSTALL_STEP,
+            `      - uses: actions/setup-java@${SHA}\n        with:\n          distribution: temurin\n${extra}${INSTALL_STEP}`,
+          ),
+        ),
+      ).toEqual([]);
+  });
+  it.each([
+    "$UNIT_PATH/gradlew publish",
+    "(cd apps/sdk-java && ./gradlew publish)",
+    "gradle publish",
+    "mvnw deploy",
+    "mvn deploy",
+  ])("3 a publish job running a JVM build (%s)", (cmd) =>
+    fires(
+      run(swap(PUBLISH_STEP, `      - run: ${cmd}`)),
+      /runs a package manager or repository code/,
+    ),
+  );
+  it.each([
+    'aws s3api --endpoint-url "$endpoint" put-object --bucket "$MAVEN_BUCKET" --key "$1" --body "$1" --if-none-match \'*\'',
+    'sha256sum --check --strict --quiet "$RUNNER_TEMP/subjects.sha256"',
+    "curl --proto '=https' --tlsv1.2 -fsSI --retry 5 \"$MAVEN_URL/$pom\"",
+  ])("3 accepts the Maven upload command %s (#902)", (cmd) =>
+    expect(run(swap(PUBLISH_STEP, `      - run: ${cmd}`))).toEqual([]),
+  );
   it.each(["bundle install", "bundle exec rake release", "(bundle exec rake)"])(
     "3 a publish job running bundler (%s)",
     (cmd) =>

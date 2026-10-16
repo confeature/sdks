@@ -47,7 +47,9 @@
 # tag policies are declared in tools/repo-gates/release-settings.json.
 #
 # Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900);
-# go, packagist, swiftpm (#901). Hex waits on #805, Maven on its builds.
+# go, packagist, swiftpm (#901); maven (#902), which is not Maven Central but
+# a static Maven repository on Cloudflare R2, served at MAVEN_URL. Hex waits
+# on #805.
 # Two publish jobs package from source because their registry accepts nothing
 # else: publish-crates (`cargo publish --no-verify`, nothing compiled) and
 # publish-pubdev (`dart pub publish --force`, which pub.dev requires in the
@@ -92,6 +94,12 @@ env:
   DOTNET_VERSION: "10.0.400"
   DART_VERSION: "3.11.6"
   GO_VERSION: "1.27.2"
+  JAVA_VERSION: "21.0.11"
+  # The JVM SDKs' repository (#902): the R2 bucket MAVEN_BUCKET, served at
+  # MAVEN_URL. Not Maven Central, which since 2026-10-01 asks a paid tier of a
+  # service-dependent SDK.
+  MAVEN_URL: "https://maven.confeature.io"
+  MAVEN_BUCKET: "confeature-maven"
   # github.com's published ed25519 host key (docs.github.com, "GitHub's SSH key
   # fingerprints"), so a deploy-key push trusts no key it is shown (#901).
   GITHUB_SSH_KNOWN_HOST: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
@@ -1325,6 +1333,280 @@ jobs:
         if: always()
         run: rm -rf "$RUNNER_TEMP/ssh"
 
+  # -------------------------------------------------------------- maven ----
+  # The JVM SDKs are served by a static Maven repository on Cloudflare R2
+  # (MAVEN_URL), not Maven Central (#902). R2 stores whatever it is given, so
+  # the pack job enforces what a registry would: the release is exactly the
+  # unit's, at the resolved version, with checksums that match, sources and
+  # javadoc jars, and complete POMs carrying no address
+  # (tools/sdk-pack/check-maven-release.mjs); and no file of that version is
+  # live yet. A released version is never rewritten. The maven-metadata.xml
+  # files are the only objects ever overwritten: the pack job puts the live ones
+  # in Gradle's output repository and publishes again, and Gradle adds the new
+  # version to the list, so every earlier one stays listed.
+  #
+  # Every Maven pack runs on macOS: the Kotlin Multiplatform SDK publishes ALL
+  # its targets from one host, in one run (its root module names every
+  # target's), and only macOS builds the iOS targets. The Java and Android SDKs
+  # build the same on any host, and a public repository's macOS minutes are
+  # free. Nothing is signed (no key to hold): integrity is the Maven checksums
+  # plus a GitHub artifact attestation of every file, made by the publish job.
+
+  pack-maven:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'maven' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.digest.outputs.sums }}
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      # No `cache:` input, so nothing is restored (setup-java caches only
+      # when asked). The Gradle distribution each wrapper downloads is checked
+      # against its distributionSha256Sum.
+      - name: Setup Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # The live metadata is read with a query string no cache has seen, so it
+      # is R2's object, never an edge copy (R2 ignores the query). A 404 is a
+      # first release; any other answer stops the run, since guessing "first
+      # release" would publish metadata that lists no earlier version.
+      # `-PenableAndroid=true` turns on kotlin-mp's opt-in Android target; the
+      # Java and Android builds have no such property and ignore it.
+      - name: Pack the release artifact
+        run: |
+          group="${UNIT_COORDINATES%%:*}"
+          base="${group//.//}"
+          repo="$GITHUB_WORKSPACE/$UNIT_PATH/build/release-repo"
+          live="$RUNNER_TEMP/live"
+          mkdir -p "$live" "$RUNNER_TEMP/release"
+          rm -rf "$repo"
+          publish() {
+            (cd "$UNIT_PATH" && ./gradlew --no-daemon --stacktrace -PenableAndroid=true publishAllPublicationsToReleaseRepository)
+          }
+          publish
+          [ -d "$repo/$base" ] || { echo "::error::the build published nothing under $base"; exit 1; }
+          merged=0
+          for dir in "$repo/$base"/*/; do
+            aid="$(basename "$dir")"
+            url="$MAVEN_URL/$base/$aid/maven-metadata.xml"
+            code="$(curl --proto '=https' --tlsv1.2 -sS -o "$live/$aid.xml" -w '%{http_code}' "$url?pack=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" || echo 000)"
+            case "$code" in
+              200) cp "$live/$aid.xml" "$dir/maven-metadata.xml" && merged=1 ;;
+              404) rm -f "$live/$aid.xml" ;;
+              *) echo "::error::cannot read $url (HTTP $code): refusing to guess whether $aid has releases"; exit 1 ;;
+            esac
+          done
+          if [ "$merged" = 1 ]; then publish; fi
+          cp -R "$repo/." "$RUNNER_TEMP/release/"
+
+      - name: Check the artifact against the resolved unit
+        run: pnpm run check:maven-release "$RUNNER_TEMP/release" "$UNIT_COORDINATES" "$UNIT_VERSION" "$RUNNER_TEMP/live"
+
+      # Immutability, before the tag's publish job can run: a file of this
+      # version that is already live is refused (the publish job's conditional
+      # put refuses it again, atomically). Same cache-free query as above.
+      - name: Probe maven.confeature.io for the new version (no credentials)
+        run: |
+          cd "$RUNNER_TEMP/release"
+          n=0
+          while IFS= read -r f; do
+            code="$(curl --proto '=https' --tlsv1.2 -sS -o /dev/null -I -w '%{http_code}' "$MAVEN_URL/$f?pack=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" || echo 000)"
+            case "$code" in
+              404) n=$((n + 1)) ;;
+              200) echo "::error::$MAVEN_URL/$f is already published: a released version never changes"; exit 1 ;;
+              *) echo "::error::cannot tell whether $MAVEN_URL/$f is published (HTTP $code): refusing to guess"; exit 1 ;;
+            esac
+          done < <(find . -type f -path "./*/${UNIT_VERSION}/*" | sed 's|^\./||' | sort)
+          [ "$n" -gt 0 ] || { echo "::error::the release has no file of ${UNIT_VERSION}"; exit 1; }
+          { echo "### Maven dry run"; java -version 2>&1 | head -n 1; echo "- ${n} files of ${UNIT_VERSION}, none live yet"; } >> "$GITHUB_STEP_SUMMARY"
+
+      # macOS has no sha256sum; `shasum -a 256` prints the same lines.
+      - name: Record the artifact digests
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          { echo "sums<<SUMS"; find . -type f | sed 's|^\./||' | sort | xargs shasum -a 256; echo "SUMS"; } >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-maven
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-maven:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-maven]
+    if: >-
+      always() &&
+      needs.pack-maven.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-maven
+    timeout-minutes: 20
+    # id-token and attestations: the artifact attestation only; R2 takes the
+    # environment's S3 credentials.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      EXPECTED_SUMS: ${{ needs.pack-maven.outputs.sums }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-maven
+          path: release
+
+      - name: Check the artifact against the pack job's digests
+        run: |
+          cd release
+          [ "$(find . -type f | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
+            { echo "::error::the file set differs from the pack job's"; exit 1; }
+          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict --quiet
+          printf '%s\n' "$EXPECTED_SUMS" > "$RUNNER_TEMP/subjects.sha256"
+
+      # One attestation whose subjects are every file, by its Maven path:
+      # `gh attestation verify <file> --repo confeature/sdks` checks any one.
+      - name: Attest every file (GitHub artifact attestation)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/subjects.sha256
+
+      # The runner's AWS CLI, on R2's S3 API (a bucket-scoped R2 token works on
+      # that API only, apps/cli/RELEASES-R2.md). Order: the version's artifacts,
+      # then the descriptors (.pom, .module) of the targets, then the root's,
+      # then the metadata, its checksums before it, so nothing names a file
+      # that is not there yet. A version file is put with If-None-Match: R2
+      # refuses an existing key atomically; one holding these exact bytes is a
+      # re-run of this job, kept; any other bytes mean the version is taken.
+      # Before anything is put, the stored metadata is read, and an upload
+      # that would drop a version it lists is refused.
+      - name: Upload
+        env:
+          MAVEN_R2_ACCESS_KEY_ID: ${{ secrets.MAVEN_R2_ACCESS_KEY_ID }}
+          MAVEN_R2_SECRET_ACCESS_KEY: ${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          [ -n "$MAVEN_R2_ACCESS_KEY_ID" ] && [ -n "$MAVEN_R2_SECRET_ACCESS_KEY" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] ||
+            { echo "::error::MAVEN_R2_ACCESS_KEY_ID, MAVEN_R2_SECRET_ACCESS_KEY and CLOUDFLARE_ACCOUNT_ID must be set in environment sdk-publish-maven"; exit 1; }
+          export AWS_ACCESS_KEY_ID="$MAVEN_R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$MAVEN_R2_SECRET_ACCESS_KEY"
+          # Checksums only when the API requires them: newer AWS CLIs add CRC
+          # headers by default, which an S3-compatible endpoint need not accept.
+          export AWS_DEFAULT_REGION=auto AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required AWS_PAGER=""
+          endpoint="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          group="${UNIT_COORDINATES%%:*}"
+          root="${UNIT_COORDINATES#*:}"
+          base="${group//.//}"
+          s3() { aws s3api --endpoint-url "$endpoint" "$@"; }
+          type_of() {
+            case "$1" in
+              *.md5 | *.sha1 | *.sha256 | *.sha512) echo "text/plain" ;;
+              *.pom | *.xml) echo "application/xml" ;;
+              *.jar | *.aar) echo "application/java-archive" ;;
+              *.module | *.json) echo "application/json" ;;
+              *) echo "application/octet-stream" ;;
+            esac
+          }
+          rank() {
+            case "$1" in
+              */maven-metadata.xml) echo 4 ;;
+              */maven-metadata.xml.*) echo 3 ;;
+              "$base/$root/"*.pom* | "$base/$root/"*.module*) echo 2 ;;
+              *.pom* | *.module*) echo 1 ;;
+              *) echo 0 ;;
+            esac
+          }
+          put_once() {
+            local err
+            if err="$(s3 put-object --bucket "$MAVEN_BUCKET" --key "$1" --body "$1" --content-type "$(type_of "$1")" --cache-control "public, max-age=31536000, immutable" --if-none-match '*' 2>&1 >/dev/null)"; then
+              echo "uploaded $1"
+              return
+            fi
+            case "$err" in
+              *PreconditionFailed*) ;;
+              *) echo "::error::$1: $err"; exit 1 ;;
+            esac
+            s3 get-object --bucket "$MAVEN_BUCKET" --key "$1" "$RUNNER_TEMP/stored" >/dev/null
+            [ "$(sha256sum < "$RUNNER_TEMP/stored")" = "$(sha256sum < "$1")" ] ||
+              { echo "::error::$1 is already stored with other bytes: version ${UNIT_VERSION} is taken"; exit 1; }
+            echo "kept $1 (already stored, identical)"
+          }
+          keeps_stored_versions() {
+            local err
+            if ! err="$(s3 get-object --bucket "$MAVEN_BUCKET" --key "$1" "$RUNNER_TEMP/stored.xml" 2>&1 >/dev/null)"; then
+              case "$err" in
+                *NoSuchKey* | *"Not Found"*) return 0 ;;
+                *) echo "::error::cannot read the stored $1: $err"; exit 1 ;;
+              esac
+            fi
+            while IFS= read -r v; do
+              grep -qF "$v" "$1" ||
+                { echo "::error::$1 would drop ${v}, which the stored metadata lists"; exit 1; }
+            done < <(grep -o '<version>[^<]*</version>' "$RUNNER_TEMP/stored.xml")
+          }
+          cd release
+          while IFS= read -r f; do echo "$(rank "$f") $f"; done < <(find . -type f | sed 's|^\./||') | sort -k1,1n -k2,2 > "$RUNNER_TEMP/order"
+          while read -r r f; do
+            if [ "$r" -eq 4 ]; then keeps_stored_versions "$f"; fi
+          done < "$RUNNER_TEMP/order"
+          while read -r r f; do
+            if [ "$r" -le 2 ]; then put_once "$f"; fi
+          done < "$RUNNER_TEMP/order"
+          while read -r r f; do
+            if [ "$r" -ge 3 ]; then
+              s3 put-object --bucket "$MAVEN_BUCKET" --key "$f" --body "$f" --content-type "$(type_of "$f")" --cache-control "public, max-age=300" >/dev/null
+              echo "uploaded $f"
+            fi
+          done < "$RUNNER_TEMP/order"
+
+      # Through the public host, as a consumer resolves it.
+      - name: Ask maven.confeature.io for the release
+        run: |
+          group="${UNIT_COORDINATES%%:*}"
+          root="${UNIT_COORDINATES#*:}"
+          pom="${group//.//}/${root}/${UNIT_VERSION}/${root}-${UNIT_VERSION}.pom"
+          curl --proto '=https' --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors "$MAVEN_URL/$pom"
+
   # ------------------------------------------------------------ conclude ----
 
   conclude:
@@ -1350,6 +1632,8 @@ jobs:
       - publish-packagist
       - pack-swiftpm
       - publish-swiftpm
+      - pack-maven
+      - publish-maven
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

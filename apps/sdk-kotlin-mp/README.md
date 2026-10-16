@@ -8,18 +8,30 @@ Confeature Kotlin Multiplatform SDK. Drop-in compatible with ConfigCat's KMP pat
 
 ## Install (Gradle Kotlin DSL)
 
-Not published to Maven Central yet (#794): build this directory from source until then. The
-coordinates below are the ones this build produces.
+Confeature's JVM SDKs are served from maven.confeature.io, not Maven Central: add the repository
+next to the ones your build already uses. Gradle picks each target's artifact (`-jvm`, `-android`, `-js`, `-iosarm64`, ...)
+from the root one.
+
+```kotlin
+// build.gradle.kts, or dependencyResolutionManagement in settings.gradle.kts
+repositories {
+    mavenCentral()
+    maven { url = uri("https://maven.confeature.io") }
+}
+```
 
 ```kotlin
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.confeature:confeature-kotlin-mp-sdk:0.1.0")
+            implementation("io.confeature:confeature-kotlin-client:0.1.0")
         }
     }
 }
 ```
+
+Every published file carries Maven checksums and a GitHub artifact attestation:
+`gh attestation verify <file> --repo confeature/sdks` checks one.
 
 ## Quickstart (commonMain)
 

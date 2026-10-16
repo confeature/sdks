@@ -1,3 +1,3 @@
 // SPDX-License-Identifier: MIT
 
-rootProject.name = "confeature-java-sdk"
+rootProject.name = "confeature-java-client"

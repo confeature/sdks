@@ -15,6 +15,7 @@ plugins {
     kotlin("plugin.serialization") version "2.0.21"
     id("org.jetbrains.kotlinx.kover") version "0.8.3"
     id("io.gitlab.arturbosch.detekt") version "1.23.7"
+    `maven-publish`
     // The AGP must be declared in the plugins block. We keep it `apply
     // false` and then conditionally apply below to avoid forcing the
     // Android SDK on developer machines that don't have ANDROID_HOME set.
@@ -91,6 +92,8 @@ kotlin {
             compilerOptions {
                 jvmTarget.set(JvmTarget.JVM_11)
             }
+            // The release AAR only (#902): a debug variant is not for consumers.
+            publishLibraryVariants("release")
         }
     }
 
@@ -184,6 +187,72 @@ if (enableAndroidPlugin) {
         compileOptions {
             sourceCompatibility = JavaVersion.VERSION_11
             targetCompatibility = JavaVersion.VERSION_11
+        }
+    }
+}
+
+// --- The release (#902) ---
+// io.confeature:confeature-kotlin-client on https://maven.confeature.io, a
+// static Maven repository on Cloudflare R2, not Maven Central. The Kotlin
+// plugin creates one publication per target plus the root one
+// (`kotlinMultiplatform`, the artifact id rootProject.name in
+// settings.gradle.kts, never overridden here); each target's artifact id is
+// that name with the target's suffix. Every target is published from ONE host,
+// in one run, or the root module would name variants nobody uploaded: the
+// macOS pack job, which alone can build the iOS targets, with
+// `-PenableAndroid=true`. `publishAllPublicationsToReleaseRepository` writes
+// the release, with Gradle's checksums, into build/release-repo; nothing is
+// signed: integrity is the checksums and a GitHub artifact attestation of
+// every file.
+//
+// The Kotlin plugin adds a sources jar to every publication. The javadoc jar
+// carries a README pointing at the docs: Kotlin has no javadoc, and Dokka would
+// add a toolchain for a jar no IDE reads from a Kotlin library.
+val javadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    from(
+        resources.text.fromString(
+            "Confeature Kotlin client: the API is documented at " +
+                "https://docs.confeature.io/sdks/kotlin-mp/ and in the sources jar.\n",
+        ),
+    ) {
+        rename { "README.md" }
+    }
+}
+
+publishing {
+    publications.withType<MavenPublication>().configureEach {
+        artifact(javadocJar)
+        pom {
+            name.set("Confeature Kotlin client")
+            description.set(
+                "Confeature Kotlin Multiplatform SDK: a drop-in replacement for ConfigCat's Kotlin client.",
+            )
+            url.set("https://github.com/confeature/sdks")
+            licenses {
+                license {
+                    name.set("MIT")
+                    url.set("https://opensource.org/licenses/MIT")
+                }
+            }
+            developers {
+                developer {
+                    id.set("makerlabs")
+                    name.set("MakerLabs")
+                    organization.set("MakerLabs")
+                    organizationUrl.set("https://confeature.io")
+                }
+            }
+            scm {
+                connection.set("scm:git:https://github.com/confeature/sdks.git")
+                url.set("https://github.com/confeature/sdks/tree/main/apps/sdk-kotlin-mp")
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "release"
+            url = uri(layout.buildDirectory.dir("release-repo"))
         }
     }
 }

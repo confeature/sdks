@@ -11,33 +11,53 @@ the evaluation rules is tested across every language at once.
 
 ## SDKs
 
-| SDK                | Package                                          | Install                                                                                                             |
-| :----------------- | :----------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
-| Node.js            | `@confeature/sdk-node` (npm)                     | `npm install @confeature/sdk-node`                                                                                  |
-| Browser JS         | `@confeature/sdk-browser-js` (npm)               | `npm install @confeature/sdk-browser-js`                                                                            |
-| React              | `@confeature/sdk-react` (npm)                    | `npm install @confeature/sdk-react`                                                                                 |
-| Angular            | `@confeature/sdk-angular` (npm)                  | `npm install @confeature/sdk-angular @confeature/sdk-browser-js`                                                    |
-| Cloudflare Workers | `@confeature/sdk-cloudflare-worker` (npm)        | `npm install @confeature/sdk-cloudflare-worker @confeature/sdk-browser-js`                                          |
-| Bun                | `@confeature/sdk-bun` (npm)                      | `bun add @confeature/sdk-bun`                                                                                       |
-| Deno               | `@confeature/sdk-deno` (npm)                     | `import { ConfeatureClient } from "npm:@confeature/sdk-deno";`                                                      |
-| Python             | `confeature-client` (PyPI)                       | `pip install confeature-client`                                                                                     |
-| Go                 | `github.com/confeature/sdks/apps/sdk-go`         | `go get github.com/confeature/sdks/apps/sdk-go@latest`                                                              |
-| Rust               | `confeature` (crates.io)                         | `cargo add confeature`                                                                                              |
-| Ruby               | `confeature` (RubyGems)                          | `gem install confeature`                                                                                            |
-| PHP                | `confeature/confeature-php-sdk` (Packagist)      | `composer require confeature/confeature-php-sdk`                                                                    |
-| .NET               | `Confeature.Client` (NuGet)                      | `dotnet add package Confeature.Client`                                                                              |
-| Java               | `io.confeature:confeature-java-sdk` (Maven)      | not published yet: see the note below                                                                               |
-| Android            | `io.confeature:confeature-android-sdk` (Maven)   | not published yet: see the note below                                                                               |
-| Kotlin             | `io.confeature:confeature-kotlin-mp-sdk` (Maven) | not published yet: see the note below                                                                               |
-| Dart / Flutter     | `confeature` (pub.dev)                           | `dart pub add confeature`                                                                                           |
-| Elixir             | `confeature_client` (Hex)                        | `{:confeature_client, "~> 0.1"}` in `mix.exs`                                                                       |
-| Swift              | `Confeature` (SwiftPM)                           | `.package(url: "https://github.com/confeature/confeature-swift", from: "0.1.0")` in `Package.swift`                 |
-| C++                | `confeature::confeature` (CMake)                 | `FetchContent_Declare(confeature GIT_REPOSITORY https://github.com/confeature/sdks.git SOURCE_SUBDIR apps/sdk-cpp)` |
-| Unreal Engine      | the `Confeature` plugin                          | copy `apps/sdk-unreal/Plugins/Confeature` into your project's `Plugins/`                                            |
+| SDK                | Package                                                         | Install                                                                                                             |
+| :----------------- | :-------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| Node.js            | `@confeature/sdk-node` (npm)                                    | `npm install @confeature/sdk-node`                                                                                  |
+| Browser JS         | `@confeature/sdk-browser-js` (npm)                              | `npm install @confeature/sdk-browser-js`                                                                            |
+| React              | `@confeature/sdk-react` (npm)                                   | `npm install @confeature/sdk-react`                                                                                 |
+| Angular            | `@confeature/sdk-angular` (npm)                                 | `npm install @confeature/sdk-angular @confeature/sdk-browser-js`                                                    |
+| Cloudflare Workers | `@confeature/sdk-cloudflare-worker` (npm)                       | `npm install @confeature/sdk-cloudflare-worker @confeature/sdk-browser-js`                                          |
+| Bun                | `@confeature/sdk-bun` (npm)                                     | `bun add @confeature/sdk-bun`                                                                                       |
+| Deno               | `@confeature/sdk-deno` (npm)                                    | `import { ConfeatureClient } from "npm:@confeature/sdk-deno";`                                                      |
+| Python             | `confeature-client` (PyPI)                                      | `pip install confeature-client`                                                                                     |
+| Go                 | `github.com/confeature/sdks/apps/sdk-go`                        | `go get github.com/confeature/sdks/apps/sdk-go@latest`                                                              |
+| Rust               | `confeature` (crates.io)                                        | `cargo add confeature`                                                                                              |
+| Ruby               | `confeature` (RubyGems)                                         | `gem install confeature`                                                                                            |
+| PHP                | `confeature/confeature-php-sdk` (Packagist)                     | `composer require confeature/confeature-php-sdk`                                                                    |
+| .NET               | `Confeature.Client` (NuGet)                                     | `dotnet add package Confeature.Client`                                                                              |
+| Java               | `io.confeature:confeature-java-client` (maven.confeature.io)    | `implementation("io.confeature:confeature-java-client:0.1.0")`, with the repository below                           |
+| Android            | `io.confeature:confeature-android-client` (maven.confeature.io) | `implementation("io.confeature:confeature-android-client:0.1.0")`, with the repository below                        |
+| Kotlin             | `io.confeature:confeature-kotlin-client` (maven.confeature.io)  | `implementation("io.confeature:confeature-kotlin-client:0.1.0")`, with the repository below                         |
+| Dart / Flutter     | `confeature` (pub.dev)                                          | `dart pub add confeature`                                                                                           |
+| Elixir             | `confeature_client` (Hex)                                       | `{:confeature_client, "~> 0.1"}` in `mix.exs`                                                                       |
+| Swift              | `Confeature` (SwiftPM)                                          | `.package(url: "https://github.com/confeature/confeature-swift", from: "0.1.0")` in `Package.swift`                 |
+| C++                | `confeature::confeature` (CMake)                                | `FetchContent_Declare(confeature GIT_REPOSITORY https://github.com/confeature/sdks.git SOURCE_SUBDIR apps/sdk-cpp)` |
+| Unreal Engine      | the `Confeature` plugin                                         | copy `apps/sdk-unreal/Plugins/Confeature` into your project's `Plugins/`                                            |
 
-**Not published yet.** The Maven releases of the Java, Android and Kotlin SDKs are still being
-settled (#794): their builds do not publish yet. Until then, build them from source in their
-directories. The Maven coordinates above are the ones their builds produce.
+**The JVM repository.** Confeature's JVM SDKs are served from maven.confeature.io, not Maven
+Central. Add the repository once, next to the ones your build already uses:
+
+```kotlin
+// build.gradle.kts, or dependencyResolutionManagement in settings.gradle.kts
+repositories {
+    mavenCentral()
+    maven { url = uri("https://maven.confeature.io") }
+}
+```
+
+```xml
+<!-- pom.xml -->
+<repositories>
+  <repository>
+    <id>confeature</id>
+    <url>https://maven.confeature.io</url>
+  </repository>
+</repositories>
+```
+
+Every published file carries Maven checksums and a GitHub artifact attestation:
+`gh attestation verify <file> --repo confeature/sdks` checks one.
 
 The PHP and Swift SDKs are published from read-only mirrors of their directories here,
 [`confeature/confeature-php-sdk`](https://github.com/confeature/confeature-php-sdk) and

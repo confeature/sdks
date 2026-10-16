@@ -10,24 +10,42 @@ The public surface mirrors ConfigCat 1:1 (Confeature Constitution Principle II).
 
 ## Install
 
+Confeature's JVM SDKs are served from maven.confeature.io, not Maven Central: add the repository
+next to the ones your build already uses.
+
 ### Gradle (Kotlin DSL)
 
-Not published to Maven Central yet (#794): build this directory from source until then. The
-coordinates below are the ones this build produces.
+```kotlin
+// build.gradle.kts, or dependencyResolutionManagement in settings.gradle.kts
+repositories {
+    mavenCentral()
+    maven { url = uri("https://maven.confeature.io") }
+}
+```
 
 ```kotlin
 dependencies {
-    implementation("io.confeature:confeature-android-sdk:0.1.0")
+    implementation("io.confeature:confeature-android-client:0.1.0")
 }
 ```
 
 ### Gradle (Groovy)
 
 ```groovy
-dependencies {
-    implementation 'io.confeature:confeature-android-sdk:0.1.0'
+repositories {
+    mavenCentral()
+    maven { url 'https://maven.confeature.io' }
 }
 ```
+
+```groovy
+dependencies {
+    implementation 'io.confeature:confeature-android-client:0.1.0'
+}
+```
+
+Every published file carries Maven checksums and a GitHub artifact attestation:
+`gh attestation verify <file> --repo confeature/sdks` checks one.
 
 ## Quickstart
 

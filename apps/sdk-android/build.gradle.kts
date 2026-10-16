@@ -3,6 +3,7 @@
 plugins {
     id("com.android.library") version "8.5.2"
     id("org.jetbrains.kotlin.android") version "1.9.25"
+    `maven-publish`
     jacoco
 }
 
@@ -46,6 +47,15 @@ android {
         getByName("debug") {
             // JaCoCo needs the debug variant to be coverage-enabled.
             enableUnitTestCoverage = true
+        }
+    }
+
+    // The one variant consumers get: the release AAR, with its sources and a
+    // javadoc jar (#902).
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
         }
     }
 
@@ -112,6 +122,53 @@ dependencies {
     // org.json.* and is exercised by parity / cache-key / fetch tests. See #173.
     testImplementation("org.json:json:20240303")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.3")
+}
+
+// The release: io.confeature:confeature-android-client on https://maven.confeature.io,
+// a static Maven repository on Cloudflare R2, not Maven Central (#902). The
+// artifact id is rootProject.name (settings.gradle.kts), never overridden here.
+// `publishAllPublicationsToReleaseRepository` writes the release, with Gradle's
+// checksums, into build/release-repo; sdk-publish.yml's pack job checks it and
+// its publish job uploads it. Nothing is signed: integrity is the checksums and
+// a GitHub artifact attestation of every file.
+publishing {
+    publications {
+        create<MavenPublication>("release") {
+            // AGP creates the component only once the variants exist.
+            afterEvaluate { from(components["release"]) }
+            pom {
+                name.set("Confeature Android client")
+                description.set(
+                    "Confeature SDK for Android: a drop-in replacement for ConfigCat's Android client.",
+                )
+                url.set("https://github.com/confeature/sdks")
+                licenses {
+                    license {
+                        name.set("MIT")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("makerlabs")
+                        name.set("MakerLabs")
+                        organization.set("MakerLabs")
+                        organizationUrl.set("https://confeature.io")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:https://github.com/confeature/sdks.git")
+                    url.set("https://github.com/confeature/sdks/tree/main/apps/sdk-android")
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "release"
+            url = uri(layout.buildDirectory.dir("release-repo"))
+        }
+    }
 }
 
 // JaCoCo report wired against the debug unit-test task; AGP's

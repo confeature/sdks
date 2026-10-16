@@ -2,6 +2,7 @@
 
 plugins {
     `java-library`
+    `maven-publish`
     jacoco
     id("com.diffplug.spotless") version "6.25.0"
 }
@@ -104,8 +105,54 @@ tasks.named<Jar>("jar") {
     archiveBaseName.set("confeature")
     manifest {
         attributes(
-            "Implementation-Title" to "confeature-java-sdk",
+            "Implementation-Title" to project.name,
             "Implementation-Version" to project.version,
         )
+    }
+}
+
+// The release: io.confeature:confeature-java-client on https://maven.confeature.io,
+// a static Maven repository on Cloudflare R2, not Maven Central (#902). The
+// artifact id is rootProject.name (settings.gradle.kts), never overridden here.
+// `publishAllPublicationsToReleaseRepository` writes the release, with Gradle's
+// checksums, into build/release-repo; sdk-publish.yml's pack job checks it and
+// its publish job uploads it. Nothing is signed: integrity is the checksums and
+// a GitHub artifact attestation of every file.
+publishing {
+    publications {
+        create<MavenPublication>("release") {
+            from(components["java"])
+            pom {
+                name.set("Confeature Java client")
+                description.set(
+                    "Confeature SDK for Java: a drop-in replacement for ConfigCat's Java client.",
+                )
+                url.set("https://github.com/confeature/sdks")
+                licenses {
+                    license {
+                        name.set("MIT")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("makerlabs")
+                        name.set("MakerLabs")
+                        organization.set("MakerLabs")
+                        organizationUrl.set("https://confeature.io")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:https://github.com/confeature/sdks.git")
+                    url.set("https://github.com/confeature/sdks/tree/main/apps/sdk-java")
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "release"
+            url = uri(layout.buildDirectory.dir("release-repo"))
+        }
     }
 }

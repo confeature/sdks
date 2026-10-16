@@ -47,7 +47,26 @@
     {
       "name": "sdk-publish-maven",
       "registry": "maven",
-      "secrets": []
+      "secrets": [
+        {
+          "name": "MAVEN_R2_ACCESS_KEY_ID",
+          "kind": "key-id",
+          "issuer": "Cloudflare R2 (MakerLabs): the S3 Access Key ID of an Object Read & Write token on confeature-maven only",
+          "rotateBy": "2027-10-16"
+        },
+        {
+          "name": "MAVEN_R2_SECRET_ACCESS_KEY",
+          "kind": "token",
+          "issuer": "Cloudflare R2 (MakerLabs): the S3 Secret Access Key of the same token",
+          "rotateBy": "2027-10-16"
+        },
+        {
+          "name": "CLOUDFLARE_ACCOUNT_ID",
+          "kind": "identifier",
+          "issuer": "Cloudflare (MakerLabs account id, not a credential)",
+          "rotateBy": "2099-12-31"
+        }
+      ]
     },
     {
       "name": "sdk-publish-go",

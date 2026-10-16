@@ -115,6 +115,21 @@ export const DECLARED_GATES = {
       },
     ],
   },
+  "check:maven-release": {
+    // The JVM SDKs go to a static Maven repository on R2 (#902), which stores
+    // whatever it is given, so the checks a registry would make run here: the
+    // release is exactly the unit's, at the resolved version, with matching
+    // checksums, sources and javadoc jars, and complete POMs that carry no
+    // address; and its metadata keeps every live version. It runs in the Maven
+    // pack job, before the probe of the live repository and the upload.
+    script: "tools/sdk-pack/check-maven-release.mjs",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Probe maven.confeature.io for the new version (no credentials)",
+      },
+    ],
+  },
   "split-mirror": {
     // The PHP and Swift SDKs are published as mirror repositories whose
     // history is this split of the unit's directory, and a pushed history

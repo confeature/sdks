@@ -10,26 +10,44 @@ The public surface mirrors ConfigCat 1:1 (Confeature Constitution Principle II).
 
 ## Install
 
+Confeature's JVM SDKs are served from maven.confeature.io, not Maven Central: add the repository
+next to the ones your build already uses.
+
 ### Gradle (Kotlin DSL)
 
-Not published to Maven Central yet (#794): build this directory from source until then. The
-coordinates below are the ones this build produces.
+```kotlin
+// build.gradle.kts, or dependencyResolutionManagement in settings.gradle.kts
+repositories {
+    mavenCentral()
+    maven { url = uri("https://maven.confeature.io") }
+}
+```
 
 ```kotlin
 dependencies {
-    implementation("io.confeature:confeature-java-sdk:0.1.0")
+    implementation("io.confeature:confeature-java-client:0.1.0")
 }
 ```
 
 ### Maven
 
 ```xml
+<repositories>
+  <repository>
+    <id>confeature</id>
+    <url>https://maven.confeature.io</url>
+  </repository>
+</repositories>
+
 <dependency>
   <groupId>io.confeature</groupId>
-  <artifactId>confeature</artifactId>
+  <artifactId>confeature-java-client</artifactId>
   <version>0.1.0</version>
 </dependency>
 ```
+
+Every published file carries Maven checksums and a GitHub artifact attestation:
+`gh attestation verify <file> --repo confeature/sdks` checks one.
 
 ## Quickstart
 

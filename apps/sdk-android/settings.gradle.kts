@@ -16,4 +16,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "confeature-android-sdk"
+rootProject.name = "confeature-android-client"

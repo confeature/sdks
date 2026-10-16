@@ -24,7 +24,7 @@
  *      tool, script or interpreter on repository files (the pinned registry
  *      client installing itself is the one exception), keeps no checkout
  *      credential, and uses no cache: no `actions/cache`, no `cache:` /
- *      `bundler-cache:` input — nor does a pack job, whose artifact the publish
+ *      `bundler-cache:` / `cache-jdk:` input — nor does a pack job, whose artifact the publish
  *      job uploads. A dependency that runs in the job holding the OIDC token or
  *      a key can publish or steal it; a poisoned cache is such a dependency.
  *      `cache: false` restores nothing, and an action that caches unless told
@@ -108,7 +108,7 @@ const triggersOf = (doc) => {
  * (the mirror publish jobs verify one, #901).
  */
 const PROJECT_CODE =
-  /\b(?:pnpm|yarn|bun|npx|make|gradle|mvn|mix|(?<!\bgit\s+|[.$/{-])bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
+  /\b(?:pnpm|yarn|bun|npx|make|gradlew?|mvnw?|mix|(?<!\bgit\s+|[.$/{-])bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
 /**
  * Rule 3's recorded exceptions: the one command a registry that takes no
  * prebuilt archive needs in the job holding its credential (#900). crates.io:
@@ -197,7 +197,9 @@ function usesRules(file, where, step, ctx) {
     repo === "actions/cache" ||
     ("cache" in w && !noCache) ||
     (DEFAULT_CACHE.has(repo) && !noCache) ||
-    "bundler-cache" in w;
+    "bundler-cache" in w ||
+    // setup-java's JDK cache, its own input (#902).
+    ("cache-jdk" in w && w["cache-jdk"] !== false && w["cache-jdk"] !== "false");
   if (isPackOrPublish && caches) add(file, where, "a pack or credentialed job restores a cache");
   if (isPublish && repo === "actions/checkout" && w["persist-credentials"] !== false)
     add(file, where, "a publish job's checkout keeps its credential (persist-credentials: false)");

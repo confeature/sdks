@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-rootProject.name = "confeature-kotlin-mp-sdk"
+rootProject.name = "confeature-kotlin-client"
 
 pluginManagement {
     repositories {
