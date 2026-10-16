@@ -12,7 +12,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "vp test"
+    "test": "vp test",
+    "record:row-counts": "RECORD_ROW_COUNTS=1 vp test release-workflows verify-workflows"
   },
   "devDependencies": {
     "vitest": "catalog:",

