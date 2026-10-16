@@ -13,7 +13,9 @@
  *   - ships no LICENSE at its root;
  *   - declares no entry point (`exports`, `main` or `module`);
  *   - names a file in `main`, `module`, `types`, `typings`, `browser`, `unpkg`,
- *     `jsdelivr`, `bin` or `exports` that it does not contain.
+ *     `jsdelivr`, `bin` or `exports` that it does not contain;
+ *   - contains a file that never belongs in a published package: a secret, a
+ *     `node_modules/` or `.git/` tree, or a test (UNPUBLISHABLE_*).
  *
  * The last two exist because @confeature/sdk-angular once packed its source
  * manifest, which declares no entry point, next to a `dist/` that held the
@@ -49,6 +51,37 @@ function referencedPaths(manifest) {
 const normalise = (p) => p.replace(/^\.\//, "");
 
 /**
+ * Files no published package of ours ever carries: a registry keeps what it is
+ * given, so the first publish of one is permanent. Deliberately small, each a
+ * category, never a guess about a build's layout:
+ *   - secrets: `.env*`, `.npmrc` (it can hold a token), private keys and
+ *     certificate stores (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
+ *     `id_ed25519*`);
+ *   - a dependency tree or VCS data: a `node_modules/` or `.git/` directory;
+ *   - tests: a `__tests__/`, `tests/`, `fixtures/` or `__fixtures__/`
+ *     directory, or a `*.test.*` / `*.spec.*` file. The SDKs ship `dist/`,
+ *     README and LICENSE; a test in the tarball is a build that swept up its
+ *     source tree.
+ */
+const UNPUBLISHABLE_NAME =
+  /^(?:\.env(?:\..*)?|\.npmrc|.*\.(?:pem|key|p12|pfx)|id_(?:rsa|ed25519)(?:\..*)?|.*\.(?:test|spec)\.[^/]+)$/;
+const UNPUBLISHABLE_DIR = new Set([
+  "node_modules",
+  ".git",
+  "__tests__",
+  "tests",
+  "fixtures",
+  "__fixtures__",
+]);
+const unpublishable = (path) => {
+  const parts = path.split("/");
+  return (
+    UNPUBLISHABLE_NAME.test(parts.at(-1)) ||
+    parts.slice(0, -1).some((d) => UNPUBLISHABLE_DIR.has(d))
+  );
+};
+
+/**
  * The problems with a packed manifest and its file list (paths relative to
  * the package root). Empty when the tarball may be published.
  */
@@ -71,6 +104,11 @@ export function tarballProblems(manifest, files, name, version) {
   if (manifest.exports === undefined && !manifest.main && !manifest.module) {
     problems.push("no entry point: the manifest declares no exports, main or module");
   }
+  for (const f of present)
+    if (unpublishable(f))
+      problems.push(
+        `${f}: a secret, a dependency tree, VCS data or a test file has no place in a published package`,
+      );
   for (const [where, path] of referencedPaths(manifest)) {
     if (!present.has(normalise(path)))
       problems.push(`${where} names ${path}, which is not in the tarball`);

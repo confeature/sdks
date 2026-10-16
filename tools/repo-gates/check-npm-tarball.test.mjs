@@ -111,6 +111,40 @@ describe("tarballProblems", () => {
   });
 });
 
+describe("files that never belong in a published tarball (#794 review)", () => {
+  it.each([
+    ".env",
+    ".env.production",
+    "dist/.env.local",
+    ".npmrc",
+    "certs/server.pem",
+    "dist/signing.key",
+    "release.p12",
+    "id_rsa",
+    "keys/id_ed25519.pub",
+    "node_modules/x/index.js",
+    ".git/config",
+    "dist/__tests__/client.test.js",
+    "tests/unit/x.js",
+    "dist/fixtures/config.json",
+    "dist/client.test.mjs",
+    "dist/client.spec.d.ts",
+  ])("refuses %s", (file) =>
+    expect(check(GOOD, [...FILES, file])).toEqual([
+      `${file}: a secret, a dependency tree, VCS data or a test file has no place in a published package`,
+    ]),
+  );
+  it.each([
+    "dist/testing.mjs",
+    "dist/env.mjs",
+    "dist/keyboard.js",
+    "dist/latest.d.ts",
+    "dist/contest.js",
+  ])("accepts %s (a name that only looks alike)", (file) =>
+    expect(check(GOOD, [...FILES, file])).toEqual([]),
+  );
+});
+
 describe("the CLI", () => {
   const pack = (manifest, files) => {
     const dir = mkdtempSync(join(tmpdir(), "npm-tarball-"));
