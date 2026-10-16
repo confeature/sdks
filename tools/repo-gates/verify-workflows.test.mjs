@@ -716,7 +716,7 @@ const REASONS = {
   "git --upload-pack": "git fetch: --upload-pack is not an option it may take",
   "git config": "git runs only init, bundle verify, fetch, push and rev-parse",
   "a loop": "while is not a command a credentialed job runs",
-  "a case": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "a case": "a ;; (case)",
   "a subshell": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
   "a function": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
   export: "export is not a command a credentialed job runs",
@@ -727,13 +727,12 @@ const REASONS = {
   "((\u2026)) read as arithmetic":
     "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
   "$((\u2026)) read as arithmetic": "an unquoted $ (every expansion is double-quoted)",
-  "case after then": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "case after then": "a ;; (case)",
   "case inside $( )":
     "an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
-  "case in a group": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "case in a group": "a ;; (case)",
   "case after !": "a ! (negation)",
-  "case with in on the next line":
-    "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+  "case with in on the next line": "a ;; (case)",
   "ANSI-C quoting": "an unquoted $ (every expansion is double-quoted)",
   '$"\u2026" quoting': "an unquoted $ (every expansion is double-quoted)",
   "a one-line function": "a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
@@ -833,7 +832,7 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
   const credOnly = (got) => got.filter((w) => CRED.test(w));
   const CRED = /a credentialed job/;
   const PUSH = "git push --atomic --end-of-options";
-  it.each([
+  const RULE3_ROWS = [
     // Rounds 1 and 2: the blocklist's bypasses.
     ["a backslash continuation", "pn\\\npm install"],
     ["a continuation inside npm's arguments", "npm \\\n  ci"],
@@ -956,7 +955,10 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ],
     ["rustup run", "rustup run stable node x"],
     ["rustup with an expansion before --", 'rustup toolchain install "$X"'],
-  ])("refuses %s, for its own reason", (label, cmd) => {
+  ];
+  it("records a reason for exactly the rows of the table, and none left over", () =>
+    expect(Object.keys(REASONS).sort()).toEqual(RULE3_ROWS.map(([label]) => label).sort()));
+  it.each(RULE3_ROWS)("refuses %s, for its own reason", (label, cmd) => {
     const got = inPublish(cmd);
     expect(Object.hasOwn(REASONS, label), `no reason recorded for ${label}`).toBe(true);
     expect(
