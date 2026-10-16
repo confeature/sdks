@@ -117,7 +117,7 @@ const withMirrors = () => {
 const READS_SECRET = (name) =>
   GOOD.replace(
     "      - run: npm publish",
-    `      - env:\n          DEPLOY_KEY: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
+    `      - env:\n          R2_ACCESS_KEY_ID: \${{ secrets.${name} }}\n        run: echo\n      - run: npm publish`,
   );
 
 describe("the real repository", () => {
@@ -1371,6 +1371,45 @@ describe("rule 3 judges what bash passes, never the quoted source (#794 review, 
         swap(
           PUBLISH_STEP,
           '      - env:\n          GIT_CONFIG_GLOBAL: /dev/null\n          GIT_CONFIG_NOSYSTEM: "1"\n        run: echo hi',
+        ),
+      ),
+    ).toEqual([]));
+});
+
+describe("9 below the workflow: no redefined pin, every *_VERSION exact (#794 review, round 4)", () => {
+  const jobEnv = (kv) =>
+    swap(
+      "    environment: sdk-publish-npm\n",
+      `    environment: sdk-publish-npm\n    env:\n      ${kv}\n`,
+    );
+  it.each([
+    ["a job env", (kv) => jobEnv(kv)],
+    [
+      "a step env",
+      (kv) => swap(PUBLISH_STEP, `      - env:\n          ${kv}\n        run: echo hi`),
+    ],
+    ["a pack job's env", (kv) => swap("  pack-npm:\n", `  pack-npm:\n    env:\n      ${kv}\n`)],
+  ])("%s that redefines NPM_VERSION as npm:evil@1.0.0", (_, at) =>
+    fires(
+      run(at("NPM_VERSION: npm:evil@1.0.0")),
+      /env NPM_VERSION redefines the workflow's NPM_VERSION/,
+    ),
+  );
+  it.each(["RUST_VERSION: 1.88.0", "UNIT_COORDINATES: evil", "UNIT_PATH: apps/y"])(
+    "a job env that redefines %s",
+    (kv) => fires(run(jobEnv(kv)), /redefines the workflow's/),
+  );
+  it("a job-level *_VERSION that is not exact", () =>
+    fires(
+      run(swap("  pack-npm:\n", '  pack-npm:\n    env:\n      DENO_VERSION: "2"\n')),
+      /env DENO_VERSION is 2, not an exact version/,
+    ));
+  it("accepts an exact *_VERSION, and the resolver's unit version", () =>
+    expect(
+      run(
+        swap(
+          "  pack-npm:\n",
+          '  pack-npm:\n    env:\n      DENO_VERSION: "2.8.2"\n      OTHER_VERSION: ${{ needs.setup.outputs.version }}\n',
         ),
       ),
     ).toEqual([]));

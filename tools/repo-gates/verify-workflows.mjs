@@ -85,6 +85,9 @@
  *      (`pnpm run verify` and the CLI's deno suite) on every push to main and
  *      every pull request, unfiltered, under plain bash, with no step env,
  *      working-directory or continue-on-error, in jobs that need nothing.
+ *      Below the workflow, a pack or credentialed job's or step's env: never
+ *      redefines a workflow env name, and its *_VERSION values are exact (or
+ *      the resolver's unit version).
  *  15. NO UNDEFINED VARIABLE (round 4). A pack or credentialed run block reads
  *      only variables its step's, job's or workflow's env: defines, it assigns
  *      itself, or RUNNER_DEFAULTS lists.
@@ -827,6 +830,32 @@ function credentialedJobRules(file, jobId, job, doc, add) {
     );
 }
 
+/**
+ * Rule 9 below the workflow (round 4): in a pack or credentialed job, a job's
+ * or step's env: never redefines a name the workflow's env: sets (a job-level
+ * `NPM_VERSION: npm:evil@1.0.0` still matched the pinned self-install), and
+ * every `*_VERSION` it sets is an exact version, or the resolver's version of
+ * the unit (`${{ needs.setup.outputs.version }}`, which resolve-publish holds
+ * to semver).
+ */
+function pinScopeRules(file, jobId, job, doc, add) {
+  const top = new Set(Object.keys(doc?.env ?? {}));
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  for (const [where, map] of [
+    [jobId, job?.env],
+    ...steps.map((s, i) => [`${jobId} step ${s?.name ?? i + 1}`, s?.env]),
+  ])
+    for (const [k, v] of Object.entries(map ?? {})) {
+      if (top.has(k)) add(file, where, `env ${k} redefines the workflow's ${k}`);
+      if (
+        k.endsWith("_VERSION") &&
+        !EXACT.test(String(v)) &&
+        !/^\$\{\{\s*needs\.setup\.outputs\.version\s*\}\}$/.test(String(v))
+      )
+        add(file, where, `env ${k} is ${String(v)}, not an exact version`);
+    }
+}
+
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
 function jobRules(args) {
   const { file, jobId, job, doc, reusable, envs, workflows, allowed, used, pins, remotes, add } =
@@ -868,6 +897,7 @@ function jobRules(args) {
     add,
   };
   if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
+  if (isPackOrPublish) pinScopeRules(file, jobId, job, doc, add);
   if (typeof job?.uses === "string") callRules(file, jobId, job, ctx);
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;
