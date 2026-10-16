@@ -15,5 +15,5 @@ namespace Confeature.Client;
 public static class SdkVersion
 {
     /// <summary>The semver string. Synchronised with the csproj <c>&lt;Version&gt;</c>.</summary>
-    public const string Value = "0.1.0-alpha";
+    public const string Value = "0.1.0";
 }

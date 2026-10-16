@@ -43,7 +43,11 @@
 # tools/repo-gates/verify-workflows.mjs; the environments, their rules and
 # tag policies are declared in tools/repo-gates/release-settings.json.
 #
-# Registries wired so far: npm. The others land with their own child of #794.
+# Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900).
+# Two publish jobs package from source because their registry accepts nothing
+# else: publish-crates (`cargo publish --no-verify`, nothing compiled) and
+# publish-pubdev (`dart pub publish --force`, which pub.dev requires in the
+# OIDC job). Rule 3 allows exactly those commands, in exactly those jobs.
 
 name: sdk-publish
 
@@ -77,6 +81,12 @@ permissions:
 env:
   NODE_VERSION: "22.23.3"
   NPM_VERSION: "11.20.0"
+  UV_VERSION: "0.10.7"
+  TWINE_VERSION: "6.2.0"
+  RUST_VERSION: "1.88.0"
+  RUBY_VERSION: "3.3.9"
+  DOTNET_VERSION: "10.0.400"
+  DART_VERSION: "3.11.6"
 
 jobs:
   setup:
@@ -321,11 +331,568 @@ jobs:
       - name: Upload
         run: npm publish --access public --provenance --ignore-scripts "./release/$ARTIFACT"
 
+  # --------------------------------------------------------------- pypi ----
+  # Multi-file registries (pypi, nuget) hand their artifacts on with one
+  # `sha256sum` line per file as a job output; the publish job refuses any file
+  # set that differs from it, by name, count or byte.
+
+  pack-pypi:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'pypi' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.digest.outputs.sums }}
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Pack the release artifact
+        run: uv build --directory "$UNIT_PATH" --out-dir "$RUNNER_TEMP/release"
+
+      # Exactly the sdist and the wheel of the resolved version, and both pass
+      # the metadata check PyPI runs on upload.
+      - name: Check the artifact against the resolved unit
+        run: |
+          cd "$RUNNER_TEMP/release"
+          want="confeature_client-${UNIT_VERSION}-py3-none-any.whl
+          confeature_client-${UNIT_VERSION}.tar.gz"
+          got="$(ls -1 | sort)"
+          [ "$got" = "$(printf '%s\n' "$want" | sed 's/^ *//' | sort)" ] ||
+            { echo "::error::expected the sdist and wheel of ${UNIT_VERSION}, got: $got"; exit 1; }
+          uvx --from "twine==${TWINE_VERSION}" twine check --strict -- *
+
+      - name: Record the artifact digests
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          { echo "sums<<SUMS"; sha256sum -- *; echo "SUMS"; } >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-pypi
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-pypi:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-pypi]
+    if: >-
+      always() &&
+      needs.pack-pypi.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-pypi
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_SUMS: ${{ needs.pack-pypi.outputs.sums }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-pypi
+          path: release
+
+      - name: Check the artifact against the pack job's digests
+        run: |
+          cd release
+          [ "$(ls -1 | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
+            { echo "::error::the file set differs from the pack job's"; exit 1; }
+          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict
+
+      # Trusted publishing: the action exchanges this job's OIDC token with
+      # PyPI and uploads PEP 740 attestations with the distributions.
+      - name: Upload
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: release/
+
+  # ------------------------------------------------------------- crates ----
+  # crates.io takes no prebuilt archive from `cargo`: the publish job packages
+  # the same commit again with `cargo publish --no-verify`, which compiles
+  # nothing and runs no build script. That one command is rule 3's recorded
+  # exception for this job (verify-workflows.mjs, PUBLISH_EXCEPTIONS).
+
+  pack-crates:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'crates' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+
+      # `cargo package` builds the packaged crate from the archive alone, so a
+      # file missing from it fails here, not on the registry.
+      - name: Pack the release artifact
+        working-directory: ${{ needs.setup.outputs.path }}
+        run: cargo "+${RUST_VERSION}" package
+
+      - name: Check the artifact against the resolved unit, and dry-run the upload
+        working-directory: ${{ needs.setup.outputs.path }}
+        run: |
+          [ -f "target/package/confeature-${UNIT_VERSION}.crate" ] ||
+            { echo "::error::cargo did not package confeature ${UNIT_VERSION}"; exit 1; }
+          cargo "+${RUST_VERSION}" publish --dry-run --no-verify
+
+  publish-crates:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-crates]
+    if: >-
+      always() &&
+      needs.pack-crates.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-crates
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+
+      # Trusted publishing: a crates.io token for this crate only, revoked by
+      # the action's post step when the job ends.
+      - name: Exchange the OIDC token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Upload
+        working-directory: ${{ needs.setup.outputs.path }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo "+${RUST_VERSION}" publish --no-verify
+
+  # ----------------------------------------------------------- rubygems ----
+
+  pack-rubygems:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'rubygems' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      file: ${{ steps.digest.outputs.file }}
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+
+      - name: Pack the release artifact
+        working-directory: ${{ needs.setup.outputs.path }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gem build confeature.gemspec --output "$RUNNER_TEMP/release/confeature-${UNIT_VERSION}.gem"
+
+      # The gem's own specification must name the resolved unit.
+      - name: Check the artifact against the resolved unit
+        run: |
+          gem="$RUNNER_TEMP/release/confeature-${UNIT_VERSION}.gem"
+          name="$(gem spec "$gem" name | sed -n 's/^--- //p')"
+          version="$(gem spec "$gem" version | sed -n 's/^version: //p')"
+          [ "$name" = "confeature" ] && [ "$version" = "$UNIT_VERSION" ] ||
+            { echo "::error::the gem is ${name} ${version}, not confeature ${UNIT_VERSION}"; exit 1; }
+
+      - name: Record the artifact digest
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          file="$(ls -- *.gem)"
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-rubygems
+          path: ${{ runner.temp }}/release/*.gem
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-rubygems:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-rubygems]
+    if: >-
+      always() &&
+      needs.pack-rubygems.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-rubygems
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-rubygems.outputs.sha256 }}
+      ARTIFACT: ${{ needs.pack-rubygems.outputs.file }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-rubygems
+          path: release
+
+      - name: Check the artifact against the pack job's digest
+        run: |
+          actual="$(sha256sum -- "release/$ARTIFACT" | cut -d' ' -f1)"
+          [ -n "$EXPECTED_SHA256" ] && [ "$actual" = "$EXPECTED_SHA256" ] ||
+            { echo "::error::release/$ARTIFACT is $actual, the pack job recorded $EXPECTED_SHA256"; exit 1; }
+
+      # Trusted publishing: a short-lived API key for this gem only, written
+      # where `gem push` reads it (GEM_HOST_API_KEY).
+      - name: Exchange the OIDC token
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+
+      - name: Upload
+        run: gem push "./release/$ARTIFACT"
+
+  # -------------------------------------------------------------- nuget ----
+
+  pack-nuget:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'nuget' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      sums: ${{ steps.digest.outputs.sums }}
+    env:
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Locked mode: a dependency that is not in packages.lock.json fails here.
+      - name: Pack the release artifact
+        run: |
+          project="$UNIT_PATH/src/$UNIT_COORDINATES/$UNIT_COORDINATES.csproj"
+          dotnet restore "$project" --locked-mode
+          dotnet pack "$project" --no-restore --configuration Release --output "$RUNNER_TEMP/release"
+
+      - name: Check the artifact against the resolved unit
+        run: |
+          cd "$RUNNER_TEMP/release"
+          want="${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg
+          ${UNIT_COORDINATES}.${UNIT_VERSION}.snupkg"
+          got="$(ls -1 | sort)"
+          [ "$got" = "$(printf '%s\n' "$want" | sed 's/^ *//' | sort)" ] ||
+            { echo "::error::expected the package and symbols of ${UNIT_COORDINATES} ${UNIT_VERSION}, got: $got"; exit 1; }
+
+      - name: Record the artifact digests
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          { echo "sums<<SUMS"; sha256sum -- *; echo "SUMS"; } >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-nuget
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-nuget:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-nuget]
+    if: >-
+      always() &&
+      needs.pack-nuget.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-nuget
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_SUMS: ${{ needs.pack-nuget.outputs.sums }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-nuget
+          path: release
+
+      - name: Check the artifact against the pack job's digests
+        run: |
+          cd release
+          [ "$(ls -1 | wc -l)" -eq "$(printf '%s\n' "$EXPECTED_SUMS" | grep -c .)" ] ||
+            { echo "::error::the file set differs from the pack job's"; exit 1; }
+          printf '%s\n' "$EXPECTED_SUMS" | sha256sum --check --strict
+
+      # Trusted publishing: a one-hour API key from this job's OIDC token. The
+      # policy on nuget.org names the account in NUGET_USER (an identifier,
+      # kept as an environment variable, not a secret).
+      - name: Exchange the OIDC token
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # Pushing the .nupkg pushes the .snupkg beside it.
+      - name: Upload
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+
+  # ------------------------------------------------------------- pubdev ----
+  # pub.dev takes no prebuilt archive: `dart pub publish` packs and uploads in
+  # one command, from the package directory, in the job that holds the OIDC
+  # token, and pub.dev accepts it only on a tag push matching the package's
+  # pattern (`sdk-dart-v{{version}}`) in the environment it names. That one
+  # command is rule 3's recorded exception for this job (PUBLISH_EXCEPTIONS);
+  # pub runs no package code while packing.
+
+  pack-pubdev:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'pubdev' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+
+      - name: Pack the release artifact
+        working-directory: ${{ needs.setup.outputs.path }}
+        run: |
+          grep -qx "version: ${UNIT_VERSION}" pubspec.yaml ||
+            { echo "::error::pubspec.yaml does not declare ${UNIT_VERSION}"; exit 1; }
+          dart pub get
+          dart pub publish --dry-run
+
+  publish-pubdev:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-pubdev]
+    if: >-
+      always() &&
+      needs.pack-pubdev.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-pubdev
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Writes the pub.dev OIDC credential for this job.
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: ${{ env.DART_VERSION }}
+
+      - name: Upload
+        working-directory: ${{ needs.setup.outputs.path }}
+        run: dart pub publish --force
+
   # ------------------------------------------------------------ conclude ----
 
   conclude:
     name: conclude
-    needs: [setup, gate, pack-npm, publish-npm]
+    needs:
+      - setup
+      - gate
+      - pack-npm
+      - publish-npm
+      - pack-pypi
+      - publish-pypi
+      - pack-crates
+      - publish-crates
+      - pack-rubygems
+      - publish-rubygems
+      - pack-nuget
+      - publish-nuget
+      - pack-pubdev
+      - publish-pubdev
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

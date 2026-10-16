@@ -25,6 +25,8 @@
  *      `bundler-cache:` input — nor does a pack job, whose artifact the publish
  *      job uploads. A dependency that runs in the job holding the OIDC token or
  *      a key can publish or steal it; a poisoned cache is such a dependency.
+ *      PUBLISH_EXCEPTIONS names the one command each source-only registry
+ *      (crates.io, pub.dev) needs instead, exact and for its job only.
  *   4. NO UNTRUSTED TRIGGERS. No workflow runs on `pull_request_target` or
  *      `workflow_run`, the two triggers that hand a fork's change a privileged
  *      context.
@@ -48,7 +50,8 @@
  *   9. PINNED TOOLS. A pack or publish job installs npm at an exact version and
  *      gives `setup-node` an exact `node-version` — written once per workflow
  *      in its top-level `env:` (`NPM_VERSION`, `NODE_VERSION`) and referenced
- *      from there — and never runs a tool through `npx`.
+ *      from there — and never runs a tool through `npx`. Every `*_VERSION` in
+ *      that top-level `env:` is an exact version.
  *  10. EXPLICIT TARBALL PATHS. An `npm publish` argument holding a `/` starts
  *      with `./`, `/` or a `$` variable: npm reads `release/x.tgz` as the
  *      GitHub repository `release/x.tgz`, so that publish fails after the tag
@@ -91,7 +94,18 @@ const triggersOf = (doc) => {
 
 /** A shell line that runs repository code or a package manager: forbidden in a publish job. */
 const PROJECT_CODE =
-  /\b(?:pnpm|yarn|bun|npx|make|gradle|mvn|mix|bundle|pip|poetry|composer|go\s+(?:run|build|generate)|cargo\s+(?:build|run|test))\b|(?:^|[\s;&|])\.\/|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
+  /\b(?:pnpm|yarn|bun|npx|make|gradle|mvn|mix|bundle|pip|poetry|composer|uvx?|cargo|rake|dart|python3?|ruby|go\s+(?:run|build|generate)|dotnet\s+(?!nuget\s+push\b)\w+|gem\s+(?!push\b)\w+)\b|(?:^|[\s;&|])\.\/(?!release\/)|\bnpm\s+(?:ci|install|i|run|exec|test|rebuild)\b|\bnode\s+\S|\b(?:bash|sh|zsh)\s+[^-\s]/;
+/**
+ * Rule 3's recorded exceptions: the one command a registry that takes no
+ * prebuilt archive needs in the job holding its credential (#900). crates.io:
+ * `cargo publish --no-verify` packages the commit again and compiles nothing.
+ * pub.dev: `dart pub publish --force` packs and uploads in one command, and
+ * pub.dev accepts it only from the OIDC job. Each is exact, and for its job only.
+ */
+export const PUBLISH_EXCEPTIONS = {
+  "publish-crates": [/^cargo "\+\$\{RUST_VERSION\}" publish --no-verify$/],
+  "publish-pubdev": [/^dart pub publish --force$/],
+};
 const PINNED_SELF_INSTALL = /^npm install --global --ignore-scripts "?npm@\$\{?NPM_VERSION\}?"?$/;
 
 /** Rules 4 and 6 (workflow scope) and the workflow-level half of rule 2. */
@@ -108,13 +122,14 @@ function workflowRules(file, doc, add) {
 /** Rule 9's homes: the workflow-level pins, which must be exact. */
 function workflowPins(file, doc, add) {
   const pins = { NODE_VERSION: doc?.env?.NODE_VERSION, NPM_VERSION: doc?.env?.NPM_VERSION };
-  for (const [k, v] of Object.entries(pins))
-    if (v !== undefined && !EXACT.test(String(v)))
+  // Every tool pin in the top-level env, not only node and npm (#900).
+  for (const [k, v] of Object.entries(doc?.env ?? {}))
+    if (/_VERSION$/.test(k) && !EXACT.test(String(v)))
       add(file, "-", `env ${k} is ${String(v)}, not an exact version`);
   return pins;
 }
 
-function runRules(file, where, run, { isPublish, isPackOrPublish, pins, add }) {
+function runRules(file, where, run, { jobId, isPublish, isPackOrPublish, pins, add }) {
   if (run.includes("${{"))
     add(file, where, "a run: block interpolates ${{ }} (pass it through env:)");
   const lines = run
@@ -123,7 +138,11 @@ function runRules(file, where, run, { isPublish, isPackOrPublish, pins, add }) {
     .filter((l) => l !== "" && !l.startsWith("#"));
   if (isPublish)
     for (const line of lines)
-      if (PROJECT_CODE.test(line) && !PINNED_SELF_INSTALL.test(line))
+      if (
+        PROJECT_CODE.test(line) &&
+        !PINNED_SELF_INSTALL.test(line) &&
+        !(PUBLISH_EXCEPTIONS[jobId] ?? []).some((re) => re.test(line))
+      )
         add(file, where, "a credentialed publish job runs a package manager or repository code");
   if (isPackOrPublish) {
     if (/\bnpx\b/.test(run)) add(file, where, "runs a tool through npx (unpinned)");
@@ -189,7 +208,7 @@ function jobRules({ file, jobId, job, reusable, envs, allowed, used, pins, add }
   }
   const isPublish = typeof declared?.registry === "string";
   const isPackOrPublish = isPublish || /^pack-/.test(jobId) || declared !== undefined;
-  const ctx = { credentialed, isPublish, isPackOrPublish, allowed, used, pins, add };
+  const ctx = { jobId, credentialed, isPublish, isPackOrPublish, allowed, used, pins, add };
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;
     if (typeof step?.run === "string") runRules(file, where, step.run, ctx);

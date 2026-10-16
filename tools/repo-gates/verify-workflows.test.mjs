@@ -302,6 +302,56 @@ describe("each rule fires on a fixture that breaks only it", () => {
   ])("10 accepts npm publish %s", (arg) =>
     expect(run(swap('npm publish "./release/$ARTIFACT"', `npm publish ${arg}`))).toEqual([]),
   );
+  it.each([
+    "cargo build --release",
+    'cargo "+${RUST_VERSION}" package',
+    "dotnet build",
+    "dotnet pack -c Release",
+    "gem build confeature.gemspec",
+    "uv build",
+    "uvx twine check dist/*",
+    "dart pub get",
+    "python3 setup.py sdist",
+    "rake release",
+  ])("3 a publish job running %s", (cmd) =>
+    fires(
+      run(swap('npm publish "./release/$ARTIFACT"', cmd)),
+      /a credentialed publish job runs a package manager or repository code/,
+    ),
+  );
+  it.each([
+    'dotnet nuget push "./release/x.nupkg" --api-key "$K" --source https://api.nuget.org/v3/index.json',
+    'gem push "./release/$ARTIFACT"',
+  ])("3 accepts the registry client upload %s", (cmd) =>
+    expect(run(swap('npm publish "./release/$ARTIFACT"', cmd))).toEqual([]),
+  );
+  it.each([
+    ['cargo "+${RUST_VERSION}" publish --no-verify', "publish-crates"],
+    ["dart pub publish --force", "publish-pubdev"],
+  ])("3 a source-only upload (%s) is allowed in %s only", (cmd, job) => {
+    const PROJECT = /a credentialed publish job runs a package manager or repository code/;
+    // In another publish job it is project code.
+    fires(run(swap('npm publish "./release/$ARTIFACT"', cmd)), PROJECT);
+    // In its own job, and nowhere else, it is the recorded exception.
+    const own = swap("  publish-npm:\n", `  ${job}:\n`).replace(
+      'npm publish "./release/$ARTIFACT"',
+      cmd,
+    );
+    expect(run(own).filter((w) => PROJECT.test(w))).toEqual([]);
+    // A variant of it is not the exception.
+    const variant = own.replace(cmd, `${cmd} && cargo build`);
+    fires(run(variant), PROJECT);
+  });
+  it("9 every *_VERSION pin is exact", () =>
+    fires(
+      run(GOOD, {
+        head: HEAD.replace(
+          'NPM_VERSION: "11.20.0"\n',
+          'NPM_VERSION: "11.20.0"\n  RUST_VERSION: "1.88"\n',
+        ),
+      }),
+      /env RUST_VERSION is 1.88, not an exact version/,
+    ));
   it("9 a literal node-version in a pack job", () =>
     fires(
       run(GOOD.replaceAll("node-version: ${{ env.NODE_VERSION }}", "node-version: 22")),

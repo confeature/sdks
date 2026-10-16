@@ -124,8 +124,14 @@
   "allowedActions": [
     "astral-sh/setup-uv@*",
     "dagger/dagger-for-github@*",
+    "dart-lang/setup-dart@*",
     "denoland/setup-deno@*",
-    "pnpm/action-setup@*"
+    "NuGet/login@*",
+    "pnpm/action-setup@*",
+    "pypa/gh-action-pypi-publish@*",
+    "ruby/setup-ruby@*",
+    "rubygems/configure-rubygems-credentials@*",
+    "rust-lang/crates-io-auth-action@*"
   ],
   "releaseTags": {
     "name": "release tags: sdk-* and cli-v*",
