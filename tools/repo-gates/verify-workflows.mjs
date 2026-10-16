@@ -1057,6 +1057,44 @@ export function credentialsOf(maps, declared) {
   return { creds, deployKeys };
 }
 
+const GIT_ISOLATION = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
+/**
+ * Git's configuration isolation belongs on the git steps, never wider (round
+ * 5): at job or workflow level, actions/checkout inherits it, and checkout
+ * writes safe.directory with `git config --global`. So a job with a checkout
+ * sets neither at job or workflow level, and a credentialed step that runs
+ * git sets both, exactly, in its own env.
+ */
+function gitConfigRules(file, jobId, job, doc, credentialed, add) {
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  const checkout = steps.some(
+    (s) => typeof s?.uses === "string" && s.uses.startsWith("actions/checkout@"),
+  );
+  for (const [scope, map] of [
+    ["the workflow's", doc?.env],
+    ["the job's", job?.env],
+  ])
+    for (const k of Object.keys(GIT_ISOLATION))
+      if (checkout && Object.hasOwn(map ?? {}, k))
+        add(
+          file,
+          jobId,
+          `${k} is set in ${scope} env, which actions/checkout inherits (set it on the git steps)`,
+        );
+  if (!credentialed) return;
+  for (const s of steps) {
+    if (typeof s?.run !== "string") continue;
+    const runsGit = lexStrict(s.run).commands.some(
+      (c) => c.words.find((w) => !["if", "then", "else", "fi"].includes(w.raw))?.text === "git",
+    );
+    if (!runsGit) continue;
+    for (const [k, v] of Object.entries(GIT_ISOLATION))
+      if (String(s?.env?.[k]) !== v)
+        add(file, jobId, `step ${s?.name ?? "?"} runs git without ${k}: ${v} in its own env`);
+  }
+}
+
 /** Rules 1, 2, 3, 5, 6, 9 and the action half of 8, for one job. */
 function jobRules(args) {
   const {
@@ -1116,6 +1154,7 @@ function jobRules(args) {
   };
   if (credentialed) credentialedJobRules(file, jobId, job, doc, add);
   if (isPackOrPublish) pinScopeRules(file, jobId, job, doc, add);
+  gitConfigRules(file, jobId, job, doc, credentialed, add);
   if (typeof job?.uses === "string") callRules(file, jobId, job, ctx);
   for (const [i, step] of steps.entries()) {
     const where = `${jobId} step ${step?.name ?? i + 1}`;

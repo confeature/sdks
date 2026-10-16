@@ -1543,7 +1543,10 @@ describe("15 a run block reads only variables something defines (#794 review, ro
 });
 
 describe("rule 3 judges what bash passes, never the quoted source (#794 review, round 4)", () => {
-  const block = (cmd) => `      - run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
+  // The git isolation a credentialed git step must carry (round 5), so a git
+  // row is judged on its words.
+  const block = (cmd) =>
+    `      - env:\n          GIT_CONFIG_GLOBAL: /dev/null\n          GIT_CONFIG_NOSYSTEM: "1"\n        run: |\n          ${cmd.replace(/\n/g, "\n          ")}`;
   const inPublish = (cmd) => run(swap(PUBLISH_STEP, block(cmd)));
   it.each([
     ["printf '-v' X y", "printf '-v' X y"],

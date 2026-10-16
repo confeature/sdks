@@ -398,3 +398,44 @@ describe("the values an exception trusts are pinned (round 5, MED)", () => {
     ).toBe(true);
   });
 });
+
+describe("git's configuration isolation sits on the git steps (round 5)", () => {
+  it.each([
+    [
+      "publish-go sets GIT_CONFIG_GLOBAL at job level, which checkout inherits",
+      (w) => {
+        w[P].jobs["publish-go"].env.GIT_CONFIG_GLOBAL = "/dev/null";
+      },
+      /GIT_CONFIG_GLOBAL is set in the job's env, which actions\/checkout inherits/,
+    ],
+    [
+      "the workflow env sets GIT_CONFIG_NOSYSTEM",
+      (w) => {
+        w[P].env.GIT_CONFIG_NOSYSTEM = "1";
+      },
+      /GIT_CONFIG_NOSYSTEM is set in the workflow's env/,
+    ],
+    [
+      "a mirror's git step without the isolation",
+      (w) => {
+        const s = w[P].jobs["publish-packagist"].steps.find((x) => x.name === "Upload");
+        delete s.env.GIT_CONFIG_GLOBAL;
+      },
+      /step Upload runs git without GIT_CONFIG_GLOBAL: \/dev\/null/,
+    ],
+    [
+      "the Go push with GIT_CONFIG_NOSYSTEM off",
+      (w) => {
+        w[P].jobs["publish-go"].steps.find((x) => x.name === "Upload").env.GIT_CONFIG_NOSYSTEM =
+          "0";
+      },
+      /runs git without GIT_CONFIG_NOSYSTEM: 1|points every tool at another configuration/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    const got = added(mutate);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n"),
+    ).toBe(true);
+  });
+});
