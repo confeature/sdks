@@ -825,11 +825,27 @@ export function assignedNames(run) {
     }
     return out;
   }
-  const bare = run
+  // Here-document bodies are data (round 6); quoted strings and comments next.
+  const lines = run.split("\n");
+  const kept = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    kept.push(lines[i]);
+    const h = /<<-?\s*(['"]?)([A-Za-z_]\w*)\1/.exec(lines[i]);
+    if (h !== null) while (i + 1 < lines.length && lines[i + 1].trim() !== h[2]) i += 1;
+  }
+  let bare = kept
+    .join("\n")
     .replace(/'[^'\n]*'/g, "''")
     .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
     .replace(/(^|\s)#.*$/gm, "$1");
-  const AT = String.raw`(?:^|[;&|({]|\b(?:then|do|else|elif)\b)\s*`;
+  // A subshell's or a substitution's assignment never reaches the block, so
+  // ( … ) and $( … ) are emptied, innermost first.
+  for (let prev = ""; prev !== bare; ) {
+    prev = bare;
+    bare = bare.replace(/\([^()]*\)/g, "()");
+  }
+  // A keyword counts only where a command starts: `echo do FOO=1` is prose.
+  const AT = String.raw`(?:^|[;&|{])\s*(?:(?:then|do|else|elif)\s+)?`;
   for (const m of bare.matchAll(
     new RegExp(
       `${AT}(?:(?:local|export|readonly|declare(?:\\s+-\\w+)*)\\s+)?([A-Za-z_]\\w*)\\+?=`,

@@ -1731,6 +1731,13 @@ describe("15 an assignment counts only at command position (round 5)", () => {
     ["a ; inside double quotes", 'echo "a; FOO=1"\necho "$FOO"'],
     ["a ; inside single quotes", "echo 'a; FOO=1'\necho \"$FOO\""],
     ["a ; inside a comment", 'echo hi # a; FOO=1\necho "$FOO"'],
+    ["a keyword in prose", 'echo do FOO=1\necho "$FOO"'],
+    ["then in prose", 'echo then FOO=1\necho "$FOO"'],
+    ["a subshell's assignment", '(FOO=1); echo "$FOO"'],
+    ["a subshell's later assignment", '(true; FOO=1); echo "$FOO"'],
+    ["an unquoted $( )'s later assignment", 'X=$(true; FOO=1)\necho "$X $FOO"'],
+    ["an assignment inside $( )", 'X="$(FOO=1; echo)"\necho "$X $FOO"'],
+    ["a here-document body", 'cat <<EOF\nFOO=1\nEOF\necho "$FOO"'],
   ])("%s does not define the name", (_, body) => {
     fires(pack(body), /reads \$FOO, which no env:/);
     // And in a block the strict grammar cannot read (a pack job's $( )).
