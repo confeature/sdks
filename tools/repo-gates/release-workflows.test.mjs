@@ -857,24 +857,24 @@ describe("16 a step output reference names an output the step writes (round 6)",
     expect(SCRIPTS["tools/sdk-pack/resolve-publish.mjs"]).toEqual(
       expect.arrayContaining(["path", "version", "mirrorTag"]),
     ));
-  it("verifyWorkflows refuses a resolver that stops emitting path, in a copy of the repository", () => {
-    const dir = mkdtempSync(join(tmpdir(), "release-workflows-"));
-    try {
-      for (const rel of [SETTINGS, MANIFEST, WORKFLOWS, "tools/sdk-pack/resolve-publish.mjs"])
-        cpSync(join(ROOT, rel), join(dir, rel), { recursive: true });
-      const f = join(dir, "tools/sdk-pack/resolve-publish.mjs");
-      writeFileSync(
-        f,
-        readFileSync(f, "utf8").replace("    path: unit.path,", "    unitPath: unit.path,"),
-      );
-      expect(verifyWorkflows(dir).map((x) => x.why)).toContainEqual(
-        expect.stringMatching(
-          /steps\.resolve\.outputs\.path: tools\/sdk-pack\/resolve-publish\.mjs emits no output path/,
-        ),
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  it("F4: a run step that only mentions the name in a comment does not write it", () => {
+    const w = structuredClone(BASE);
+    const d = w[P].jobs["pack-npm"].steps.find((x) => x.id === "digest");
+    d.run = d.run.replace(/^.*sha256=.*$/m, '          # echo "sha256=x" >> "$GITHUB_OUTPUT"');
+    const got = referenceFindings(w, SCRIPTS, settings).map((f) => f.why);
+    expect(got).toContainEqual(
+      expect.stringMatching(/step digest writes no sha256= to \$GITHUB_OUTPUT/),
+    );
+  });
+  it("a name written by a line that does not redirect to GITHUB_OUTPUT is no output", () => {
+    const w = structuredClone(BASE);
+    const d = w[P].jobs["pack-npm"].steps.find((x) => x.id === "digest");
+    d.run = d.run.replace(/^(.*sha256=.*)>> "\$GITHUB_OUTPUT"$/m, '$1>> "$GITHUB_STEP_SUMMARY"');
+    expect(d.run).toContain("GITHUB_STEP_SUMMARY");
+    const got = referenceFindings(w, SCRIPTS, settings).map((f) => f.why);
+    expect(got).toContainEqual(
+      expect.stringMatching(/step digest writes no sha256= to \$GITHUB_OUTPUT/),
+    );
   });
 });
 

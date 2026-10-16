@@ -13,6 +13,8 @@ import { spawnSync } from "node:child_process";
 import {
   InputError,
   MANIFEST,
+  OUTPUT_KEYS,
+  checkSafe,
   Refusal,
   parseArgs,
   resolvePublish,
@@ -334,4 +336,22 @@ describe("the CLI", () => {
   it("a tag without --main-ref is refused, exit 1", () =>
     expect(cli("--tag", "sdk-python-v0.1.0").status).toBe(1));
   it("a usage error is exit 2", () => expect(cli("--nope", "x").status).toBe(2));
+});
+
+describe("OUTPUT_KEYS is exactly what the resolver emits (round 7)", () => {
+  it("every accepted unit's outputs are OUTPUT_KEYS, in order", async () => {
+    const out = await resolvePublish({ root: ROOT, unit: "node" });
+    expect(Object.keys(out)).toEqual([...OUTPUT_KEYS]);
+  });
+  it("checkSafe refuses to emit any other set: one missing, one extra, reordered", () => {
+    const ok = Object.fromEntries(OUTPUT_KEYS.map((k) => [k, "x"]));
+    expect(() => checkSafe(ok)).not.toThrow();
+    const { path: _p, ...missing } = ok;
+    expect(() => checkSafe(missing)).toThrow(/not OUTPUT_KEYS/);
+    expect(() => checkSafe({ ...ok, extra: "x" })).toThrow(/not OUTPUT_KEYS/);
+    const [first, ...rest] = OUTPUT_KEYS;
+    expect(() => checkSafe(Object.fromEntries([...rest, first].map((k) => [k, "x"])))).toThrow(
+      /not OUTPUT_KEYS/,
+    );
+  });
 });

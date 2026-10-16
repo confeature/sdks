@@ -167,7 +167,28 @@ export function onMain(root, commit, mainRef) {
   throw new Refusal(`git merge-base could not compare ${commit} with ${mainRef}`);
 }
 
-function checkSafe(out) {
+/**
+ * The outputs the resolver emits, exactly: the workflow's steps.resolve
+ * references are checked against this list (verify-workflows rule 16), and
+ * checkSafe refuses to emit any other set.
+ */
+export const OUTPUT_KEYS = Object.freeze([
+  "name",
+  "registry",
+  "coordinates",
+  "path",
+  "version",
+  "gate",
+  "daggerFn",
+  "releaseTag",
+  "mirrorRepository",
+  "mirrorTag",
+]);
+
+export function checkSafe(out) {
+  const keys = Object.keys(out);
+  if (keys.length !== OUTPUT_KEYS.length || keys.some((k, i) => k !== OUTPUT_KEYS[i]))
+    throw new Error(`resolve-publish emits ${keys.join(",")}, not OUTPUT_KEYS`);
   for (const [k, v] of Object.entries(out))
     if (typeof v !== "string" || !SAFE.test(v))
       throw new Refusal(`refusing to emit ${k}: unsafe characters`);

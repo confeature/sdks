@@ -107,6 +107,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
 import { lexStrict } from "./strict-shell.mjs";
+import { OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS } from "../sdk-pack/resolve-publish.mjs";
 
 export const SETTINGS = "tools/repo-gates/release-settings.json";
 export const MANIFEST = "dagger/sdk-manifest.json";
@@ -1831,15 +1832,9 @@ export const ACTION_OUTPUTS = {
   "rust-lang/crates-io-auth-action": ["token"],
   "NuGet/login": ["NUGET_API_KEY"],
 };
-/** The repository scripts whose outputs a step reference may name, read by verifyWorkflows. */
+/** The repository scripts whose outputs a step reference may name, by their exported list. */
 export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
-
-/** The keys a script appends to $GITHUB_OUTPUT: those of its `return checkSafe({ … })`. */
-export function scriptOutputKeys(source) {
-  const m = /return checkSafe\(\{([\s\S]*?)\}\);/.exec(source);
-  // `key: value` and the shorthand `key,`.
-  return m === null ? [] : [...m[1].matchAll(/^\s*([A-Za-z_]\w*)\s*[:,]/gm)].map((x) => x[1]);
-}
+const SCRIPT_OUTPUT_KEYS = { "tools/sdk-pack/resolve-publish.mjs": RESOLVER_OUTPUT_KEYS };
 
 /**
  * Why `steps.<id>.outputs.<name>` names nothing the step writes, or null
@@ -1861,8 +1856,18 @@ function stepOutputProblem(s, name, scriptOutputs) {
     return (scriptOutputs[script] ?? []).includes(name)
       ? null
       : `${script} emits no output ${name}`;
-  const writes =
-    /GITHUB_OUTPUT/.test(run) && new RegExp(`(?:^|[\\s"'{;])${name}(?:=|<<)`, "m").test(run);
+  // The write itself: a line that redirects to $GITHUB_OUTPUT and, before
+  // the redirection, writes `<name>=` or `<name><<` (round 7: a comment or a
+  // line that only mentions the name passed a text search).
+  const writes = run
+    .split("\n")
+    .map((l) => /^(.*?)>>\s*"?\$\{?GITHUB_OUTPUT\}?"?\s*$/.exec(l.trim()))
+    .some(
+      (m) =>
+        m !== null &&
+        !m[1].trimStart().startsWith("#") &&
+        new RegExp(`(?:^|[\\s"'{;])${name}(?:=|<<)`).test(m[1]),
+    );
   return writes ? null : `step ${s?.id} writes no ${name}= to $GITHUB_OUTPUT`;
 }
 
@@ -1952,11 +1957,9 @@ export function releaseGateFindings(workflows) {
   return out;
 }
 
-/** The outputs each OUTPUT_SCRIPTS script emits, read from the repository at `root`. */
-export function readScriptOutputs(root) {
-  const out = {};
-  for (const f of OUTPUT_SCRIPTS) out[f] = scriptOutputKeys(readFileSync(join(root, f), "utf8"));
-  return out;
+/** The outputs each OUTPUT_SCRIPTS script emits: its exported OUTPUT_KEYS, which it enforces. */
+export function readScriptOutputs() {
+  return Object.fromEntries(OUTPUT_SCRIPTS.map((f) => [f, [...SCRIPT_OUTPUT_KEYS[f]]]));
 }
 
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
@@ -1970,7 +1973,7 @@ export function verifyWorkflows(root) {
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
-    ...referenceFindings(workflows, readScriptOutputs(root), settings),
+    ...referenceFindings(workflows, readScriptOutputs(), settings),
   ];
 }
 
