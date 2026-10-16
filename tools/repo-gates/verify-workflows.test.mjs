@@ -371,10 +371,17 @@ describe("each rule fires on a fixture that breaks only it", () => {
     ["rake release", /rake is not a command/],
   ])("3 a publish job running %s", (cmd, why) => fires(run(swap(UPLOAD, cmd)), why));
   it.each([
-    'dotnet nuget push "./release/x.nupkg" --source https://api.nuget.org/v3/index.json',
+    'dotnet nuget push "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg" --source https://api.nuget.org/v3/index.json',
     'gem push "./release/$ARTIFACT"',
   ])("3 accepts the registry client upload %s", (cmd) =>
-    expect(run(swap(UPLOAD, cmd))).toEqual([]),
+    expect(
+      run(
+        swap(
+          PUBLISH_STEP,
+          `      - env:\n          UNIT_VERSION: \${{ needs.setup.outputs.version }}\n        run: ${cmd}`,
+        ),
+      ),
+    ).toEqual([]),
   );
   it.each([
     [
@@ -1058,7 +1065,7 @@ git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got
     ],
     [
       "the NuGet upload",
-      'dotnet nuget push "./release/x.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
+      'dotnet nuget push "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json',
     ],
   ])("accepts %s", (_, cmd) => expect(credOnly(inPublish(cmd))).toEqual([]));
 

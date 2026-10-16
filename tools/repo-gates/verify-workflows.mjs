@@ -299,6 +299,9 @@ const scratchOnly = (name) => (ops) =>
   ops.every((w) => SCRATCH.test(w.text) && !w.text.split("/").includes(".."))
     ? null
     : `${name} touches only publish-tmp/`;
+/** What each registry client may upload: the received artifact, by its pinned name. */
+const UPLOADED = "./release/${ARTIFACT}";
+const NUPKG = "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg";
 /** The printf formats the credentialed jobs use, as bash passes them (unquoted). */
 const PRINTF_FORMATS = new Set(["%s\\n", "%s  %s\\n"]);
 const SED_SCRIPT = /^s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1g?$/;
@@ -502,14 +505,22 @@ export const CREDENTIALED_COMMANDS = {
       options: { "--access": LITERAL, "--provenance": FLAG, "--ignore-scripts": FLAG },
       positional: "any",
       require: ["--ignore-scripts"],
-      check: (ops) => (ops.length === 1 ? null : "npm publish uploads one tarball"),
+      // Exactly the artifact the pack job handed on (round 6: a package.json
+      // written to publish-tmp/ was publishable).
+      check: (ops) =>
+        ops.length === 1 && ops[0].text === UPLOADED
+          ? null
+          : `npm publish uploads only ${UPLOADED}`,
     });
   },
   gem: (a) =>
     a[0]?.text === "push"
       ? argsProblem("gem push", a.slice(1), {
           positional: "any",
-          check: (ops) => (ops.length === 1 ? null : "gem push uploads one gem"),
+          check: (ops) =>
+            ops.length === 1 && ops[0].text === UPLOADED
+              ? null
+              : `gem push uploads only ${UPLOADED}`,
         })
       : "gem runs only `push`",
   dotnet: (a) =>
@@ -518,6 +529,10 @@ export const CREDENTIALED_COMMANDS = {
           options: { "--api-key": VALUE, "--source": "=https://api.nuget.org/v3/index.json" },
           positional: "any",
           require: ["--source"],
+          check: (ops) =>
+            ops.length === 1 && ops[0].text === NUPKG
+              ? null
+              : `dotnet nuget push uploads only ${NUPKG}`,
         })
       : "dotnet runs only `nuget push`",
   rustup: (a) =>
