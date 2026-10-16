@@ -268,6 +268,19 @@ describe("every refusal fails closed", () => {
       Refusal,
     );
   });
+  // Both reach `git merge-base` as arguments: a value starting with `-` would
+  // be read as an option, never as a revision (#794 review).
+  it.each([
+    ["--commit", { commit: "--help" }],
+    ["--main-ref", { mainRef: "--upload-pack=x" }],
+  ])("a %s value that starts with -", (_, over) => {
+    let called = false;
+    return refused(
+      fixture([unit()], [covered()], base),
+      { tag: "sdk-a-v1.2.3", ...MAIN, isOnMain: () => (called = true), ...over },
+      /starts with -/,
+    ).then(() => expect(called).toBe(false));
+  });
   it("a release tag without --main-ref", () =>
     expect(
       resolvePublish({

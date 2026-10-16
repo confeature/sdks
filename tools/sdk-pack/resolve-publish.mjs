@@ -247,6 +247,13 @@ export async function resolvePublish({
     }
     if (mainRef === undefined)
       throw new Refusal("a release tag needs --main-ref: release tags are cut from main only");
+    // Both are `git merge-base` arguments: one starting with `-` is an option.
+    for (const [flag, v] of [
+      ["--commit", commit],
+      ["--main-ref", mainRef],
+    ])
+      if (String(v).startsWith("-"))
+        throw new Refusal(`${flag} "${String(v)}" starts with -: it would be read as a git option`);
     if (!isOnMain(root, commit, mainRef))
       throw new Refusal(`${commit} is not on ${mainRef}: release tags are cut from main only`);
   }
