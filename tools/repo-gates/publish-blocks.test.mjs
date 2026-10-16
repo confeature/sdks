@@ -30,14 +30,15 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { referenceProblem } from "./verify-workflows.mjs";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { ENVIRONMENT_COMMANDS, referenceProblem } from "./verify-workflows.mjs";
+import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const flow = (f) => parseYaml(readFileSync(join(ROOT, ".github/workflows", f), "utf8"));
@@ -105,7 +106,7 @@ function resolveEnv({ env, doc, jobId }, table) {
 /** Write `tools` (name → bash body) into a fresh bin directory (`dir`, or a test's scratch). */
 function bin(tools, dir = scratch()) {
   for (const [name, body] of Object.entries(tools)) {
-    writeFileSync(join(dir, name), `#!${BASH}\n${body}\n`);
+    writeFileSync(join(dir, name), `#!${BASH}\n${String(body)}\n`);
     chmodSync(join(dir, name), 0o755);
   }
   return dir;
@@ -117,55 +118,77 @@ const argvLog = (log) =>
   existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
 
 /**
- * Fail-closed network stubs on every step's PATH: curl refuses any URL but
- * $CURL_ALLOW (a test that expects one sets it), ssh refuses outright.
+ * Every program that can reach a network or a registry. A block never gets
+ * the real one: each is a fail-closed stub unless the test stubs it to
+ * record. curl's default stub also lets through the one URL in $CURL_ALLOW.
  */
-// Module-level, so outside the per-test cleanup: removing it would put the
-// real curl back on PATH for every later test.
-const NET = bin(
-  {
-    curl: `${RECORD("curl")}
-for a in "$@"; do case "$a" in http*) [ -n "$CURL_ALLOW" ] && [ "\${a#"$CURL_ALLOW"}" != "$a" ] && exit 0 ;; esac; done
-echo "curl stub: no network in this test ($*)" >&2; exit 97`,
-    ssh: 'echo "ssh stub: no network in this test" >&2; exit 97',
-  },
-  mkdtempSync(join(tmpdir(), "publish-blocks-net-")),
-);
+const NETWORK = [
+  "curl",
+  "ssh",
+  "wget",
+  "nc",
+  "npm",
+  "gh",
+  "aws",
+  "node",
+  "python3",
+  "gem",
+  "dotnet",
+  "cargo",
+  "rustup",
+  "dart",
+  "deno",
+];
+const FAIL_CLOSED = (name) => `echo "${name} stub: no network in this test ($*)" >&2; exit 97`;
+const CURL = `${RECORD("curl")}
+for a in "$@"; do case "$a" in http*) [ -n "$CURL_ALLOW" ] && [ "$a" = "$CURL_ALLOW" ] && exit 0 ;; esac; done
+echo "curl stub: no network in this test ($*)" >&2; exit 97`;
+/** bash's builtins, which need no file on PATH. */
+const BUILTINS = new Set(["[", "test", "echo", "printf", "exit", "umask", "cd", "true", "false"]);
+const which = (tool) =>
+  spawnSync("/bin/sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
 
 /**
- * The runner is Ubuntu, whose sha256sum is GNU's. On macOS only, `shasum -a
- * 256` stands in (same --check, --strict, --quiet): a shim of the coreutil,
- * never of the block under test.
+ * PATH for one block: a scratch bin holding exactly `tools` (the job's
+ * ENVIRONMENT_COMMANDS plus the extras a test names for an exception script)
+ * as links to the real programs, every NETWORK program as a stub, and nothing
+ * of the process PATH. The runner is Ubuntu, whose sha256sum is GNU's; on
+ * macOS only, `shasum -a 256` (same --check, --strict, --quiet) stands in.
  */
-const SHIM =
-  process.platform === "darwin" ? mkdtempSync(join(tmpdir(), "publish-blocks-shim-")) : null;
-if (SHIM !== null) {
-  writeFileSync(join(SHIM, "sha256sum"), `#!${BASH}\nexec shasum -a 256 "$@"\n`);
-  chmodSync(join(SHIM, "sha256sum"), 0o755);
+function toolPath(tools, stubs = {}) {
+  const dir = scratch();
+  for (const t of new Set(tools)) {
+    if (BUILTINS.has(t) || NETWORK.includes(t) || Object.hasOwn(stubs, t)) continue;
+    if (t === "sha256sum" && process.platform === "darwin") {
+      writeFileSync(join(dir, t), `#!${BASH}\nexec ${which("shasum")} -a 256 "$@"\n`);
+      chmodSync(join(dir, t), 0o755);
+      continue;
+    }
+    const real = which(t);
+    if (real === "") throw new Error(`no ${String(t)} on this machine`);
+    symlinkSync(real, join(dir, t));
+  }
+  const all = Object.fromEntries(NETWORK.map((n) => [n, n === "curl" ? CURL : FAIL_CLOSED(n)]));
+  bin({ ...all, ...stubs }, dir);
+  return dir;
 }
-afterAll(() => {
-  rmSync(NET, { recursive: true, force: true });
-  if (SHIM !== null) rmSync(SHIM, { recursive: true, force: true });
-});
-/** The network stubs are first on every path, every time a block runs. */
-const expectNetStubs = () =>
-  expect(existsSync(join(NET, "curl")) && existsSync(join(NET, "ssh"))).toBe(true);
-const path = (...extra) =>
-  [...extra, NET, ...(SHIM === null ? [] : [SHIM]), process.env.PATH].join(":");
 
 /**
  * Run one block as GitHub does, in `cwd`, with exactly `env` (the step's
- * resolved env), `test` (the named test overrides) and a minimal process env.
- * GIT_ALLOW_PROTOCOL=file is applied to every step.
+ * resolved env), `test` (the named test overrides) and the toolPath of its
+ * job (plus `tools`, with `stubs`). GIT_ALLOW_PROTOCOL=file on every step.
  */
-function runBlock({ run }, cwd, env, test = {}) {
-  expectNetStubs();
+function runBlock({ run, doc, jobId }, cwd, env, { test = {}, stubs = {}, tools = [] } = {}) {
+  const job = doc.jobs[jobId];
+  const environment = typeof job.environment === "string" ? job.environment : job.environment?.name;
+  const PATH = toolPath([...(ENVIRONMENT_COMMANDS[environment] ?? []), ...tools], stubs);
   const file = join(scratch(), "step.sh");
   writeFileSync(file, run);
   return spawnSync(BASH, ["--noprofile", "--norc", "-eo", "pipefail", file], {
     cwd,
     encoding: "utf8",
-    env: { PATH: path(), HOME: scratch(), ...env, GIT_ALLOW_PROTOCOL: "file", ...test },
+    // LC_ALL=C: the runner's messages, not this machine's locale.
+    env: { PATH, HOME: scratch(), LC_ALL: "C", ...env, GIT_ALLOW_PROTOCOL: "file", ...test },
   });
 }
 
@@ -204,6 +227,22 @@ function history(...messages) {
 
 const sha256 = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
+describe("a block's PATH is exactly its job's tools and the stubs", () => {
+  const fake = (jobId, run) => ({ run, doc: PUBLISH, jobId });
+  it("a program outside the job's ENVIRONMENT_COMMANDS is not found (publish-npm has no ls)", () => {
+    const r = runBlock(fake("publish-npm", "ls"), scratch(), {});
+    expect(r.status).toBe(127);
+  });
+  it.each(["wget x", "nc -z x 1", "python3 -c 1", "node -e 1", "aws s3 ls", "gh api x"])(
+    "%s reaches the fail-closed stub",
+    (cmd) => {
+      const r = runBlock(fake("publish-maven", cmd), scratch(), {});
+      expect(r.status).toBe(97);
+      expect(r.stderr).toContain("stub: no network in this test");
+    },
+  );
+});
+
 describe.each([
   ["publish-packagist", "git@github.com:confeature/confeature-php-sdk.git", "pack-packagist"],
   ["publish-swiftpm", "git@github.com:confeature/confeature-swift.git", "pack-swiftpm"],
@@ -231,7 +270,7 @@ describe.each([
       const s = step(PUBLISH, jobId, name);
       const env = resolveEnv(s, table);
       if (name !== "Install the deploy key") expectGitIsolation(env, { push: name === "Upload" });
-      const r = runBlock(s, ws, env, name === "Upload" ? remote.env : {});
+      const r = runBlock(s, ws, env, { test: name === "Upload" ? remote.env : {} });
       if (r.status !== 0) {
         failed = name;
         errors.push(r.stderr);
@@ -291,11 +330,14 @@ describe("publish-go tags the checkout's HEAD, verbatim", () => {
       "github.workspace": clone,
     };
     let status = 0;
+    let stderr = "";
     for (const name of ["Install the deploy key", "Upload"]) {
       const s = step(PUBLISH, "publish-go", name);
       const env = resolveEnv(s, table);
       if (name === "Upload") expectGitIsolation(env, { push: true });
-      status = runBlock(s, clone, env, name === "Upload" ? push : {}).status;
+      const r = runBlock(s, clone, env, { test: name === "Upload" ? push : {} });
+      status = r.status;
+      stderr = r.stderr;
       if (status !== 0) break;
     }
     const rm = step(PUBLISH, "publish-go", "Remove the deploy key");
@@ -304,62 +346,77 @@ describe("publish-go tags the checkout's HEAD, verbatim", () => {
     ).toBe("always()");
     expect(runBlock(rm, clone, resolveEnv(rm, table)).status).toBe(0);
     expect(existsSync(join(clone, "publish-tmp/ssh"))).toBe(false);
-    return status;
+    return { status, stderr };
   };
   it("pushes HEAD:refs/tags/<module tag> to confeature/sdks, and removes the key", () => {
     const clone = history("one", "two");
     const remote = redirect("git@github.com:confeature/sdks.git");
-    expect(run(clone, remote, remote.env)).toBe(0);
+    expect(run(clone, remote, remote.env).status).toBe(0);
     expect(git(remote.bare, "rev-parse", "refs/tags/apps/sdk-go/v1.2.3")).toBe(
       git(clone, "rev-parse", "HEAD"),
     );
   });
-  it("without the redirect, the push reaches no network, fails, and the key is still removed", () => {
-    expect(run(history("one"), null, {})).not.toBe(0);
+  it("without the redirect, git refuses the ssh transport, and the key is still removed", () => {
+    const { status, stderr } = run(history("one"), null, {});
+    expect(status).not.toBe(0);
+    expect(stderr).toMatch(/transport 'ssh' not allowed/);
   });
 });
 
 describe("the uploads hand each client exactly the resolved artifact", () => {
-  const CLIENT = (name) => RECORD(name);
-  /** release/ holding `files`, plus whatever `extra` copies from the repository. */
-  function workspace(files, extra = []) {
+  /** release/ holding `files`, plus whatever `copies` names from the repository. */
+  function workspace(files, copies = []) {
     const ws = scratch();
     for (const [f, body] of Object.entries(files)) {
       mkdirSync(dirname(join(ws, f)), { recursive: true });
       writeFileSync(join(ws, f), body);
     }
-    for (const f of extra) {
+    for (const f of copies) {
       mkdirSync(dirname(join(ws, f)), { recursive: true });
       copyFileSync(join(ROOT, f), join(ws, f));
     }
     return ws;
   }
-  const upload = (doc, jobId, name, ws, table, tools, test = {}) => {
+  /** Run one step with recording `stubs`, the extra real `tools` it needs, and `test` overrides. */
+  const upload = ({ doc = PUBLISH, jobId, name, ws, table, stubs, tools = [], test = {} }) => {
     const log = join(scratch(), "argv.log");
     const s = step(doc, jobId, name);
     const r = runBlock(s, ws, resolveEnv(s, table), {
-      PATH: path(bin(tools)),
-      ARGV_LOG: log,
-      ...test,
+      stubs,
+      tools,
+      test: { ARGV_LOG: log, ...test },
     });
     return { r, argv: argvLog(log) };
   };
+  const NPM_TABLE = {
+    "needs.pack-npm.outputs.sha256": "s",
+    "needs.pack-npm.outputs.file": "x-1.0.0.tgz",
+    "needs.setup.outputs.coordinates": "@confeature/x",
+    "needs.setup.outputs.version": "1.0.0",
+  };
+
+  it("npm installs itself at the workflow's NPM_VERSION, scripts off", () => {
+    const { r, argv } = upload({
+      jobId: "publish-npm",
+      name: "Install the pinned npm",
+      ws: scratch(),
+      table: NPM_TABLE,
+      stubs: { npm: RECORD("npm") },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(PUBLISH.env.NPM_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(argv).toEqual([`npm install --global --ignore-scripts npm@${PUBLISH.env.NPM_VERSION}`]);
+  });
 
   it("npm publishes ./release/<the pack job's file>", () => {
     const ws = workspace({ "release/x-1.0.0.tgz": "t" });
-    const { r, argv } = upload(
-      PUBLISH,
-      "publish-npm",
-      "Upload",
+    const { r, argv } = upload({
+      jobId: "publish-npm",
+      name: "Upload",
       ws,
-      {
-        "needs.pack-npm.outputs.sha256": "s",
-        "needs.pack-npm.outputs.file": "x-1.0.0.tgz",
-        "needs.setup.outputs.coordinates": "@confeature/x",
-        "needs.setup.outputs.version": "1.0.0",
-      },
-      { npm: CLIENT("npm") },
-    );
+      table: NPM_TABLE,
+      stubs: { npm: RECORD("npm") },
+    });
     expect(r.status, r.stderr).toBe(0);
     expect(argv).toEqual([
       "npm publish --access public --provenance --ignore-scripts ./release/x-1.0.0.tgz",
@@ -369,19 +426,18 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
 
   it("gem pushes ./release/<the pack job's file>", () => {
     const ws = workspace({ "release/x-1.0.0.gem": "g" });
-    const { r, argv } = upload(
-      PUBLISH,
-      "publish-rubygems",
-      "Upload",
+    const { r, argv } = upload({
+      jobId: "publish-rubygems",
+      name: "Upload",
       ws,
-      {
+      table: {
         "needs.pack-rubygems.outputs.sha256": "s",
         "needs.pack-rubygems.outputs.file": "x-1.0.0.gem",
         "needs.setup.outputs.coordinates": "x",
         "needs.setup.outputs.version": "1.0.0",
       },
-      { gem: CLIENT("gem") },
-    );
+      stubs: { gem: RECORD("gem") },
+    });
     expect(r.status, r.stderr).toBe(0);
     expect(argv).toEqual(["gem push ./release/x-1.0.0.gem"]);
     expect(existsSync(join(ws, "release/x-1.0.0.gem"))).toBe(true);
@@ -389,25 +445,66 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
 
   it("dotnet pushes ./release/<coordinates>.<version>.nupkg to nuget.org with the exchanged key", () => {
     const ws = workspace({ "release/Confeature.Client.1.2.3.nupkg": "n" });
-    const { r, argv } = upload(
-      PUBLISH,
-      "publish-nuget",
-      "Upload",
+    const { r, argv } = upload({
+      jobId: "publish-nuget",
+      name: "Upload",
       ws,
-      {
+      table: {
         "needs.pack-nuget.outputs.sums": "s",
         "needs.setup.outputs.coordinates": "Confeature.Client",
         "needs.setup.outputs.version": "1.2.3",
         "steps.login.outputs.NUGET_API_KEY": "oidc-key",
       },
-      { dotnet: CLIENT("dotnet") },
-    );
+      stubs: { dotnet: RECORD("dotnet") },
+    });
     expect(r.status, r.stderr).toBe(0);
     expect(argv).toEqual([
       "dotnet nuget push ./release/Confeature.Client.1.2.3.nupkg --api-key oidc-key --source https://api.nuget.org/v3/index.json",
     ]);
     expect(existsSync(join(ws, "release/Confeature.Client.1.2.3.nupkg"))).toBe(true);
   });
+
+  it("the Go job asks the proxy for exactly the module's version info", () => {
+    const { r, argv } = upload({
+      jobId: "publish-go",
+      name: "Ask the Go proxy for the release",
+      ws: scratch(),
+      table: {
+        "needs.setup.outputs.releaseTag": "apps/sdk-go/v1.2.3",
+        "needs.setup.outputs.version": "1.2.3",
+        "secrets.GO_TAG_DEPLOY_KEY": "k",
+      },
+      test: {
+        CURL_ALLOW:
+          "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v1.2.3.info",
+      },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(argv).toEqual([
+      "curl -fsS --proto =https --retry 5 --retry-delay 15 --retry-all-errors https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v1.2.3.info",
+    ]);
+  });
+
+  // The Maven tools maven-r2-upload.sh runs (its exception), and the aws stub's own.
+  const MAVEN_TOOLS = [
+    "bash",
+    "mktemp",
+    "rm",
+    "grep",
+    "sed",
+    "find",
+    "sort",
+    "sha256sum",
+    "mkdir",
+    "cp",
+    "dirname",
+    "cat",
+  ];
+  const AWS = `${RECORD("aws")}
+key=""; body=""; out=""; verb="$4"; shift 4
+while [ $# -gt 0 ]; do case "$1" in --key) key="$2"; shift 2;; --body) body="$2"; shift 2;; --bucket|--content-type|--cache-control|--if-none-match) shift 2;; *) out="$1"; shift;; esac; done
+if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(dirname "$key")"; cp "$body" "$STORE/$key"; exit 0; fi
+[ -f "$STORE/$key" ] || { echo "An error occurred (NoSuchKey)" >&2; exit 254; }; cp "$STORE/$key" "$out"`;
 
   // The java and android units' live root module names no target (round 6:
   // that stopped the upload with exit 1); x has no module at all.
@@ -431,12 +528,12 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
         );
       const ws = workspace(files, ["tools/sdk-pack/maven-r2-upload.sh"]);
       const store = scratch();
-      const { r, argv } = upload(
-        PUBLISH,
-        "publish-maven",
-        "Upload",
+      const pom = `https://maven.confeature.io/io/confeature/${root}/${version}/${root}-${version}.pom`;
+      const { r, argv } = upload({
+        jobId: "publish-maven",
+        name: "Upload",
         ws,
-        {
+        table: {
           "needs.pack-maven.outputs.sums": "s",
           "needs.setup.outputs.coordinates": `io.confeature:${root}`,
           "needs.setup.outputs.version": version,
@@ -444,18 +541,10 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
           "secrets.MAVEN_R2_SECRET_ACCESS_KEY": "secret",
           "secrets.CLOUDFLARE_ACCOUNT_ID": "acct",
         },
-        {
-          aws: `${CLIENT("aws")}
-key=""; body=""; out=""; verb="$4"; shift 4
-while [ $# -gt 0 ]; do case "$1" in --key) key="$2"; shift 2;; --body) body="$2"; shift 2;; --bucket|--content-type|--cache-control|--if-none-match) shift 2;; *) out="$1"; shift;; esac; done
-if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(dirname "$key")"; cp "$body" "$STORE/$key"; exit 0; fi
-[ -f "$STORE/$key" ] || { echo "An error occurred (NoSuchKey)" >&2; exit 254; }; cp "$STORE/$key" "$out"`,
-        },
-        {
-          STORE: store,
-          CURL_ALLOW: `https://maven.confeature.io/io/confeature/${root}/${version}/${root}-${version}.pom`,
-        },
-      );
+        stubs: { aws: AWS },
+        tools: MAVEN_TOOLS,
+        test: { STORE: store, CURL_ALLOW: pom },
+      });
       expect(r.status, r.stdout + r.stderr).toBe(0);
       const puts = argv.filter((a) => a.includes(" put-object "));
       expect(puts.length).toBe(Object.keys(files).length);
@@ -466,7 +555,7 @@ if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(d
           ),
         );
       expect(argv.at(-1)).toBe(
-        `curl --proto =https --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors https://maven.confeature.io/io/confeature/${root}/${version}/${root}-${version}.pom`,
+        `curl --proto =https --tlsv1.2 -fsSI --retry 5 --retry-delay 15 --retry-all-errors ${pom}`,
       );
       expect(
         readFileSync(
@@ -482,27 +571,77 @@ if [ "$verb" = put-object ]; then [ -f "$body" ] || exit 9; mkdir -p "$STORE/$(d
     ["promote", "Promote", "bash apps/cli/scripts/publish-r2.sh promote 1.2.3"],
   ])("cli-release %s runs publish-r2.sh with the tag's version", (jobId, name, want) => {
     const ws = workspace({ "dist/SHA256SUMS": "x" }, ["apps/cli/scripts/publish-r2.sh"]);
-    const { r, argv } = upload(
-      CLI,
+    const { r, argv } = upload({
+      doc: CLI,
       jobId,
       name,
       ws,
-      {
+      table: {
         "secrets.R2_ACCESS_KEY_ID": "kid",
         "secrets.R2_SECRET_ACCESS_KEY": "secret",
         "secrets.CLOUDFLARE_ACCOUNT_ID": "acct",
         "github.ref_name": "cli-v1.2.3",
         ...(jobId === "upload" ? { "needs.release.outputs.sums-digest": "d" } : {}),
       },
-      {
-        // The inner `bash`, never the runner's (/bin/bash, by absolute path).
-        bash: `${CLIENT("bash")}
+      // The inner `bash`, never the runner's (/bin/bash, by absolute path).
+      stubs: {
+        bash: `${RECORD("bash")}
 [ -f "$1" ] || { echo "no such script: $1" >&2; exit 127; }
 [ -n "$R2_ACCESS_KEY_ID" ] && [ -n "$R2_SECRET_ACCESS_KEY" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || exit 8`,
       },
-    );
+    });
     expect(r.status, r.stderr).toBe(0);
     expect(argv).toEqual([want]);
+  });
+
+  describe("cli-release's GitHub mirror (the release job, GH_TOKEN)", () => {
+    // gh release view <tag> exits 1 until $GH_EXISTS is set; --json … prints $GH_ASSETS.
+    const GH = `${RECORD("gh")}
+[ -n "$GH_TOKEN" ] || { echo "no GH_TOKEN" >&2; exit 4; }
+if [ "$1 $2" = "release view" ]; then
+  [ -n "$GH_EXISTS" ] || exit 1
+  [ "$4" = "--json" ] && echo "\${GH_ASSETS:-0}"
+fi
+exit 0`;
+    const TABLE = { "github.token": "t", "github.ref_name": "cli-v1.2.3" };
+    const ws = () =>
+      workspace({ "apps/cli/dist/confeature-x86_64": "b", "apps/cli/dist/SHA256SUMS": "s" });
+    const gh = (name, test, dir = ws()) =>
+      upload({ doc: CLI, jobId: "release", name, ws: dir, table: TABLE, stubs: { gh: GH }, test });
+
+    it("creates the release from the tag when it does not exist", () => {
+      const { r, argv } = gh("Create the GitHub release if it does not exist", {});
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv).toEqual([
+        "gh release view cli-v1.2.3",
+        "gh release create cli-v1.2.3 --title Confeature CLI 1.2.3 --generate-notes --verify-tag",
+      ]);
+    });
+    it("creates nothing when it exists", () => {
+      const { r, argv } = gh("Create the GitHub release if it does not exist", { GH_EXISTS: "1" });
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv).toEqual(["gh release view cli-v1.2.3"]);
+    });
+    it("uploads the binaries and SHA256SUMS to a release with no assets", () => {
+      const { r, argv } = gh("Upload assets to the GitHub release (mirror)", {
+        GH_EXISTS: "1",
+        GH_ASSETS: "0",
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv).toEqual([
+        "gh release view cli-v1.2.3 --json assets --jq .assets | length",
+        "gh release upload cli-v1.2.3 apps/cli/dist/confeature-x86_64 apps/cli/dist/SHA256SUMS",
+      ]);
+    });
+    it("replaces nothing on a release that already has assets", () => {
+      const { r, argv } = gh("Upload assets to the GitHub release (mirror)", {
+        GH_EXISTS: "1",
+        GH_ASSETS: "3",
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(argv).toEqual(["gh release view cli-v1.2.3 --json assets --jq .assets | length"]);
+      expect(r.stdout).toContain("already carries 3 assets");
+    });
   });
 });
 
@@ -526,10 +665,10 @@ d=""; while [ $# -gt 0 ]; do [ "$1" = --directory ] && d="$2"; shift; done
   const exec = (jobId, names, table, manifestFile) => {
     const ws = workspace(manifestFile);
     const log = join(scratch(), "argv.log");
-    const tools = bin({ rustup: RECORD("rustup"), cargo: CARGO, dart: DART });
+    const stubs = { rustup: RECORD("rustup"), cargo: CARGO, dart: DART };
     for (const name of names) {
       const s = step(PUBLISH, jobId, name);
-      const r = runBlock(s, ws, resolveEnv(s, table), { PATH: path(tools), ARGV_LOG: log });
+      const r = runBlock(s, ws, resolveEnv(s, table), { stubs, test: { ARGV_LOG: log } });
       expect(r.status, `${name}: ${r.stderr}`).toBe(0);
     }
     return argvLog(log);
