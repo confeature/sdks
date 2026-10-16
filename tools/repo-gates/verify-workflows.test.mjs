@@ -1688,3 +1688,33 @@ describe("14 a status function cannot run a job past a failed workflow-rules (#7
     ).toMatch(/step \? sets (if|continue-on-error):, so the rules can be skipped/),
   );
 });
+
+describe("15 an assignment counts only at command position (round 5)", () => {
+  const pack = (body) =>
+    run(swap(INSTALL_STEP, `      - run: |\n          ${body.replace(/\n/g, "\n          ")}`));
+  it.each([
+    ["a comment", '# FOO=\necho "${FOO}"'],
+    ["a trailing comment", 'echo hi # FOO=1\necho "$FOO"'],
+    ["a quoted NAME=", 'echo "FOO=x"\necho "$FOO"'],
+    ["a single-quoted NAME=", "echo 'FOO=x'\necho \"$FOO\""],
+    ["prose in an argument", 'echo set FOO=1 first\necho "$FOO"'],
+    ["a ; inside double quotes", 'echo "a; FOO=1"\necho "$FOO"'],
+    ["a ; inside single quotes", "echo 'a; FOO=1'\necho \"$FOO\""],
+    ["a ; inside a comment", 'echo hi # a; FOO=1\necho "$FOO"'],
+  ])("%s does not define the name", (_, body) => {
+    fires(pack(body), /reads \$FOO, which no env:/);
+    // And in a block the strict grammar cannot read (a pack job's $( )).
+    fires(pack(`X="$(true)"\necho "$X"\n${body}`), /reads \$FOO, which no env:/);
+  });
+  it.each([
+    ["a plain assignment", 'FOO="$(date)"\necho "$FOO"'],
+    ["one after &&", 'true && FOO=1\necho "$FOO"'],
+    ["one inside then", 'if true; then FOO=1; fi\necho "$FOO"'],
+    ["local", 'f() { local FOO=1; echo "$FOO"; }'],
+    ["a while read", 'while IFS= read -r FOO; do echo "$FOO"; done < x'],
+    ["a for loop", 'for FOO in a b; do echo "$FOO"; done'],
+  ])("%s defines the name", (_, body) => {
+    expect(pack(body)).toEqual([]);
+    expect(pack(`X="$(true)"\necho "$X"\n${body}`)).toEqual([]);
+  });
+});

@@ -741,15 +741,61 @@ export const RUNNER_DEFAULTS = new Set([
  * OIDC exchange, burning the version.
  */
 export function undefinedVariables(run, defined) {
-  const assigned = new Set(
-    [...run.matchAll(/(?:^|[\s;&|(])(?:local\s+|export\s+)?([A-Za-z_]\w*)\+?=/g)].map((m) => m[1]),
-  );
-  for (const m of run.matchAll(
-    /\bread\s+(?:-r\s+)?((?:[A-Za-z_]\w*[ \t]*)+)|\bfor\s+([A-Za-z_]\w*)\s+in\b/g,
-  ))
-    for (const n of (m[1] ?? m[2]).trim().split(/\s+/)) assigned.add(n);
+  const assigned = assignedNames(run);
   const used = new Set([...run.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => m[1]));
   return [...used].filter((n) => !defined.has(n) && !assigned.has(n) && !RUNNER_DEFAULTS.has(n));
+}
+
+/**
+ * The names a block assigns, found only at command position (round 5): a
+ * raw-text search let `# FOO=`, `echo "NAME=x"` or prose mask an undefined
+ * read. A block the strict grammar reads is judged on its commands; any
+ * other (a pack job's) on its text with quoted strings and comments removed,
+ * a NAME= counting only at the start of a simple command (line start, or
+ * after ; & | ( { then do else elif, local, export, readonly or declare).
+ */
+export function assignedNames(run) {
+  const out = new Set();
+  const lexed = lexStrict(run);
+  if (lexed.problems.length === 0) {
+    const KW = new Set(["if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!"]);
+    for (const c of lexed.commands) {
+      let k = 0;
+      while (k < c.words.length && KW.has(c.words[k].raw)) k += 1;
+      for (; k < c.words.length; k += 1) {
+        const m = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(c.words[k].raw);
+        if (m === null) break;
+        out.add(m[1]);
+      }
+      const rest = c.words.slice(k);
+      if (rest[0]?.raw === "read")
+        for (const w of rest.slice(1)) if (/^[A-Za-z_]\w*$/.test(w.raw)) out.add(w.raw);
+      if (rest[0]?.raw === "for" && /^[A-Za-z_]\w*$/.test(rest[1]?.raw ?? "")) out.add(rest[1].raw);
+    }
+    return out;
+  }
+  const bare = run
+    .replace(/'[^'\n]*'/g, "''")
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
+    .replace(/(^|\s)#.*$/gm, "$1");
+  const AT = String.raw`(?:^|[;&|({]|\b(?:then|do|else|elif)\b)\s*`;
+  for (const m of bare.matchAll(
+    new RegExp(
+      `${AT}(?:(?:local|export|readonly|declare(?:\\s+-\\w+)*)\\s+)?([A-Za-z_]\\w*)\\+?=`,
+      "gm",
+    ),
+  ))
+    out.add(m[1]);
+  for (const m of bare.matchAll(
+    new RegExp(
+      `${AT}(?:while\\s+)?(?:IFS=\\S*\\s+)?read\\s+(?:-r\\s+)?((?:[A-Za-z_]\\w*[ \\t]*)+)`,
+      "gm",
+    ),
+  ))
+    for (const n of m[1].trim().split(/\s+/)) out.add(n);
+  for (const m of bare.matchAll(new RegExp(`${AT}for\\s+([A-Za-z_]\\w*)\\s+in\\b`, "gm")))
+    out.add(m[1]);
+  return out;
 }
 
 function runRules(file, where, run, ctx) {
