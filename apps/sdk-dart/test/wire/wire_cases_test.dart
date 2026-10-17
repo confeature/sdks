@@ -13,7 +13,7 @@
 /// `FetchResult.error` rather than a typed enum (sdk-node ships
 /// `SdkErrorCode`; this maps the string form back to the same
 /// vocabulary). When a future revision of `ConfigFetcher` switches to
-/// a typed enum, update [_dartErrorToClass] accordingly.
+/// a typed enum, update `dartErrorToClass` (wire_case_assertions.dart).
 ///
 /// See epic #146 (contract testing framework) + #148 (this suite) +
 /// spec 112.
@@ -31,31 +31,12 @@ import 'package:test/test.dart';
 import 'package:confeature/src/internal/config_fetcher.dart';
 import 'package:confeature/confeature.dart';
 
-import '../workspace_root.dart';
+import 'wire_case_assertions.dart';
 
 const String _sdkKey =
     'confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 
-/// Every `given` / `expected` field this consumer reads. A corpus field
-/// outside these sets FAILS the case (#803 FR-003), so a new expectation
-/// can never be skipped silently.
-const Set<String> _knownGiven = {'previousEtag', 'sdkKey', 'baseUrl'};
-const Set<String> _knownExpected = {
-  'outcome',
-  'errorClass',
-  'hasConfig',
-  'resultingEtag',
-  'requestHeaderIfNoneMatch',
-  'requestUrlPrefix',
-  'requestPath',
-};
-
 const String _defaultBaseUrl = 'https://cdn.test.confeature.io';
-
-String _fixturesDir() =>
-    '${findWorkspaceRoot()}/packages/test-fixtures-sdk-parity/fixtures';
-
-String _wireCasesPath() => '${_fixturesDir()}/wire-cases.json';
 
 /// Resolve a `server.bodyRef` or `server.body` into a raw response body.
 ///
@@ -64,38 +45,41 @@ String _wireCasesPath() => '${_fixturesDir()}/wire-cases.json';
 String? _resolveBody(Map<String, dynamic> server) {
   final bodyRef = server['bodyRef'];
   if (bodyRef is String && bodyRef.isNotEmpty) {
-    return File('${_fixturesDir()}/$bodyRef').readAsStringSync();
+    return File('${wireFixturesDir()}/$bodyRef').readAsStringSync();
   }
   final body = server['body'];
   if (body is String) return body;
   return null;
 }
 
-/// Map Dart's stringly-typed `FetchResult.error` onto the corpus's
-/// normalised error-class vocabulary.
-///
-/// HTTP 403 and 404 both map to `invalidSdkKey` to match the corpus's
-/// intent (per ConfigCat only 403/404 are invalid-SDK-key statuses; 401
-/// is a generic retryable failure) even though `ConfigFetcher` does not
-/// currently surface the distinction as a typed field — same pragmatic
-/// choice as sdk-python. Tightening this in the SDK itself (typed enum +
-/// 403/404-specific message) is tracked as a follow-up to #146.
-String _dartErrorToClass(String? error) {
-  if (error == null) return 'fetchFailed';
-  if (error == 'MALFORMED_JSON') return 'parseFailed';
-  if (error == 'HTTP 403' || error == 'HTTP 404') return 'invalidSdkKey';
-  if (error.startsWith('HTTP ')) return 'fetchFailed';
-  if (error == 'TIMEOUT' || error.contains('Timeout')) return 'timeout';
-  return 'fetchFailed';
-}
-
 void main() {
-  final corpusRaw = File(_wireCasesPath()).readAsStringSync();
-  final corpus = jsonDecode(corpusRaw) as Map<String, dynamic>;
-  final cases = (corpus['cases'] as List).cast<Map<String, dynamic>>();
-  if (cases.isEmpty) {
-    throw StateError('wire-cases.json MUST ship at least one case');
-  }
+  final cases = loadWireCases();
+
+  // The error-class mapping fails closed: a missing or unknown reason maps
+  // to no corpus class, so it can never pass a fetchFailed case (the old
+  // fold to fetchFailed did).
+  group('dartErrorToClass', () {
+    test('fails closed on a missing or unknown reason', () {
+      expect(dartErrorToClass(null), startsWith('unmapped:'));
+      expect(dartErrorToClass('SOME_NEW_REASON'), startsWith('unmapped:'));
+    });
+
+    test('maps every fixed reason the fetcher emits', () {
+      const wanted = {
+        'MALFORMED_JSON': 'parseFailed',
+        'HTTP 403': 'invalidSdkKey',
+        'HTTP 404': 'invalidSdkKey',
+        'INVALID_SDK_KEY': 'invalidSdkKey',
+        'HTTP 500': 'fetchFailed',
+        'TIMEOUT': 'timeout',
+        'NETWORK_ERROR': 'fetchFailed',
+        'FETCH_EXCEPTION': 'fetchFailed',
+        'INVALID_REQUEST': 'fetchFailed',
+      };
+      wanted.forEach((raw, cls) =>
+          expect(dartErrorToClass(raw), equals(cls), reason: 'raw=$raw'));
+    });
+  });
 
   group('wire-cases (#148)', () {
     for (final c in cases) {
@@ -105,15 +89,9 @@ void main() {
       final expected = (c['expected'] as Map).cast<String, dynamic>();
 
       test(id, () async {
-        final unknownGiven = given.keys.toSet().difference(_knownGiven);
-        expect(unknownGiven, isEmpty,
-            reason: "Case '$id': unknown given field(s) — no adapter");
-        final unknownExpected =
-            expected.keys.toSet().difference(_knownExpected);
-        expect(unknownExpected, isEmpty,
-            reason: "Case '$id': unknown expected field(s) — no adapter");
+        expectOnlyKnownFields(c);
 
-        final sdkKey = (given['sdkKey'] as String?) ?? _sdkKey;
+        final sdkKey = sdkKeyFor(c, _sdkKey);
         final baseUrl = (given['baseUrl'] as String?) ?? _defaultBaseUrl;
 
         final bodyText = _resolveBody(server);
@@ -166,89 +144,13 @@ void main() {
           await raw?.close();
         }
 
-        // ---- Request-side assertions -------------------------------
-        final sent =
-            raw != null ? _sentOnWire(raw) : _sentThroughMock(captured);
-        final requestTarget = sent.target;
-        final requestUrl = sent.url;
-        final ifNoneMatch = sent.ifNoneMatch;
-        // URL shape: ConfigCat's `<baseUrl>/configuration-files/<sdkKey>/
-        // config_v6.json` (#803).
-        expect(requestTarget, startsWith('/configuration-files/'));
-        expect(requestTarget, endsWith('/config_v6.json'));
-        final requestPath = expected['requestPath'];
-        if (requestPath is String) {
-          expect(requestTarget, equals(requestPath),
-              reason: "Case '$id': request path ON THE WIRE");
-        }
-        final requestUrlPrefix = expected['requestUrlPrefix'];
-        if (requestUrlPrefix is String) {
-          expect(requestUrl, startsWith(requestUrlPrefix),
-              reason: "Case '$id': request URL prefix");
-        }
-
-        if (expected.containsKey('requestHeaderIfNoneMatch')) {
-          final expectedIfNoneMatch = expected['requestHeaderIfNoneMatch'];
-          if (expectedIfNoneMatch == null) {
-            expect(
-              ifNoneMatch,
-              isNull,
-              reason: 'previousEtag=null MUST NOT send an If-None-Match',
-            );
-          } else {
-            expect(ifNoneMatch, equals(expectedIfNoneMatch));
-          }
-        }
-
-        // ---- Outcome assertions ------------------------------------
-        final hasConfig = expected['hasConfig'];
-        if (hasConfig is bool) {
-          expect(result.body != null, equals(hasConfig),
-              reason: "Case '$id': hasConfig");
-        }
-        final outcome = expected['outcome'] as String;
-        switch (outcome) {
-          case 'fetched':
-            expect(
-              result.status,
-              equals(FetchStatus.fetched),
-              reason: "Case '$id' expected 'fetched' but got "
-                  '${result.status} (error=${result.error})',
-            );
-            expect(result.body, isNotNull);
-            final resultingEtag = expected['resultingEtag'];
-            if (resultingEtag is String) {
-              expect(result.etag, equals(resultingEtag));
-            }
-          case 'notModified':
-            expect(
-              result.status,
-              equals(FetchStatus.notModified),
-              reason: "Case '$id' expected 'notModified' but got "
-                  '${result.status} (error=${result.error})',
-            );
-            final resultingEtag = expected['resultingEtag'];
-            if (resultingEtag is String) {
-              expect(result.etag, equals(resultingEtag));
-            }
-          case 'failed':
-            expect(
-              result.status,
-              equals(FetchStatus.failed),
-              reason: "Case '$id' expected 'failed' but got "
-                  '${result.status} (body=${result.body})',
-            );
-            final mapped = _dartErrorToClass(result.error);
-            expect(
-              mapped,
-              equals(expected['errorClass']),
-              reason: "Case '$id' expected errorClass="
-                  "${expected['errorClass']} but mapped='$mapped' "
-                  'from raw error=${result.error}',
-            );
-          default:
-            fail("Unknown outcome value in corpus: '$outcome'");
-        }
+        // ---- Judge it by the shared rules --------------------------
+        expectWireCase(
+          c,
+          sdkKey,
+          raw != null ? _sentOnWire(raw) : _sentThroughMock(captured),
+          result,
+        );
       });
     }
   });
@@ -339,19 +241,8 @@ const Duration _standardTimeout = Duration(seconds: 30);
   }
 }
 
-/// The request the fetcher sent, as the test transport observed it.
-final class _SentRequest {
-  const _SentRequest(this.target, this.url, this.ifNoneMatch);
-
-  /// The path as SENT, still percent-encoded, with any query (the version
-  /// carrier, #807) cut off.
-  final String target;
-  final String url;
-  final String? ifNoneMatch;
-}
-
 /// The single request [raw] received, read from its bytes.
-_SentRequest _sentOnWire(_RawWireServer raw) {
+SentRequest _sentOnWire(_RawWireServer raw) {
   // A socket error before the request head leaves `heads` empty; this
   // check names the cause the length check below cannot.
   expect(raw.errors, isEmpty,
@@ -370,21 +261,21 @@ _SentRequest _sentOnWire(_RawWireServer raw) {
   expect(parts[2], equals('HTTP/1.1'));
   final target = parts[1];
   final q = target.indexOf('?');
-  return _SentRequest(
+  return SentRequest(
     q < 0 ? target : target.substring(0, q),
-    '${raw.baseUrl}$target',
+    target,
     head.header('if-none-match'),
   );
 }
 
 /// The request the MockClient captured.
-_SentRequest _sentThroughMock(http.BaseRequest? captured) {
+SentRequest _sentThroughMock(http.BaseRequest? captured) {
   expect(captured, isNotNull,
       reason: 'Fetcher MUST issue exactly one HTTP request');
   final req = captured!;
-  return _SentRequest(
+  return SentRequest(
     req.url.path,
-    req.url.toString(),
+    req.url.hasQuery ? '${req.url.path}?${req.url.query}' : req.url.path,
     req.headers['If-None-Match'],
   );
 }

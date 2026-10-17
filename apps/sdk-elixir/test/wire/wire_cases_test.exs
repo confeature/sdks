@@ -34,6 +34,7 @@ defmodule Confeature.Wire.WireCasesTest do
 
   alias Confeature.Internal.ConfigFetcher
   alias Confeature.Logger, as: ConfLogger
+  alias Confeature.Test.WireCaseAssertions
   alias Confeature.TestHelpers
 
   @sdk_key TestHelpers.sample_sdk_key()
@@ -41,29 +42,9 @@ defmodule Confeature.Wire.WireCasesTest do
   # Module-attribute corpus: read once at compile time so the `for`
   # at the bottom of the module can fan a `describe`/`test` out per
   # case. The fixture is FROZEN — recompilation is the right cache
-  # invalidation signal when it ever changes. apps/sdk-elixir/test/
-  # wire/wire_cases_test.exs → workspace root is four `..` away.
-  @fixtures_dir Path.expand(
-                  "../../../../packages/test-fixtures-sdk-parity/fixtures",
-                  __DIR__
-                )
-  @corpus_path Path.join(@fixtures_dir, "wire-cases.json")
-  @external_resource @corpus_path
-  @corpus_doc @corpus_path |> File.read!() |> Jason.decode!()
-  @cases Map.fetch!(@corpus_doc, "cases")
-
-  if @cases == [] do
-    raise "wire-cases.json carries no cases — fixture is FROZEN"
-  end
-
-  # Every `given` / `expected` field this consumer reads (#803 FR-003).
-  # A field outside these lists FAILS the case — a new expectation can
-  # never be skipped silently.
-  @known_given_fields ~w(previousEtag sdkKey baseUrl)
-  @known_expected_fields ~w(outcome errorClass resultingEtag hasConfig
-                            requestHeaderIfNoneMatch requestUrlPrefix requestPath)
-
-  defp fixtures_dir, do: @fixtures_dir
+  # invalidation signal when it ever changes.
+  @external_resource WireCaseAssertions.corpus_path()
+  @cases WireCaseAssertions.load_cases()
 
   defmodule RebaseHttp do
     @moduledoc false
@@ -78,39 +59,9 @@ defmodule Confeature.Wire.WireCasesTest do
     end
   end
 
-  # Maps the fetcher's stringly-typed `Result.error` onto the corpus's
-  # normalised error-class vocabulary. The fetcher produces:
-  #
-  #   - "MALFORMED_JSON"      -> parseFailed   (JSON.decode failure or wrong shape)
-  #   - "INVALID_SDK_KEY"     -> invalidSdkKey (key refused before any request)
-  #   - "HTTP 403" / "HTTP 404" -> invalidSdkKey (CDN rejected the key — per
-  #                              ConfigCat only 403/404 are invalid-SDK-key
-  #                              statuses; 401 is a generic retryable failure)
-  #   - "HTTP <other-non-2xx>"-> fetchFailed
-  #   - "TRANSPORT_TIMEOUT"   -> timeout       (recv/connect timeout — the
-  #                              fetcher classifies the HTTPoison reason
-  #                              atom; wire-cases `timeout` case, #490)
-  #   - "TRANSPORT" / other   -> fetchFailed   (any other transport drop,
-  #                              incl. a connection reset mid-response —
-  #                              wire-cases `network-reset` case, #490)
-  #
-  # Mirrors sdk-python's `_python_error_to_class`, sdk-go's
-  # `goErrorToClass`, and sdk-ruby's `ruby_error_to_class`. When the
-  # fetcher upgrades to a typed enum, this mapping moves to a `case`
-  # on that enum.
-  defp elixir_error_to_class(nil), do: "fetchFailed"
-  defp elixir_error_to_class("MALFORMED_JSON"), do: "parseFailed"
-  defp elixir_error_to_class("INVALID_SDK_KEY"), do: "invalidSdkKey"
-  defp elixir_error_to_class("HTTP 403"), do: "invalidSdkKey"
-  defp elixir_error_to_class("HTTP 404"), do: "invalidSdkKey"
-  defp elixir_error_to_class("HTTP " <> _rest), do: "fetchFailed"
-  defp elixir_error_to_class("TRANSPORT_TIMEOUT"), do: "timeout"
-  defp elixir_error_to_class("TRANSPORT"), do: "fetchFailed"
-  defp elixir_error_to_class(_), do: "fetchFailed"
-
   defp resolve_body(server) do
     case Map.get(server, "bodyRef") do
-      ref when is_binary(ref) -> fixtures_dir() |> Path.join(ref) |> File.read!()
+      ref when is_binary(ref) -> WireCaseAssertions.fixtures_dir() |> Path.join(ref) |> File.read!()
       _ -> Map.get(server, "body")
     end
   end
@@ -141,30 +92,15 @@ defmodule Confeature.Wire.WireCasesTest do
     )
   end
 
-  # URL shape: ConfigCat's <baseUrl>/configuration-files/<sdkKey>/config_v6.json
-  # (#803). The corpus pins the prefix and the exact PARSED path (query
-  # excluded — #807 may add one).
-  defp assert_request_url(fetcher, request_path, expected) do
-    path = URI.parse(request_path).path
-
-    if prefix = Map.get(expected, "requestUrlPrefix") do
-      assert String.starts_with?(ConfigFetcher.request_url(fetcher), prefix),
-             "expected URL to start with #{prefix}, got #{ConfigFetcher.request_url(fetcher)}"
-
-      assert_received {:wire_url, sent_url}
-      assert String.starts_with?(sent_url, prefix)
-    end
-
-    if expected_path = Map.get(expected, "requestPath") do
-      assert URI.parse(ConfigFetcher.request_url(fetcher)).path == expected_path
-      assert path == expected_path, "expected path #{expected_path}, got #{path}"
-    end
-
-    assert String.starts_with?(path, "/configuration-files/"),
-           "expected path to start with '/configuration-files/', got #{path}"
-
-    assert String.ends_with?(path, "/config_v6.json"),
-           "expected path to end with '/config_v6.json', got #{path}"
+  # The request as the raw listener received it, in the shared helper's
+  # SDK-neutral form: the request-line target, still percent-encoded as
+  # sent, with any query (#807) cut off for the path.
+  defp sent_request(request_target, req_headers) do
+    %{
+      path: request_target |> String.split("?", parts: 2) |> hd(),
+      target: request_target,
+      if_none_match: Enum.find_value(req_headers, fn {k, v} -> if k == "if-none-match", do: v end)
+    }
   end
 
   # The mock-transport behaviour adapter (#490). `server.behavior` (a
@@ -330,6 +266,31 @@ defmodule Confeature.Wire.WireCasesTest do
     {method, path, req_headers}
   end
 
+  # The error-class mapping fails closed: a missing or unknown code maps to
+  # no corpus class, so it can never pass a fetchFailed case (the old fold
+  # to fetchFailed did).
+  describe "elixir_error_to_class" do
+    test "fails closed on a missing or unknown code" do
+      assert "unmapped:" <> _ = WireCaseAssertions.elixir_error_to_class(nil)
+      assert "unmapped:" <> _ = WireCaseAssertions.elixir_error_to_class("SOME_NEW_REASON")
+    end
+
+    test "maps every fixed code the fetcher emits" do
+      for {raw, wanted} <- [
+            {"MALFORMED_JSON", "parseFailed"},
+            {"HTTP 403", "invalidSdkKey"},
+            {"HTTP 404", "invalidSdkKey"},
+            {"INVALID_SDK_KEY", "invalidSdkKey"},
+            {"HTTP 500", "fetchFailed"},
+            {"TRANSPORT_TIMEOUT", "timeout"},
+            {"TRANSPORT", "fetchFailed"},
+            {"EXCEPTION", "fetchFailed"}
+          ] do
+        assert WireCaseAssertions.elixir_error_to_class(raw) == wanted, "raw=#{raw}"
+      end
+    end
+  end
+
   # Parameterised describe/test generation — ExUnit's idiomatic shape
   # for a corpus-driven suite. Each case lands as its own `test`
   # block so failures point at the exact corpus id.
@@ -346,16 +307,7 @@ defmodule Confeature.Wire.WireCasesTest do
       test @wire_case["id"] do
         given = @wire_case["given"]
         server = @wire_case["server"]
-        expected = @wire_case["expected"]
-
-        unknown_given = Map.keys(given) -- @known_given_fields
-        unknown_expected = Map.keys(expected) -- @known_expected_fields
-
-        assert unknown_given == [],
-               "case #{@wire_case["id"]}: unknown given field(s) #{inspect(unknown_given)}"
-
-        assert unknown_expected == [],
-               "case #{@wire_case["id"]}: unknown expected field(s) #{inspect(unknown_expected)}"
+        WireCaseAssertions.assert_only_known_fields(@wire_case)
 
         # Capture the incoming request so we can assert URL shape +
         # If-None-Match round-trip from the test body.
@@ -376,7 +328,7 @@ defmodule Confeature.Wire.WireCasesTest do
         # The timeout case needs a short request deadline so the suite
         # stays fast; every other behaviour keeps the standard 1s budget.
         timeout_seconds = if behavior == "timeout", do: 0.1, else: 1.0
-        sdk_key = Map.get(given, "sdkKey") || @sdk_key
+        sdk_key = WireCaseAssertions.sdk_key_for(@wire_case, @sdk_key)
         fetcher = build_fetcher(sdk_key, Map.get(given, "baseUrl"), target_url, timeout_seconds)
         result = ConfigFetcher.fetch(fetcher, Map.get(given, "previousEtag"))
 
@@ -384,74 +336,20 @@ defmodule Confeature.Wire.WireCasesTest do
         assert_received {:wire_request, method, request_path, req_headers}
         assert method == "GET"
 
-        assert_request_url(fetcher, request_path, expected)
-
-        # If-None-Match round-trip. The corpus uses a 3-state
-        # encoding: absent key = don't assert, explicit null = header
-        # MUST NOT be sent, explicit string = header MUST equal.
-        if Map.has_key?(expected, "requestHeaderIfNoneMatch") do
-          inm_expected = Map.get(expected, "requestHeaderIfNoneMatch")
-
-          inm_actual =
-            Enum.find_value(req_headers, fn {k, v} ->
-              if String.downcase(k) == "if-none-match", do: v
-            end)
-
-          if inm_expected == nil do
-            assert inm_actual == nil,
-                   "Case #{@wire_case["id"]} with previousEtag=null MUST NOT send If-None-Match"
-          else
-            assert inm_actual == inm_expected,
-                   "Case #{@wire_case["id"]}: expected If-None-Match=#{inspect(inm_expected)}, got #{inspect(inm_actual)}"
-          end
+        # The custom base was configured, and RebaseHttp saw the request
+        # leave for it before delivering it to the local listener.
+        if prefix = Map.get(@wire_case["expected"], "requestUrlPrefix") do
+          assert_received {:wire_url, sent_url}
+          assert String.starts_with?(sent_url, prefix)
         end
 
-        # ---- Outcome assertions -----------------------------------------
-        case Map.fetch!(expected, "outcome") do
-          "fetched" ->
-            assert result.status == :fetched,
-                   "expected :fetched, got status=#{inspect(result.status)} error=#{inspect(result.error)}"
-
-            assert result.body != nil
-
-            if expected_etag = Map.get(expected, "resultingEtag") do
-              assert result.etag == expected_etag
-            end
-
-          "notModified" ->
-            # Elixir returns status=:not_modified (snake_case atom)
-            # where the corpus uses 'notModified' (camelCase). The
-            # corpus is canonical; each consumer maps to its own
-            # idiom.
-            assert result.status == :not_modified,
-                   "expected :not_modified, got status=#{inspect(result.status)} error=#{inspect(result.error)}"
-
-            assert result.body == nil
-
-            if expected_etag = Map.get(expected, "resultingEtag") do
-              assert result.etag == expected_etag
-            end
-
-          "failed" ->
-            assert result.status == :failed,
-                   "expected :failed, got status=#{inspect(result.status)} body=#{inspect(result.body)}"
-
-            mapped = elixir_error_to_class(result.error)
-            expected_class = Map.fetch!(expected, "errorClass")
-
-            assert mapped == expected_class,
-                   "case #{@wire_case["id"]}: expected errorClass=#{inspect(expected_class)}, got mapped=#{inspect(mapped)} from raw error=#{inspect(result.error)}"
-
-          other ->
-            flunk("Unknown outcome value in corpus: #{inspect(other)}")
-        end
-
-        # hasConfig: the round-trip did / did not yield a config body.
-        if Map.has_key?(expected, "hasConfig") do
-          if expected["hasConfig"],
-            do: assert(is_map(result.body)),
-            else: assert(result.body == nil)
-        end
+        # ---- Judge it by the shared rules -------------------------------
+        WireCaseAssertions.assert_wire_case(
+          @wire_case,
+          sdk_key,
+          sent_request(request_path, req_headers),
+          result
+        )
       end
     end
   end

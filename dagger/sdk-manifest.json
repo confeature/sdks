@@ -89,7 +89,11 @@
       "name": "dotnet",
       "daggerFn": "dotnet-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-dotnet && c=\"Confeature.Client.Tests.Wire.$(basename tests/Confeature.Client.Tests/Wire/WireCasesLiveTests.cs .cs)\" && r=/tmp/confeature-live-dotnet && rm -rf \"$r\" && for f in net8.0 net10.0; do dotnet test tests/Confeature.Client.Tests --configuration Release --framework \"$f\" --filter \"FullyQualifiedName~$c.\" --logger \"trx;LogFileName=$f.trx\" --results-directory \"$r\" && grep -Eo \"total=\\\"([1-9][0-9]*)\\\" executed=\\\"\\1\\\" passed=\\\"\\1\\\" failed=\\\"0\\\" error=\\\"0\\\"\" \"$r/$f.trx\" || exit 1; done'",
+        "path": "apps/sdk-dotnet/tests/Confeature.Client.Tests/Wire/WireCasesLiveTests.cs"
+      }
     },
     {
       "name": "php",
@@ -125,7 +129,11 @@
       "name": "dart",
       "daggerFn": "dart-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-dart && r=/tmp/confeature-live-dart.json && rm -f \"$r\" && dart pub get && dart test test/wire/wire_cases_live_test.dart --file-reporter \"json:$r\" && grep -q \"\\\"skipped\\\":false,\\\"hidden\\\":false\" \"$r\" && ! grep -q \"\\\"skipped\\\":true\" \"$r\" && grep -q \"{\\\"success\\\":true,\\\"type\\\":\\\"done\\\"\" \"$r\"'",
+        "path": "apps/sdk-dart/test/wire/wire_cases_live_test.dart"
+      }
     },
 
     {
@@ -152,7 +160,11 @@
       "name": "elixir",
       "daggerFn": "elixir-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-elixir && r=/tmp/confeature-live-elixir.log && mix local.hex --force && mix local.rebar --force && mix deps.get && { mix test test/wire/wire_cases_live_test.exs > \"$r\" 2>&1; s=$?; cat \"$r\"; [ \"$s\" -eq 0 ] && grep -Eq \"^[1-9][0-9]* tests, 0 failures$\" \"$r\"; }'",
+        "path": "apps/sdk-elixir/test/wire/wire_cases_live_test.exs"
+      }
     },
     {
       "name": "cpp",

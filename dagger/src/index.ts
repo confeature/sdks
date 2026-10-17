@@ -437,6 +437,9 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   java: { build: javaToolchain },
   android: { build: androidSdkContainer },
   "kotlin-mp": { build: androidSdkContainer },
+  dotnet: { build: dotnetToolchain },
+  dart: { build: dartToolchain },
+  elixir: { build: elixirToolchain },
 };
 
 /**

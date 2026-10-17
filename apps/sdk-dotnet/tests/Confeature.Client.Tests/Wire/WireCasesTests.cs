@@ -59,51 +59,10 @@ public class WireCasesTests
 
     private const string WireTestBaseUrl = "https://cdn.test.confeature.io";
 
-    /// <summary>
-    /// Every <c>given</c> field this consumer reads. A field outside this set
-    /// FAILS the case (#803 FR-003): a new precondition is never ignored.
-    /// </summary>
-    private static readonly HashSet<string> KnownGivenFields = new(StringComparer.Ordinal)
-    {
-        "previousEtag", "sdkKey", "baseUrl",
-    };
-
-    /// <summary>
-    /// Every <c>expected</c> field this consumer asserts. A field outside this
-    /// set FAILS the case (#803 FR-003): a new expectation is never skipped.
-    /// </summary>
-    private static readonly HashSet<string> KnownExpectedFields = new(StringComparer.Ordinal)
-    {
-        "requestHeaderIfNoneMatch", "outcome", "resultingEtag", "hasConfig",
-        "errorClass", "requestUrlPrefix", "requestPath",
-    };
-
-    /// <summary>
-    /// Every top-level case field. A field outside this set FAILS the case
-    /// (#803 FR-003), as sdk-go's <c>DisallowUnknownFields</c> decode does.
-    /// </summary>
-    private static readonly HashSet<string> KnownCaseFields = new(StringComparer.Ordinal)
-    {
-        "id", "description", "given", "server", "expected",
-    };
-
-    /// <summary>
-    /// Every <c>server</c> field the behaviour adapter reads. A field outside
-    /// this set FAILS the case (#803 FR-003): a new server behaviour knob is
-    /// never ignored.
-    /// </summary>
-    private static readonly HashSet<string> KnownServerFields = new(StringComparer.Ordinal)
-    {
-        "status", "headers", "body", "bodyRef", "behavior",
-    };
-
-    /// <summary>Cached parse of <c>wire-cases.json</c> at class-load.</summary>
-    private static readonly Lazy<JsonDocument> CorpusDoc = new(LoadCorpusDocument);
-
     /// <summary>xUnit <see cref="TheoryAttribute"/> row source — one row per case.</summary>
     public static IEnumerable<object[]> WireCases()
     {
-        foreach (var caseElement in CorpusDoc.Value.RootElement.GetProperty("cases").EnumerateArray())
+        foreach (var caseElement in WireCaseAssertions.Cases)
         {
             var id = caseElement.GetProperty("id").GetString()
                 ?? throw new InvalidOperationException("Case missing 'id'");
@@ -127,15 +86,14 @@ public class WireCasesTests
         var root = caseDoc.RootElement;
         var given = root.GetProperty("given");
         var server = root.GetProperty("server");
-        var expected = root.GetProperty("expected");
-        AssertCaseHasOnlyKnownFields(root);
+        WireCaseAssertions.AssertCaseHasOnlyKnownFields(root);
 
         // The behaviour adapter (#490) maps server.behavior onto the mock
         // transport: "respond" (default/absent) delivers status+headers+body;
         // "timeout" hangs past the client timeout; "close-mid-response" drops
         // the connection mid-body. An unrecognised value FAILS the case
         // loudly (never falls through to respond).
-        var behavior = ReadNullableString(server, "behavior") ?? "respond";
+        var behavior = WireCaseAssertions.ReadNullableString(server, "behavior") ?? "respond";
 
         // ---- Wire up the mock handler -----------------------------------
         var capturedRequest = new RequestCapture();
@@ -159,8 +117,8 @@ public class WireCasesTests
         // ---- Drive the fetcher ------------------------------------------
         // FR-003: the case's key (always a valid sdk-key-shapes.json key)
         // and base URL, when pinned, configure the SDK.
-        var sdkKey = ReadNullableString(given, "sdkKey") ?? WireTestSdkKey;
-        var baseUrl = ReadNullableString(given, "baseUrl") ?? WireTestBaseUrl;
+        var sdkKey = WireCaseAssertions.SdkKeyFor(root, WireTestSdkKey);
+        var baseUrl = WireCaseAssertions.ReadNullableString(given, "baseUrl") ?? WireTestBaseUrl;
         using var fetcher = new ConfigFetcher(
             httpClient: httpClient,
             baseUrl: baseUrl,
@@ -169,106 +127,22 @@ public class WireCasesTests
             timeout: requestTimeout,
             logger: new CapturingLogger());
 
-        string? previousETag = ReadNullableString(given, "previousEtag");
+        string? previousETag = WireCaseAssertions.ReadNullableString(given, "previousEtag");
         var result = await fetcher.FetchAsync(previousETag, CancellationToken.None);
 
-        // ---- Request-side assertions ------------------------------------
+        // ---- Judge it by the shared rules ------------------------------
         capturedRequest.Request.Should().NotBeNull(
             because: "fetcher MUST issue exactly one HTTP request");
         var sentRequest = capturedRequest.Request!;
-
-        // URL shape (#803 FR-001): ConfigCat's <baseURL>/configuration-files/
-        // <sdkKey>/config_v6.json, the key's exact bytes. Compared on the
-        // PARSED path, so a query string (#807) never breaks it.
         var sentUri = sentRequest.RequestUri!;
-        var wantedPath = ReadNullableString(expected, "requestPath")
-            ?? "/configuration-files/" + sdkKey + "/config_v6.json";
-        sentUri.AbsolutePath.Should().Be(
-            wantedPath,
-            because: "the SDK MUST request the path the CDN serves");
-
-        if (expected.TryGetProperty("requestUrlPrefix", out var prefixEl))
-        {
-            sentUri.AbsoluteUri.Should().StartWith(prefixEl.GetString());
-        }
-
-        // If-None-Match three-state semantics: absent (don't assert),
-        // explicit null (header MUST NOT be sent), explicit string
-        // (header MUST equal exact value).
-        if (expected.TryGetProperty("requestHeaderIfNoneMatch", out var inmEl))
-        {
-            var inmHeader = sentRequest.Headers.TryGetValues("If-None-Match", out var headerValues)
-                ? string.Join(",", headerValues)
-                : null;
-
-            if (inmEl.ValueKind == JsonValueKind.Null)
-            {
-                inmHeader.Should().BeNull(
-                    because: "Case with previousEtag=null MUST NOT send If-None-Match");
-            }
-            else
-            {
-                inmHeader.Should().Be(inmEl.GetString());
-            }
-        }
-
-        // ---- Outcome assertions -----------------------------------------
-        var outcome = expected.GetProperty("outcome").GetString();
-        switch (outcome)
-        {
-            case "fetched":
-                result.Status.Should().Be(
-                    FetchStatus.Fetched,
-                    because: $"corpus expects 'fetched' (raw error: '{result.Error}')");
-                if (expected.TryGetProperty("resultingEtag", out var etagFetched)
-                    && etagFetched.ValueKind == JsonValueKind.String)
-                {
-                    result.ETag.Should().Be(etagFetched.GetString());
-                }
-
-                result.Body.ValueKind.Should().NotBe(
-                    JsonValueKind.Undefined,
-                    because: "Body must be populated on fetched outcome");
-                break;
-
-            case "notModified":
-                result.Status.Should().Be(
-                    FetchStatus.NotModified,
-                    because: $"corpus expects 'notModified' (raw error: '{result.Error}')");
-                if (expected.TryGetProperty("resultingEtag", out var etagNm)
-                    && etagNm.ValueKind == JsonValueKind.String)
-                {
-                    result.ETag.Should().Be(etagNm.GetString());
-                }
-
-                // 304 carries no body; the fetcher's contract is that
-                // RawBody stays null on NotModified.
-                result.RawBody.Should().BeNull(
-                    because: "Body must be unset on notModified outcome");
-                break;
-
-            case "failed":
-                result.Status.Should().Be(
-                    FetchStatus.Failed,
-                    because: $"corpus expects 'failed' (raw error: '{result.Error}')");
-                var mapped = MapDotnetErrorToClass(result.Error);
-                var wanted = expected.GetProperty("errorClass").GetString();
-                mapped.Should().Be(
-                    wanted,
-                    because: $"errorClass mapped from raw='{result.Error}'");
-                break;
-
-            default:
-                throw new InvalidOperationException(
-                    $"Unknown outcome value in corpus: '{outcome}'");
-        }
-
-        if (expected.TryGetProperty("hasConfig", out var hasConfigEl))
-        {
-            (result.Status == FetchStatus.Fetched).Should().Be(
-                hasConfigEl.GetBoolean(),
-                because: "hasConfig is true exactly when this fetch delivered a config");
-        }
+        var inmHeader = sentRequest.Headers.TryGetValues("If-None-Match", out var headerValues)
+            ? string.Join(",", headerValues)
+            : null;
+        WireCaseAssertions.AssertWireCase(
+            root,
+            sdkKey,
+            new SentRequest(sentUri.AbsolutePath, sentUri.PathAndQuery, inmHeader),
+            result);
     }
 
     /// <summary>
@@ -285,7 +159,7 @@ public class WireCasesTests
     public async Task Wire_case_with_an_unknown_field_fails(string? section)
     {
         // A passing case: only the injected field can make it fail.
-        var baseline = CorpusDoc.Value.RootElement.GetProperty("cases").EnumerateArray()
+        var baseline = WireCaseAssertions.Cases
             .Single(c => c.GetProperty("id").GetString() == "fresh-fetch-200");
         var mutated = System.Text.Json.Nodes.JsonNode.Parse(baseline.GetRawText())!.AsObject();
         var target = section is null ? mutated : mutated[section]!.AsObject();
@@ -301,74 +175,38 @@ public class WireCasesTests
     [Fact]
     public async Task Wire_case_probe_baseline_passes_untouched()
     {
-        var baseline = CorpusDoc.Value.RootElement.GetProperty("cases").EnumerateArray()
+        var baseline = WireCaseAssertions.Cases
             .Single(c => c.GetProperty("id").GetString() == "fresh-fetch-200");
 
         await Wire_case_conforms_to_corpus("baseline", baseline.GetRawText());
     }
 
-    private static void AssertCaseHasOnlyKnownFields(JsonElement root)
-    {
-        AssertOnlyKnownFields(root, KnownCaseFields, "case");
-        AssertOnlyKnownFields(root.GetProperty("given"), KnownGivenFields, "given");
-        AssertOnlyKnownFields(root.GetProperty("server"), KnownServerFields, "server");
-        AssertOnlyKnownFields(root.GetProperty("expected"), KnownExpectedFields, "expected");
-    }
-
-    private static void AssertOnlyKnownFields(JsonElement section, HashSet<string> known, string sectionName)
-    {
-        foreach (var prop in section.EnumerateObject())
-        {
-            known.Should().Contain(
-                prop.Name,
-                because: $"wire-cases '{sectionName}.{prop.Name}' has no .NET adapter — read it, never skip it");
-        }
-    }
-
     /// <summary>
-    /// Maps sdk-dotnet's stringly-typed <see cref="FetchResult.Error"/>
-    /// onto the corpus's normalised error-class vocabulary. The fetcher
-    /// produces:
-    /// <list type="bullet">
-    ///   <item><description><c>MALFORMED_JSON</c> → <c>parseFailed</c></description></item>
-    ///   <item><description><c>HTTP 403</c> / <c>HTTP 404</c> → <c>invalidSdkKey</c> (per ConfigCat only 403/404 are invalid-SDK-key statuses; 401 is a generic retryable failure)</description></item>
-    ///   <item><description><c>HTTP &lt;other-non-2xx&gt;</c> → <c>fetchFailed</c></description></item>
-    ///   <item><description><c>INVALID_SDK_KEY</c> (refused before any request) → <c>invalidSdkKey</c></description></item>
-    ///   <item><description><c>TIMEOUT</c> → <c>timeout</c></description></item>
-    ///   <item><description>anything else → <c>fetchFailed</c></description></item>
-    /// </list>
-    /// Mirrors sdk-python's <c>_python_error_to_class</c> and sdk-go's
-    /// <c>goErrorToClass</c> (apps/sdk-{python,go}/wire/*).
+    /// The error-class mapping fails closed: a missing or unknown reason maps
+    /// to no corpus class, so it can never pass a <c>fetchFailed</c> case
+    /// (the old fold to <c>fetchFailed</c> did).
     /// </summary>
-    private static string MapDotnetErrorToClass(string? raw)
+    [Theory]
+    [InlineData(null)]
+    [InlineData("SOME_NEW_REASON")]
+    public void Error_mapping_fails_closed_on_an_unknown_reason(string? raw)
     {
-        if (string.IsNullOrEmpty(raw))
-        {
-            return "fetchFailed";
-        }
+        WireCaseAssertions.MapDotnetErrorToClass(raw).Should().StartWith("unmapped:");
+    }
 
-        if (raw == "MALFORMED_JSON")
-        {
-            return "parseFailed";
-        }
-
-        if (raw == "HTTP 403" || raw == "HTTP 404" || raw == "INVALID_SDK_KEY")
-        {
-            return "invalidSdkKey";
-        }
-
-        if (raw!.StartsWith("HTTP ", StringComparison.Ordinal))
-        {
-            return "fetchFailed";
-        }
-
-        if (raw == "TIMEOUT")
-        {
-            return "timeout";
-        }
-
-        // NETWORK_ERROR, CANCELLED, or anything else lands here.
-        return "fetchFailed";
+    /// <summary>Every fixed reason the fetcher emits has its corpus class.</summary>
+    [Theory]
+    [InlineData("MALFORMED_JSON", "parseFailed")]
+    [InlineData("HTTP 403", "invalidSdkKey")]
+    [InlineData("HTTP 404", "invalidSdkKey")]
+    [InlineData("INVALID_SDK_KEY", "invalidSdkKey")]
+    [InlineData("HTTP 500", "fetchFailed")]
+    [InlineData("TIMEOUT", "timeout")]
+    [InlineData("NETWORK_ERROR", "fetchFailed")]
+    [InlineData("CANCELLED", "fetchFailed")]
+    public void Error_mapping_maps_every_fixed_reason(string raw, string wanted)
+    {
+        WireCaseAssertions.MapDotnetErrorToClass(raw).Should().Be(wanted);
     }
 
     /// <summary>
@@ -384,7 +222,7 @@ public class WireCasesTests
             && bodyRef.ValueKind == JsonValueKind.String)
         {
             var refPath = Path.Combine(
-                WireFixturesDir(),
+                WireCaseAssertions.WireFixturesDir(),
                 bodyRef.GetString()!);
             return File.ReadAllBytes(refPath);
         }
@@ -413,38 +251,6 @@ public class WireCasesTests
         }
 
         return result;
-    }
-
-    private static string? ReadNullableString(JsonElement parent, string key)
-    {
-        if (!parent.TryGetProperty(key, out var el))
-        {
-            return null;
-        }
-
-        return el.ValueKind == JsonValueKind.String ? el.GetString() : null;
-    }
-
-    private static string WireFixturesDir() => Path.Combine(
-        WorkspaceRoot.Path,
-        "packages",
-        "test-fixtures-sdk-parity",
-        "fixtures");
-
-    private static JsonDocument LoadCorpusDocument()
-    {
-        var corpusPath = Path.Combine(WireFixturesDir(), "wire-cases.json");
-        var raw = File.ReadAllText(corpusPath);
-        var doc = JsonDocument.Parse(raw);
-        var cases = doc.RootElement.GetProperty("cases");
-        if (cases.GetArrayLength() == 0)
-        {
-            throw new InvalidOperationException(
-                "wire-cases.json carries no cases — fixture is FROZEN at 14 cases "
-                + "(incl. the timeout + network-reset behaviour cases, #490)");
-        }
-
-        return doc;
     }
 
     /// <summary>Inbound-request capture sink (set once per fetch).</summary>
