@@ -52,10 +52,14 @@ const NODE_IMAGE = "node:22.23.3-bookworm-slim";
  * helper is a private TS-level refactor, not exposed via @func() to the Dagger
  * schema. See spec 053 T004.
  */
-function nodeContainer(source: Directory): Container {
+function nodeContainer(source: Directory, platform?: Platform): Container {
+  // A foreign platform gets its own install caches: a virtual store holds the
+  // platform's native optional dependencies (workerd, esbuild) and its hidden
+  // lockfile, which one platform's install must not hand to another's.
+  const caches = platform === undefined ? "" : `-${platform.replace(/\W+/g, "-")}`;
   return (
     dag
-      .container()
+      .container(platform === undefined ? undefined : { platform })
       .from(NODE_IMAGE)
       .withEnvVariable("CI", "true")
       .withExec([
@@ -68,8 +72,8 @@ function nodeContainer(source: Directory): Container {
       // (`--virtual-store-dir=/pnpm/vstore`) means pnpm's "Recreating node_modules"
       // step rmdirs a path inside /work/node_modules/.pnpm — now an EMPTY directory
       // (not a mount point), so EBUSY no longer fires.
-      .withMountedCache("/root/.local/share/pnpm/store", dag.cacheVolume("pnpm-store"))
-      .withMountedCache("/pnpm/vstore", dag.cacheVolume("pnpm-vstore"))
+      .withMountedCache("/root/.local/share/pnpm/store", dag.cacheVolume(`pnpm-store${caches}`))
+      .withMountedCache("/pnpm/vstore", dag.cacheVolume(`pnpm-vstore${caches}`))
       .withMountedDirectory("/work", source)
       .withWorkdir("/work")
       .withExec(["corepack", "enable"])
@@ -112,8 +116,8 @@ const JS_TESTED = {
  * failed dependency build reddens every JS-family function, under whichever
  * name rejects first — the build step's own error names the package.
  */
-function jsWorkspace(source: Directory): Container {
-  return nodeContainer(source).withExec([
+function jsWorkspace(source: Directory, platform?: Platform): Container {
+  return nodeContainer(source, platform).withExec([
     "pnpm",
     ...Object.values(JS_TESTED).flatMap((pkg) => ["--filter", `${pkg}...`]),
     "--if-present",
@@ -394,9 +398,12 @@ const HARNESS_DIR = "/work/tools/test-harness-live-contract";
  * pnpm store, a cache volume that is not part of any container snapshot.
  * `inject-workspace-packages` is set for this one command only: pnpm 10+
  * deploys nothing else, and the harness has no workspace dependency to inject.
+ * `platform` is the target container's when it differs from the engine's
+ * (#922): the deploy carries native binaries (workerd, esbuild), which pnpm
+ * picks for the platform it installs on.
  */
-function deployedHarness(source: Directory): Directory {
-  return jsWorkspace(source)
+function deployedHarness(source: Directory, platform?: Platform): Directory {
+  return jsWorkspace(source, platform)
     .withExec([
       "pnpm",
       "--config.inject-workspace-packages=true",
@@ -427,27 +434,63 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   php: { build: phpToolchain },
   go: { build: goToolchain },
   rust: { build: rustToolchain },
+  java: { build: javaToolchain },
+  android: { build: androidSdkContainer },
+  "kotlin-mp": { build: androidSdkContainer },
 };
+
+/**
+ * A Node one-liner that runs the deployed harness's workerd binary (found the
+ * way wrangler finds it) with `--version`, run from `HARNESS_DIR`: it exits 1
+ * naming `platform` when that binary — or the Node runtime running the
+ * one-liner — cannot execute in the toolchain container (#922).
+ */
+function nativeHarnessCheck(platform: Platform): string {
+  return [
+    "try {",
+    '  const fromWrangler = require("module").createRequire(require.resolve("wrangler/package.json"));',
+    '  const workerd = fromWrangler("workerd");',
+    '  require("child_process").execFileSync(workerd.default ?? workerd, ["--version"], { stdio: "pipe" });',
+    "} catch (error) {",
+    `  console.error("the deployed harness's workerd does not run on ${platform}: " + (error.message || error));`,
+    "  process.exit(1);",
+    "}",
+  ].join("\n");
+}
 
 /**
  * The container an SDK's live suite runs in, at the repository root: its
  * toolchain, plus (outside the JS family) the pinned Node runtime copied from
  * `NODE_IMAGE`'s `/usr/local` — every toolchain image is glibc Debian or
  * Ubuntu — and the deployed harness mounted where the runner names it.
+ *
+ * Both are built for the TOOLCHAIN's platform, not the engine's (#922): the
+ * Node binary, workerd and esbuild are native code, and a toolchain pinned to
+ * another platform (`androidSdkContainer`, linux/amd64 for aapt2, #364) cannot
+ * run the engine's. When the platforms match — every toolchain on CI, and all
+ * but the pinned ones locally — the harness is the same `jsWorkspace` deploy
+ * as before. The check step runs node and workerd once before the suite, so a
+ * platform mismatch fails as one, not as a suite that cannot boot its harness.
  */
-function liveContainer(source: Directory, sdk: string): Container {
+async function liveContainer(source: Directory, sdk: string): Promise<Container> {
   const toolchain = LIVE_TOOLCHAINS[sdk];
   if (toolchain === undefined)
     throw new Error(
       `dagger/src/index.ts LIVE_TOOLCHAINS has no toolchain for ${sdk}: add its builder there`,
     );
   const base = toolchain.build(source);
-  const ready = toolchain.node
-    ? base
-    : base
-        .withDirectory("/usr/local", dag.container().from(NODE_IMAGE).directory("/usr/local"))
-        .withMountedDirectory(HARNESS_DIR, deployedHarness(source));
-  return ready.withWorkdir("/work");
+  if (toolchain.node) return base.withWorkdir("/work");
+  const platform = await base.platform();
+  const foreign = platform === (await dag.defaultPlatform()) ? undefined : platform;
+  return base
+    .withDirectory(
+      "/usr/local",
+      dag.container({ platform }).from(NODE_IMAGE).directory("/usr/local"),
+    )
+    .withMountedDirectory(HARNESS_DIR, deployedHarness(source, foreign))
+    .withWorkdir(HARNESS_DIR)
+    .withExec(["node", "-e", nativeHarnessCheck(platform)])
+    .withWorkdir("/work");
 }
 
 @object()
@@ -920,9 +963,8 @@ export class Confeature {
     if (!/^[a-z][a-z0-9-]*$/.test(sdk))
       throw new Error(`${JSON.stringify(sdk)} is not an SDK name`);
     const runner = await liveSuiteRunner(source, sdk);
-    const result = await liveContainer(source, sdk)
-      .withExec(["bash", "-euo", "pipefail", "-c", runner])
-      .stdout();
+    const container = await liveContainer(source, sdk);
+    const result = await container.withExec(["bash", "-euo", "pipefail", "-c", runner]).stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (liveSuite ${sdk} #918)`;
   }

@@ -9,7 +9,6 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Url
-import io.ktor.http.headersOf
 import io.ktor.http.headers
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
@@ -17,18 +16,10 @@ import io.ktor.utils.io.cancel
 import io.ktor.utils.io.writeStringUtf8
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -95,13 +86,9 @@ class WireCasesTest {
     fun wireCase(id: String, wireCase: JsonObject) = runBlocking {
         val given = wireCase["given"] as JsonObject
         val server = wireCase["server"] as JsonObject
-        val expected = wireCase["expected"] as JsonObject
 
-        val behavior = (server["behavior"] as? JsonPrimitive)?.contentOrEmpty() ?: BEHAVIOR_RESPOND
-
-        // FR-003 (#803): an unread field is a skipped expectation — fail on any we do not know.
-        assertOnlyKnownFields(id, "given", given, KNOWN_GIVEN_FIELDS)
-        assertOnlyKnownFields(id, "expected", expected, KNOWN_EXPECTED_FIELDS)
+        val behavior = WireCaseAssertions.field(server, "behavior") ?: BEHAVIOR_RESPOND
+        val sdkKey = WireCaseAssertions.field(given, "sdkKey") ?: WireCaseAssertions.DEFAULT_SDK_KEY
 
         val capturedIfNoneMatch = CopyOnWriteArrayList<String?>()
         val capturedUrls = CopyOnWriteArrayList<Url>()
@@ -120,10 +107,17 @@ class WireCasesTest {
             val result = fetcher.fetch(previousEtag)
 
             assertEquals(1, capturedRequestCount.get(), "fetcher MUST issue exactly one HTTP request")
-            assertRequestUrl(id, capturedUrls.single(), wireRequestTarget(given), expected)
-            assertIfNoneMatch(capturedIfNoneMatch.firstOrNull(), expected)
-            assertOutcome(id, expected, result)
-            assertHasConfig(id, expected, result)
+            val url = capturedUrls.single()
+            val wirePath = wireRequestTarget(given).substringBefore('?')
+            // The mock must never see a different path than the socket.
+            assertEquals(wirePath, url.encodedPath, "case=$id mock path vs wire path")
+            WireCaseAssertions.assertWireCase(
+                id,
+                wireCase,
+                sdkKey,
+                WireCaseAssertions.SentRequest(wirePath, url.toString(), capturedIfNoneMatch.firstOrNull()),
+                result,
+            )
         } finally {
             fetcher.close()
         }
@@ -138,8 +132,8 @@ class WireCasesTest {
         ifNoneMatch: CopyOnWriteArrayList<String?>,
         urls: CopyOnWriteArrayList<Url>,
     ): ConfigFetcher = ConfigFetcher(
-        baseUrl = givenString(given, "baseUrl") ?: DEFAULT_BASE_URL,
-        sdkKey = givenString(given, "sdkKey") ?: SDK_KEY,
+        baseUrl = WireCaseAssertions.field(given, "baseUrl") ?: DEFAULT_BASE_URL,
+        sdkKey = WireCaseAssertions.field(given, "sdkKey") ?: WireCaseAssertions.DEFAULT_SDK_KEY,
         timeoutMillis = 5_000L,
         logger = CapturingLogger(),
         httpClientFactory = {
@@ -166,17 +160,6 @@ class WireCasesTest {
         },
     )
 
-    private fun assertOnlyKnownFields(id: String, block: String, obj: JsonObject, known: Set<String>) {
-        val unknown = obj.keys - known
-        assertTrue(
-            unknown.isEmpty(),
-            "case=$id: $block field(s) $unknown unknown to the kotlin-mp wire suite — read them",
-        )
-    }
-
-    private fun givenString(given: JsonObject, field: String): String? =
-        (given[field] as? JsonPrimitive)?.contentOrEmpty()
-
     /**
      * Sends the case's request once more through the PRODUCTION Ktor client (the fetcher's default
      * factory — CIO on the JVM) to a raw TCP listener, and returns the request-target exactly as
@@ -186,10 +169,13 @@ class WireCasesTest {
      */
     private fun wireRequestTarget(given: JsonObject): String = runBlocking {
         RawHttpListener().use { listener ->
-            val basePath = givenString(given, "baseUrl")?.let { Url(it).encodedPath.trimEnd('/') }.orEmpty()
+            val basePath = WireCaseAssertions.field(given, "baseUrl")
+                ?.let { Url(it).encodedPath.trimEnd('/') }
+                .orEmpty()
             val fetcher = ConfigFetcher(
                 baseUrl = listener.baseUrl + basePath,
-                sdkKey = givenString(given, "sdkKey") ?: SDK_KEY,
+                sdkKey = WireCaseAssertions.field(given, "sdkKey")
+                    ?: WireCaseAssertions.DEFAULT_SDK_KEY,
                 timeoutMillis = DEFAULT_REQUEST_TIMEOUT_MS,
                 logger = CapturingLogger(),
             )
@@ -202,114 +188,10 @@ class WireCasesTest {
         }
     }
 
-    /**
-     * `requestUrlPrefix` is compared against the full request URL (scheme + host come from the
-     * mock run); `requestPath` against the path of the request line AS RECEIVED ON THE WIRE, byte
-     * for byte (query excluded — #807 may add one). The mock's parsed path must equal those wire
-     * bytes too, so the mock never sees a different path than the socket. Every request is
-     * ConfigCat's `/configuration-files/<key>/config_v6.json` — never a `/v2/` path.
-     */
-    private fun assertRequestUrl(id: String, url: Url, wireTarget: String, expected: JsonObject) {
-        val wirePath = wireTarget.substringBefore('?')
-        assertTrue(wirePath.startsWith("/configuration-files/"), "case=$id wire path=$wirePath")
-        assertTrue(wirePath.endsWith("/config_v6.json"), "case=$id wire path=$wirePath")
-        assertEquals(wirePath, url.encodedPath, "case=$id mock path vs wire path")
-        (expected["requestUrlPrefix"] as? JsonPrimitive)?.let { prefix ->
-            assertTrue(
-                url.toString().startsWith(prefix.content),
-                "case=$id request URL must start with ${prefix.content}",
-            )
-        }
-        (expected["requestPath"] as? JsonPrimitive)?.let { path ->
-            assertEquals(path.content, wirePath, "case=$id requestPath (raw request line)")
-        }
-    }
-
-    private fun assertHasConfig(id: String, expected: JsonObject, result: ConfigFetcher.FetchResult) {
-        val hasConfig = (expected["hasConfig"] as? JsonPrimitive)?.content?.toBooleanStrict() ?: return
-        assertEquals(hasConfig, result.body != null, "case=$id hasConfig")
-    }
-
     private fun readPreviousEtag(given: JsonObject): String = when (val raw = given["previousEtag"]) {
         null, JsonNull -> ""
         is JsonPrimitive -> raw.content
         else -> error("unexpected previousEtag shape: $raw")
-    }
-
-    private fun assertOutcome(
-        id: String,
-        expected: JsonObject,
-        result: ConfigFetcher.FetchResult,
-    ) {
-        when (val outcome = (expected["outcome"] as JsonPrimitive).content) {
-            "fetched" -> assertFetched(id, expected, result)
-            "notModified" -> assertNotModified(id, expected, result)
-            "failed" -> assertFailed(id, expected, result)
-            else -> error("unknown outcome: $outcome")
-        }
-    }
-
-    private fun assertFetched(id: String, expected: JsonObject, result: ConfigFetcher.FetchResult) {
-        assertEquals(
-            ConfigFetcher.Status.FETCHED,
-            result.status,
-            "outcome=fetched (case=$id, error=${result.error})",
-        )
-        assertResultingEtag(expected, result.etag)
-        assertNotNull(result.body, "fetched outcome must populate body")
-        assertNotNull(result.rawBody, "fetched outcome must populate raw body")
-    }
-
-    private fun assertNotModified(
-        id: String,
-        expected: JsonObject,
-        result: ConfigFetcher.FetchResult,
-    ) {
-        assertEquals(
-            ConfigFetcher.Status.NOT_MODIFIED,
-            result.status,
-            "outcome=notModified (case=$id, error=${result.error})",
-        )
-        assertResultingEtag(expected, result.etag)
-        assertNull(result.body, "notModified outcome must NOT carry a body")
-    }
-
-    private fun assertFailed(id: String, expected: JsonObject, result: ConfigFetcher.FetchResult) {
-        assertEquals(
-            ConfigFetcher.Status.FAILED,
-            result.status,
-            "outcome=failed (case=$id, error=${result.error})",
-        )
-        val expectedClass = (expected["errorClass"] as JsonPrimitive).content
-        val actualClass = kotlinMpErrorToClass(result.error)
-        assertEquals(
-            expectedClass,
-            actualClass,
-            "errorClass mapping for case=$id (raw error=${result.error}) MUST be $expectedClass",
-        )
-        assertNull(result.body, "failed outcome must NOT carry a body")
-    }
-
-    private fun assertResultingEtag(expected: JsonObject, actualEtag: String) {
-        val resultingEtag = expected["resultingEtag"]
-        if (resultingEtag != null && resultingEtag !is JsonNull) {
-            assertEquals((resultingEtag as JsonPrimitive).content, actualEtag)
-        }
-    }
-
-    /**
-     * Asserts the request's `If-None-Match` header against the corpus's three-state semantics:
-     * absent (don't assert), explicit `null` (header MUST NOT be sent), explicit string (header
-     * MUST equal). kotlinx-serialization decodes absent vs explicit-null differently — absent
-     * yields `containsKey == false`, explicit-null yields a [JsonNull] value.
-     */
-    private fun assertIfNoneMatch(actual: String?, expected: JsonObject) {
-        if (!expected.containsKey("requestHeaderIfNoneMatch")) return
-        when (val value = expected["requestHeaderIfNoneMatch"]) {
-            null, JsonNull -> assertNull(actual, "If-None-Match MUST NOT be sent")
-            is JsonPrimitive -> assertEquals(value.content, actual, "If-None-Match round-trip")
-            else -> error("unexpected requestHeaderIfNoneMatch shape: $value")
-        }
     }
 
     /**
@@ -329,13 +211,13 @@ class WireCasesTest {
                 append(name, (value as JsonPrimitive).content)
             }
         }
-        val bodyRef = (server["bodyRef"] as? JsonPrimitive)?.contentOrEmpty()
+        val bodyRef = WireCaseAssertions.field(server, "bodyRef")
         val bodyText: String? = when {
             bodyRef != null -> {
                 val raw = Files.readAllBytes(WorkspaceRoot.fixturesDir().resolve(bodyRef))
                 String(raw, StandardCharsets.UTF_8)
             }
-            else -> (server["body"] as? JsonPrimitive)?.contentOrEmpty()
+            else -> WireCaseAssertions.field(server, "body")
         }
         val payload = bodyText ?: ""
         return when (behavior) {
@@ -372,24 +254,8 @@ class WireCasesTest {
     }
 
     private companion object {
-        /** Stable, well-formed key — used when a case does not pin `given.sdkKey`. */
-        const val SDK_KEY =
-            "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-
         /** Base URL when a case does not pin `given.baseUrl`. */
         const val DEFAULT_BASE_URL = "https://mock.confeature.test"
-
-        /** Every `given` / `expected` field this suite reads; any other one fails the case. */
-        val KNOWN_GIVEN_FIELDS = setOf("previousEtag", "sdkKey", "baseUrl")
-        val KNOWN_EXPECTED_FIELDS = setOf(
-            "outcome",
-            "errorClass",
-            "resultingEtag",
-            "requestHeaderIfNoneMatch",
-            "hasConfig",
-            "requestUrlPrefix",
-            "requestPath",
-        )
 
         /** `server.behavior` discriminator values (#490) — see [respondFromCase]. */
         const val BEHAVIOR_RESPOND = "respond"
@@ -409,58 +275,13 @@ class WireCasesTest {
         const val PARTIAL_PREFIX_CHARS = 16
 
         /**
-         * Maps the KMP fetcher's stringly-typed [ConfigFetcher.FetchResult.error] onto the
-         * corpus's normalised error-class vocabulary. The fetcher emits:
-         *
-         * - `"MALFORMED_JSON"` (JSON parse failure OR wrong-shape body) → `parseFailed`
-         * - `"HTTP 403"` / `"HTTP 404"` → `invalidSdkKey` (per ConfigCat only 403/404 are
-         *   invalid-SDK-key statuses; 401 is a generic retryable failure)
-         * - `"HTTP <other-non-2xx>"` → `fetchFailed`
-         * - `"timeout"` (HttpRequestTimeoutException / connect / socket timeout) → `timeout`
-         * - any other fixed transport code (`network_error`, `body_read_failed`,
-         *   `too_many_redirects`, `INVALID_SDK_KEY`) → `fetchFailed`
-         *
-         * The fetcher never returns exception text (#803 FR-002), so the mapping is on fixed codes.
-         *
-         * Mirrors sdk-java's `javaErrorToClass`, sdk-android's `androidErrorToClass`, sdk-go's
-         * `goErrorToClass`, and sdk-python's `_python_error_to_class`. When the fetcher upgrades
-         * to a typed enum (FR-018), this mapping moves to a `when` on that enum.
-         */
-        @JvmStatic
-        fun kotlinMpErrorToClass(reason: String?): String {
-            if (reason.isNullOrEmpty()) return "fetchFailed"
-            if (reason == "MALFORMED_JSON") return "parseFailed"
-            if (reason == "HTTP 403" || reason == "HTTP 404") return "invalidSdkKey"
-            if (reason == ConfigFetcher.TIMEOUT) return "timeout"
-            return "fetchFailed"
-        }
-
-        /**
          * Loads + projects each corpus case into a JUnit [Arguments] row keyed by case id so the
          * test output reports `WireCasesTest > wireCase("fresh-fetch-200")`.
          */
         @JvmStatic
-        fun wireCases(): Stream<Arguments> {
-            val raw = String(
-                Files.readAllBytes(WorkspaceRoot.wireCasesPath()),
-                StandardCharsets.UTF_8,
-            )
-            val corpus = Json.parseToJsonElement(raw) as JsonObject
-            val cases = (corpus["cases"] as? JsonArray)
-                ?: error("wire-cases.json carries no cases.")
-            check(cases.isNotEmpty()) {
-                "wire-cases.json carries no cases."
+        fun wireCases(): Stream<Arguments> =
+            WireCaseAssertions.casesById().entries.stream().map { (id, wireCase) ->
+                Arguments.of(id, wireCase)
             }
-            return cases.stream().map { element ->
-                val obj = element.jsonObject
-                Arguments.of(obj["id"]!!.jsonPrimitive.content, obj)
-            }
-        }
-
-        /**
-         * Returns the string content of a [JsonPrimitive], unless it is a JSON `null` literal, in
-         * which case returns null. Distinguishes the corpus's `null` (explicit) from a string `""`.
-         */
-        private fun JsonPrimitive.contentOrEmpty(): String? = if (this is JsonNull) null else content
     }
 }

@@ -79,7 +79,11 @@
       "name": "java",
       "daggerFn": "java-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-java && c=\"io.confeature.client.$(basename src/test/java/io/confeature/client/WireCasesLiveTest.java .java)\" && sh ./gradlew --no-daemon test --rerun --tests \"$c\" && r=\"build/test-results/test/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
+        "path": "apps/sdk-java/src/test/java/io/confeature/client/WireCasesLiveTest.java"
+      }
     },
     {
       "name": "dotnet",
@@ -128,13 +132,21 @@
       "name": "kotlin-mp",
       "daggerFn": "kotlin-mp-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-kotlin-mp && c=\"io.confeature.kmp.$(basename src/jvmTest/kotlin/io/confeature/kmp/WireCasesLiveTest.kt .kt)\" && sh ./gradlew --no-daemon jvmTest --rerun --tests \"$c\" && r=\"build/test-results/jvmTest/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
+        "path": "apps/sdk-kotlin-mp/src/jvmTest/kotlin/io/confeature/kmp/WireCasesLiveTest.kt"
+      }
     },
     {
       "name": "android",
       "daggerFn": "android-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-android && c=\"io.confeature.android.$(basename src/test/java/io/confeature/android/WireCasesLiveTest.kt .kt)\" && sh ./gradlew --no-daemon testDebugUnitTest --rerun --tests \"$c\" && r=\"build/test-results/testDebugUnitTest/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
+        "path": "apps/sdk-android/src/test/java/io/confeature/android/WireCasesLiveTest.kt"
+      }
     },
     {
       "name": "elixir",
