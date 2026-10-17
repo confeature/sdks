@@ -11,3 +11,6 @@
  * they pulled.
  */
 export const SDK_VERSION = "0.1.1";
+
+// PROOF (#911, FR-013): a deliberate type error; ng-packagr must refuse it.
+export const proof911: number = "not a number";

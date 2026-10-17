@@ -172,3 +172,6 @@ describe("API-surface conformance vs configcat-react (#264)", () => {
     expect(confeature.ClientCacheState.NoFlagData).toBe(configcat.ClientCacheState.NoFlagData);
   });
 });
+
+// PROOF (#911, FR-013): a deliberate break. This pull request is closed unmerged.
+test("proof/911: the react gate must go red", () => expect(1).toBe(2));
