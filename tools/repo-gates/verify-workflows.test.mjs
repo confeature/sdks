@@ -1989,8 +1989,8 @@ describe("19 the SDK gates' own shape (#793)", () => {
     ],
     [
       "a select output not handed on",
-      ({ jobs }) => void delete jobs.select.outputs.pending,
-      /select: its outputs are not exactly gate, known_red, pending, swift, smoke, gate_files, summary/,
+      ({ jobs }) => void delete jobs.select.outputs.smoke,
+      /select: its outputs are not exactly gate, known_red, swift, smoke, gate_files, summary/,
     ],
     [
       "an environment",

@@ -167,7 +167,6 @@ const fixture = () => ({
     { name: "b", daggerFn: "b-test" },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
-    { name: "p", daggerFn: "p-test", ci: { pending: "#911" } },
   ],
 });
 const route = (names, { event = "push", manifest = fixture(), base = manifest } = {}) =>
@@ -175,22 +174,15 @@ const route = (names, { event = "push", manifest = fixture(), base = manifest } 
 
 describe("the routing into job kinds", () => {
   it("each SDK lands in exactly one kind", () => {
-    expect(route(["a", "b", "mac", "ue", "p"])).toEqual({
+    expect(route(["a", "b", "mac", "ue"])).toEqual({
       gate: [
         { name: "a", daggerFn: "a-test" },
         { name: "b", daggerFn: "b-test" },
       ],
       known_red: [],
-      pending: ["p"],
       swift: ["mac"],
       smoke: ["ue"],
     });
-  });
-
-  it("a pending SDK never gets a leg", () => {
-    const got = route(["p"]);
-    expect(got.gate).toEqual([]);
-    expect(got.pending).toEqual(["p"]);
   });
 
   it("a base knownRed moves the SDK to known_red, with its ticket", () => {
@@ -259,9 +251,11 @@ describe("the manifest's CI shape", () => {
       /only a daggerFn SDK/,
     ],
     [
-      "a pending without a ticket",
-      { name: "x", daggerFn: "x-test", ci: { pending: "" } },
-      /ci\.pending/,
+      // T10 removed the transitional key: an SDK never again sits in the
+      // matrix with no leg (MUTATION: put "pending" back in CI_KEYS).
+      "a ci.pending, retired with the last family of #793",
+      { name: "x", daggerFn: "x-test", ci: { pending: "#917" } },
+      /ci\.pending is not one of ci\.native, ci\.knownRed/,
     ],
     [
       "an unknown ci key",
@@ -457,7 +451,7 @@ describe("the CLI", SPAWNS, () => {
     write("apps/cli/main.ts", "z\n");
     const got = select(root, prEnv(base, commit()));
     expect(got.status, got.stderr).toBe(0);
-    for (const k of ["gate", "known_red", "pending", "swift", "smoke"])
+    for (const k of ["gate", "known_red", "swift", "smoke"])
       expect(JSON.parse(got.outputs[k])).toEqual([]);
     expect(got.outputs.summary).toMatch(/no SDK selected/);
   });
@@ -583,7 +577,7 @@ describe("the CLI", SPAWNS, () => {
     expect(got.raw).not.toContain("::");
     expect(got.raw.split("\n").filter((l) => l !== "")).toHaveLength(OUTPUT_KEYS.length);
     expect(JSON.parse(got.outputs.gate_files)).toEqual({ files: [], unnamed: 1 });
-    for (const k of ["gate", "known_red", "pending", "swift", "smoke"])
+    for (const k of ["gate", "known_red", "swift", "smoke"])
       for (const n of names(got.outputs, k)) expect(n).toMatch(NAME);
   });
 });

@@ -2,7 +2,7 @@
 
 // The aggregate of sdk-gates.yml (conclude-sdk-gates.mjs): `sdk gates` is
 // green only when every job kind's result matches its selection, a known-red
-// leg is shown and never counted, a pending SDK is never green, and anything
+// leg is shown and never counted, and anything
 // it cannot read is red.
 
 import { spawnSync } from "node:child_process";
@@ -22,7 +22,6 @@ const NONE = { files: [], unnamed: 0 };
 const outputs = ({
   gate = [],
   known_red = [],
-  pending = [],
   swift = [],
   smoke = [],
   gate_files = NONE,
@@ -30,7 +29,6 @@ const outputs = ({
 } = {}) => ({
   gate: JSON.stringify(gate),
   known_red: JSON.stringify(known_red),
-  pending: JSON.stringify(pending),
   swift: JSON.stringify(swift),
   smoke: JSON.stringify(smoke),
   gate_files: JSON.stringify(gate_files),
@@ -114,13 +112,6 @@ describe("the aggregate", () => {
     expect(got.summary).toMatch(/`rust` \(#806\): its leg passed; remove its ci\.knownRed/);
   });
 
-  it("a pending SDK is red, shown as PENDING (no leg yet)", () => {
-    const got = conclude(needs({ gate: [NODE], pending: ["go", "rust"] }, { gate: "success" }));
-    expect(got.ok).toBe(false);
-    expect(got.summary).toMatch(/PENDING \(no leg yet\) \(2\): `go`, `rust`/);
-    expect(got.problems.join()).toMatch(/PENDING \(no leg yet\): go, rust/);
-  });
-
   it("an empty selection is green, and says no SDK was selected", () => {
     const got = conclude(
       needs({ summary: "pull_request: no SDK selected (only apps/cli changed)" }),
@@ -140,7 +131,7 @@ describe("the aggregate", () => {
   it.each([
     ["an output that is not JSON", (n) => void (n.select.outputs.gate = "[")],
     ["an output that is not an array", (n) => void (n.select.outputs.swift = '{"a":1}')],
-    ["a missing output", (n) => void delete n.select.outputs.pending],
+    ["a missing output", (n) => void delete n.select.outputs.smoke],
     ["a name that is not an SDK name", (n) => void (n.select.outputs.smoke = '["a b"]')],
     ["a leg with no name", (n) => void (n.select.outputs.gate = '[{"daggerFn":"x"}]')],
     [

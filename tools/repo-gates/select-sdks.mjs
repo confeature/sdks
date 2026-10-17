@@ -25,8 +25,7 @@
  *     dependency between SDKs is not seen; the push run judges it (FR-004).
  *
  * The routing, from the manifest's `ci` (its `$comment` documents it): an SDK
- * with `ci.pending` has no leg yet and goes to `pending`; one with a daggerFn
- * goes to `gate`, or to `known_red` when its `ci.knownRed` is the BASE
+ * with a daggerFn goes to `gate`, or to `known_red` when its `ci.knownRed` is the BASE
  * commit's on a pull request (the judged commit's own on a push), so a pull
  * request cannot waive its own red; one with `ci.native` goes to `swift`
  * (`macos`) or `smoke`.
@@ -62,11 +61,14 @@ export const NAME = /^[a-z][a-z0-9-]*$/;
  * the rule: verify-workflows.mjs's daggerFnFindings reads it from here.
  */
 export const DAGGER_FN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-/** A ticket reference, `#<issue>`, as ci.knownRed and ci.pending carry it. */
+/** A ticket reference, `#<issue>`, as ci.knownRed carries it. */
 export const TICKET = /^#[1-9]\d*$/;
 /** The runners ci.native names: Swift natively on macOS, Unreal's labelled smoke. */
 export const NATIVE = ["macos", "smoke"];
-const CI_KEYS = ["native", "knownRed", "pending"];
+// `ci.pending` (an SDK with no leg yet, always red) existed only while the
+// families of #793 landed one by one; T10 removed the last one and the key
+// with it, so an SDK can never again sit in the matrix with no leg.
+const CI_KEYS = ["native", "knownRed"];
 
 /**
  * The job kinds of sdk-gates.yml: each matrix job's id, the output that feeds
@@ -84,15 +86,7 @@ export const KINDS = [
 export const SELECT_JOB = "select";
 
 /** Every output, in the order it is written. */
-export const OUTPUT_KEYS = [
-  "gate",
-  "known_red",
-  "pending",
-  "swift",
-  "smoke",
-  "gate_files",
-  "summary",
-];
+export const OUTPUT_KEYS = ["gate", "known_red", "swift", "smoke", "gate_files", "summary"];
 
 /** The events the workflow runs on: pushes and the schedule judge every SDK. */
 const ALL_EVENTS = ["push", "schedule"];
@@ -155,8 +149,6 @@ export function manifestProblems(manifest) {
         add(`ci.knownRed ${JSON.stringify(ci.knownRed)} is not a ticket (#<issue>)`);
       if (!dagger) add("ci.knownRed: only a daggerFn SDK has a leg to run red in");
     }
-    if (ci?.pending !== undefined && (typeof ci.pending !== "string" || !TICKET.test(ci.pending)))
-      add(`ci.pending ${JSON.stringify(ci.pending)} is not a ticket (#<issue>)`);
   }
   return out;
 }
@@ -262,13 +254,9 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
     const w = (waivers?.sdks ?? []).find((s) => s?.name === name)?.ci?.knownRed;
     return typeof w === "string" && TICKET.test(w) ? w : null;
   };
-  const out = { gate: [], known_red: [], pending: [], swift: [], smoke: [] };
+  const out = { gate: [], known_red: [], swift: [], smoke: [] };
   for (const name of names) {
     const s = byName.get(name);
-    if (s?.ci?.pending !== undefined) {
-      out.pending.push(name);
-      continue;
-    }
     if (s?.ci?.native !== undefined) {
       out[KINDS.find((k) => k.native === s.ci.native).output].push(name);
       continue;

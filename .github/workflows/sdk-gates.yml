@@ -16,8 +16,10 @@
 #                   with the publish gate, release-gate.yml and the pre-push.
 #   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
 #                   the BASE manifest (ci.knownRed): shown red, never counted.
-#   swift, smoke    the native runners (ci.native); no SDK reaches them before
-#                   #917 and #916, while ci.pending holds them.
+#   swift           Swift natively on macOS (ci.native: macos): the one SDK
+#                   whose toolchain is Apple's, on a macos-15 runner.
+#   smoke           Unreal's source-quality smoke (ci.native: smoke), labelled
+#                   as such: no hosted runner has an Unreal Engine.
 #   sdk gates       the aggregate, and the one required check on main:
 #                   tools/repo-gates/conclude-sdk-gates.mjs decides it, from
 #                   toJSON(needs).
@@ -65,7 +67,6 @@ jobs:
     outputs:
       gate: ${{ steps.select.outputs.gate }}
       known_red: ${{ steps.select.outputs.known_red }}
-      pending: ${{ steps.select.outputs.pending }}
       swift: ${{ steps.select.outputs.swift }}
       smoke: ${{ steps.select.outputs.smoke }}
       gate_files: ${{ steps.select.outputs.gate_files }}
@@ -255,8 +256,9 @@ jobs:
         run: |
           echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
 
-  # Swift natively on macOS (ci.native: macos). No SDK reaches it while
-  # ci.pending holds swift; #917 replaces this step with the suite.
+  # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
+  # the same script the local pre-push runs, which fails closed under CI when
+  # swift or swift-format is missing. Xcode is selected by exact path.
   swift:
     name: swift (${{ matrix.sdk }})
     needs: select
@@ -267,13 +269,17 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.swift) }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
-      - name: No runner yet
-        env:
-          SDK: ${{ matrix.sdk }}
-        run: |
-          echo "::error::${SDK}: no runner yet — lands in #917"
-          exit 1
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Build, test and lint (scripts/swift-precheck.sh)
+        run: bash scripts/swift-precheck.sh
 
   # The labelled source-quality smoke (ci.native: smoke): NOT A BUILD. No
   # hosted runner has an Unreal Engine, so apps/sdk-<name>/scripts/

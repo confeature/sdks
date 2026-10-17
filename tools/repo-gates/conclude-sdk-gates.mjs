@@ -22,7 +22,6 @@
  *   - each counted kind (KINDS) is `success` when its selection is non-empty
  *     and `skipped` when it is empty: `failure`, `cancelled`, a missing
  *     result, or a kind that ran with nothing selected is red;
- *   - no SDK is pending: a selected SDK with no leg yet is never green;
  *   - needs names no job this rule does not judge.
  * A known-red leg is shown with its ticket and never counted; one that passed
  * is shown as a waiver to remove, never as passing.
@@ -64,7 +63,7 @@ function readSelection(outputs) {
     }
     sel[key] = v;
   }
-  for (const k of [...KINDS.map((x) => x.output), "pending"]) {
+  for (const k of KINDS.map((x) => x.output)) {
     const v = sel[k];
     if (v === undefined) continue;
     if (!Array.isArray(v)) {
@@ -123,7 +122,7 @@ export function conclude(needs) {
   const problems = [];
   if (!isObject(needs)) {
     problems.push("NEEDS_JSON is not an object of jobs");
-    return { ok: false, problems, summary: render(undefined, "", [], [], [], problems) };
+    return { ok: false, problems, summary: render(undefined, "", [], [], problems) };
   }
   const known = new Set([SELECT_JOB, ...KINDS.map((k) => k.job)]);
   for (const job of Object.keys(needs))
@@ -131,7 +130,7 @@ export function conclude(needs) {
   const selectResult = needs[SELECT_JOB]?.result ?? "missing";
   if (selectResult !== "success") {
     problems.push(`select: ${selectResult}, so nothing was selected and nothing was judged`);
-    return { ok: false, problems, summary: render(undefined, "", [], [], [], problems) };
+    return { ok: false, problems, summary: render(undefined, "", [], [], problems) };
   }
   const { sel, summary, problems: unreadable } = readSelection(needs[SELECT_JOB]?.outputs);
   problems.push(...unreadable);
@@ -158,17 +157,15 @@ export function conclude(needs) {
     if (result !== "success")
       problems.push(`${kind.job}: ${result} (selected: ${names.join(", ")})`);
   }
-  const pending = sel.pending ?? [];
-  if (pending.length > 0) problems.push(`PENDING (no leg yet): ${pending.join(", ")}`);
   return {
     ok: problems.length === 0,
     problems,
-    summary: render(sel.gate_files, summary, rows, knownRed, pending, problems),
+    summary: render(sel.gate_files, summary, rows, knownRed, problems),
   };
 }
 
 /** The step summary: gate files first, the verdict, the table, the waivers, the reasons. */
-function render(gateFilesValue, selectSummary, rows, knownRed, pending, problems) {
+function render(gateFilesValue, selectSummary, rows, knownRed, problems) {
   const lines = [gateFilesLine(gateFilesValue), ""];
   lines.push(`**sdk gates: ${problems.length === 0 ? "GREEN" : "RED"}**`, "");
   if (selectSummary !== "") lines.push(selectSummary, "");
@@ -188,11 +185,6 @@ function render(gateFilesValue, selectSummary, rows, knownRed, pending, problems
       );
     lines.push("");
   }
-  if (pending.length > 0)
-    lines.push(
-      `PENDING (no leg yet) (${pending.length}): ${quoted(pending)}. Never green: each is red until its leg lands.`,
-      "",
-    );
   if (problems.length > 0) {
     lines.push("Red because:", "");
     for (const p of problems) lines.push(`- ${p}`);
@@ -209,7 +201,7 @@ function main() {
     status = result.ok ? 0 : 1;
   } catch (e) {
     const problems = [`NEEDS_JSON is missing or does not parse (${e?.message ?? e})`];
-    result = { ok: false, problems, summary: render(undefined, "", [], [], [], problems) };
+    result = { ok: false, problems, summary: render(undefined, "", [], [], problems) };
     status = 2;
   }
   if (process.env.GITHUB_STEP_SUMMARY)
