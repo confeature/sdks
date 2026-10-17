@@ -198,4 +198,4 @@ def test_known_divergences_are_absent_on_confeature_client() -> None:
 
 # PROOF (#912, FR-013): a deliberate break. This pull request is closed unmerged.
 def test_proof_912() -> None:
-    assert 1 == 2
+    assert len("proof") == 2
