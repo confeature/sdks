@@ -149,7 +149,8 @@ RSpec/SpecFilePathFormat:
 
 # spec/parity_corpus_spec.rb, spec/parity_corpus_typed_spec.rb,
 # spec/parity_upstream_spec.rb, spec/api_surface_conformance_spec.rb,
-# spec/cache_key_fixtures_spec.rb, and spec/wire/wire_cases_spec.rb are
+# spec/cache_key_fixtures_spec.rb, spec/wire/wire_cases_spec.rb and
+# spec/wire/wire_cases_live_spec.rb are
 # cross-language gates that describe a behaviour rather than a single class.
 # Allow string descriptions for those.
 RSpec/DescribeClass:
@@ -161,6 +162,7 @@ RSpec/DescribeClass:
     - "spec/api_surface_conformance_spec.rb"
     - "spec/cache_key_fixtures_spec.rb"
     - "spec/wire/wire_cases_spec.rb"
+    - "spec/wire/wire_cases_live_spec.rb"
 
 # The spec 072 conformance + typed-parity specs and the spec 112
 # wire-cases consumer lift named constants to file scope (curated

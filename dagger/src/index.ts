@@ -423,6 +423,8 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   bun: { build: jsWorkspace, node: true },
   deno: { build: jsWorkspace, node: true },
   python: { build: pythonToolchain },
+  ruby: { build: rubyToolchain },
+  php: { build: phpToolchain },
 };
 
 /**

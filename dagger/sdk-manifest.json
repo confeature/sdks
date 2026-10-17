@@ -83,13 +83,21 @@
       "name": "php",
       "daggerFn": "php-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-php && composer install --no-interaction --no-progress && vendor/bin/phpunit --no-coverage tests/WireCasesLiveTest.php'",
+        "path": "apps/sdk-php/tests/WireCasesLiveTest.php"
+      }
     },
     {
       "name": "ruby",
       "daggerFn": "ruby-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-ruby && bundle install && bundle exec rspec spec/wire/wire_cases_live_spec.rb'",
+        "path": "apps/sdk-ruby/spec/wire/wire_cases_live_spec.rb"
+      }
     },
     {
       "name": "rust",

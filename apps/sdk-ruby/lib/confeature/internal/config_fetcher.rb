@@ -42,6 +42,10 @@ module Confeature
       # URL — no request is made (#803 FR-002; sdk-go's code).
       INVALID_REQUEST = "invalid_request"
 
+      # Reason code of a dropped connection: a transport exception, or a
+      # 2xx body cut short of its Content-Length (#920).
+      CONNECTION_RESET = "connection_reset"
+
       # Transport failures -> fixed, key-free reason codes (#803 FR-002;
       # mirrors sdk-go's `classifyError`). Order matters: a timeout is
       # checked first (`Net::OpenTimeout` etc. descend from
@@ -109,7 +113,7 @@ module Confeature
       # reason code (#803 FR-002). The message is never read.
       def self.classify_error(exc)
         return "timeout" if TIMEOUT_ERRORS.any? { |klass| exc.is_a?(klass) }
-        return "connection_reset" if CONNECTION_RESET_ERRORS.any? { |klass| exc.is_a?(klass) }
+        return CONNECTION_RESET if CONNECTION_RESET_ERRORS.any? { |klass| exc.is_a?(klass) }
 
         "network_error"
       end
@@ -166,6 +170,11 @@ module Confeature
         http.open_timeout = @timeout
         http.read_timeout = @timeout
         http.write_timeout = @timeout if http.respond_to?(:write_timeout=)
+        # Net::HTTP silently retries an idempotent GET once on a read
+        # timeout or a reset (`max_retries` defaults to 1): two requests,
+        # and twice the deadline, for one fetch. One fetch is one request —
+        # the poll service owns retrying (#920, found by the live suite).
+        http.max_retries = 0
         http
       end
 
@@ -183,6 +192,8 @@ module Confeature
         when Net::HTTPNotModified
           FetchResult.new(status: :not_modified, etag: response["etag"])
         when Net::HTTPSuccess
+          return fail_with(CONNECTION_RESET) if truncated?(response)
+
           parse_success(response)
         else
           reason = "HTTP #{response.code}"
@@ -191,6 +202,19 @@ module Confeature
           )
           FetchResult.new(status: :failed, error: reason)
         end
+      end
+
+      # Net::HTTP reads a Content-Length body ignoring EOF, so a connection
+      # dropped mid-body yields a SHORT body, never an EOFError. Without
+      # this check it would be misread as malformed JSON — a transport
+      # failure reported as CDN drift (wire-cases `network-reset`, #920).
+      # Net::HTTP rewrites Content-Length to the inflated size when it
+      # decodes gzip, so the comparison holds for a compressed response.
+      def truncated?(response)
+        declared = response["content-length"]
+        return false unless declared&.match?(/\A\d+\z/)
+
+        response.body.to_s.bytesize < Integer(declared, 10)
       end
 
       def parse_success(response)

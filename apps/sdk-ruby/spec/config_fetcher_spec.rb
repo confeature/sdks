@@ -2,6 +2,8 @@
 
 # SPDX-License-Identifier: MIT
 
+require "socket"
+
 RSpec.describe Confeature::Internal::ConfigFetcher do
   let(:silent_logger) { SpecHelpers::SilentLogger.new }
   let(:sdk_key) { SpecHelpers::SAMPLE_SDK_KEY }
@@ -226,6 +228,55 @@ RSpec.describe Confeature::Internal::ConfigFetcher do
   # ends as the fixed `invalid_request`, with no request. It never
   # raises — constructor included: a `URI::InvalidURIError` quotes the
   # whole URL, key included.
+  # Found by the live suite (#920): two Net::HTTP behaviours WebMock cannot
+  # show, so these examples talk to a real socket on 127.0.0.1.
+  describe "over a real socket" do
+    # Accepts every connection, reads its request, then runs `respond`
+    # (nil = hold it unanswered). Returns the accepted-connection count.
+    def serve(respond)
+      server = TCPServer.new("127.0.0.1", 0)
+      accepted = Queue.new
+      thread = Thread.new do
+        loop do
+          socket = server.accept
+          accepted << socket
+          socket.gets("\r\n\r\n")
+          respond&.call(socket)
+        end
+      end
+      WebMock.disable_net_connect!(allow_localhost: true)
+      yield "http://127.0.0.1:#{server.addr[1]}"
+      accepted.size
+    ensure
+      thread&.kill
+      accepted&.size&.times { accepted.pop.close }
+      server&.close
+      WebMock.disable_net_connect!(allow_localhost: false)
+    end
+
+    # Net::HTTP retries an idempotent GET once on a read timeout
+    # (`max_retries` defaults to 1): two requests, and twice the deadline,
+    # for one fetch. One fetch is one request; the poller owns retrying.
+    it "sends one request when the read times out" do
+      result = nil
+      connections = serve(nil) { |base| result = fetcher_for(sdk_key, timeout: 0.2, base_url: base).fetch }
+      expect([result.status, result.error, connections]).to eq([:failed, "timeout", 1])
+    end
+
+    # Net::HTTP reads a Content-Length body ignoring EOF, so a body cut
+    # short arrives as a short string, never an EOFError: it is a dropped
+    # connection (fetchFailed), not a JSON error (wire-cases `network-reset`).
+    it "reports a body cut short of its Content-Length as connection_reset" do
+      cut = lambda do |socket|
+        socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{\"f\":")
+        socket.close
+      end
+      result = nil
+      serve(cut) { |base| result = fetcher_for(sdk_key, base_url: base).fetch }
+      expect([result.status, result.error]).to eq([:failed, "connection_reset"])
+    end
+  end
+
   describe "a bad base URL" do
     keys = {
       "legacy" => SpecHelpers::SAMPLE_SDK_KEY,
