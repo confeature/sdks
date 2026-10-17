@@ -38,6 +38,7 @@
   "devDependencies": {
     "@confeature/sdk-shared": "workspace:*",
     "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@confeature/test-harness-live-contract": "workspace:*",
     "@types/bun": "^1.1.0",
     "@typescript/native-preview": "catalog:",
     "configcat-js": "^9.4.0",

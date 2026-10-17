@@ -419,6 +419,9 @@ function deployedHarness(source: Directory): Directory {
  */
 const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container; node?: true }> = {
   node: { build: jsWorkspace, node: true },
+  "browser-js": { build: jsWorkspace, node: true },
+  bun: { build: jsWorkspace, node: true },
+  deno: { build: jsWorkspace, node: true },
   python: { build: pythonToolchain },
 };
 

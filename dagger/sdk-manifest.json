@@ -13,7 +13,11 @@
     {
       "name": "browser-js",
       "daggerFn": "browser-test",
-      "status": "covered"
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-browser-js exec vp test run tests/wire/wire-cases.live.test.ts",
+        "path": "apps/sdk-browser-js/tests/wire/wire-cases.live.test.ts"
+      }
     },
     {
       "name": "python",
@@ -26,8 +30,24 @@
     },
     { "name": "go", "daggerFn": "go-test", "status": "covered" },
 
-    { "name": "deno", "daggerFn": "deno-test", "status": "covered" },
-    { "name": "bun", "daggerFn": "bun-test", "status": "covered" },
+    {
+      "name": "deno",
+      "daggerFn": "deno-test",
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-deno exec vp test run tests/wire/wire-cases.live.test.ts",
+        "path": "apps/sdk-deno/tests/wire/wire-cases.live.test.ts"
+      }
+    },
+    {
+      "name": "bun",
+      "daggerFn": "bun-test",
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-bun exec vp test run tests/wire/wire-cases.live.test.ts",
+        "path": "apps/sdk-bun/tests/wire/wire-cases.live.test.ts"
+      }
+    },
     {
       "name": "angular",
       "daggerFn": "angular-test",
