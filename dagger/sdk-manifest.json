@@ -25,7 +25,7 @@
         "toolchain": "uv"
       }
     },
-    { "name": "go", "daggerFn": "go-test", "status": "covered", "ci": { "pending": "#913" } },
+    { "name": "go", "daggerFn": "go-test", "status": "covered" },
 
     { "name": "deno", "daggerFn": "deno-test", "status": "covered" },
     { "name": "bun", "daggerFn": "bun-test", "status": "covered" },
@@ -71,8 +71,7 @@
       "name": "rust",
       "daggerFn": "rust-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#913" }
+      "localGate": false
     },
     {
       "name": "dart",

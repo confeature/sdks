@@ -266,6 +266,45 @@ function phpToolchain(source: Directory): Container {
   );
 }
 
+function goToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("golang:1.23.12-bookworm")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("GOMODCACHE", "/cache/go-mod")
+    .withEnvVariable("GOCACHE", "/cache/go-build")
+    .withMountedCache("/cache/go-mod", dag.cacheVolume("go-mod-cache"))
+    .withMountedCache("/cache/go-build", dag.cacheVolume("go-build-cache"))
+    .withExec(["useradd", "-m", "-u", "1000", "runner"])
+    .withExec([
+      "bash",
+      "-eu",
+      "-c",
+      // Install staticcheck under root with GOBIN forced to /usr/local/bin so
+      // it resolves on PATH for the unprivileged runner user.
+      "GOBIN=/usr/local/bin go install honnef.co/go/tools/cmd/staticcheck@2024.1.1",
+    ])
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-go");
+}
+
+function rustToolchain(source: Directory): Container {
+  return (
+    dag
+      .container()
+      .from("rust:1.88.0-bookworm")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("CARGO_HOME", "/cache/cargo")
+      // Target dir OUTSIDE /work so the cache mount never collides with the
+      // mounted source directory (the EBUSY class of conflict).
+      .withEnvVariable("CARGO_TARGET_DIR", "/cache/target")
+      .withMountedCache("/cache/cargo", dag.cacheVolume("cargo-home"))
+      .withMountedCache("/cache/target", dag.cacheVolume("cargo-target"))
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-rust")
+  );
+}
+
 @object()
 export class Confeature {
   /**
@@ -516,26 +555,16 @@ export class Confeature {
    */
   @func()
   async rustTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("rust:1.88-bookworm")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("CARGO_HOME", "/cache/cargo")
-      // Target dir OUTSIDE /work so the cache mount never collides with the
-      // mounted source directory (the EBUSY class of conflict).
-      .withEnvVariable("CARGO_TARGET_DIR", "/cache/target")
-      .withMountedCache("/cache/cargo", dag.cacheVolume("cargo-home"))
-      .withMountedCache("/cache/target", dag.cacheVolume("cargo-target"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-rust")
-      // MSRV guard (cargo +1.86 build --lib, no dev-deps) then fmt+test on the
-      // image's 1.88 default; rustfmt add is idempotent. clippy is left to the
-      // SDK's own CI for now.
+    // MSRV guard (cargo +1.86 build --lib, no dev-deps), then fmt, clippy
+    // with -D warnings (the SDK's declared merge bar, .claude/agents/sdk-rust.md
+    // rule 9; #793 FR-007) and the tests on the image's 1.88 default.
+    // rustfmt and clippy adds are idempotent.
+    const result = await rustToolchain(source)
       .withExec([
         "bash",
         "-eu",
         "-c",
-        "rustup toolchain install 1.86 --profile minimal && cargo +1.86 build --lib && rustup component add rustfmt && cargo fmt --check && cargo test",
+        "rustup toolchain install 1.86 --profile minimal && cargo +1.86 build --lib && rustup component add rustfmt clippy && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -704,27 +733,7 @@ export class Confeature {
     // + GOCACHE env vars redirect Go's toolchain accordingly.
     // `staticcheck` is installed under root (GOBIN=/usr/local/bin) so it
     // resolves on PATH for the unprivileged runner user.
-    const result = await dag
-      .container()
-      .from("golang:1.23-bookworm")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("GOMODCACHE", "/cache/go-mod")
-      .withEnvVariable("GOCACHE", "/cache/go-build")
-      .withMountedCache("/cache/go-mod", dag.cacheVolume("go-mod-cache"))
-      .withMountedCache("/cache/go-build", dag.cacheVolume("go-build-cache"))
-      .withExec(["useradd", "-m", "-u", "1000", "runner"])
-      .withExec([
-        "bash",
-        "-eu",
-        "-c",
-        // Install staticcheck under root with GOBIN forced to /usr/local/bin so
-        // it resolves on PATH for the unprivileged runner user. Then chown the
-        // shared cache volumes (which `go install` will have populated with
-        // root-owned entries) so the runner user can read/write them.
-        "GOBIN=/usr/local/bin go install honnef.co/go/tools/cmd/staticcheck@2024.1.1",
-      ])
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-go")
+    const result = await goToolchain(source)
       .withExec([
         "bash",
         "-eu",
