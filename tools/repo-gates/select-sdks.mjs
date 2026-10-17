@@ -115,6 +115,11 @@ export const GATE_PREFIXES = [
   "tools/test-harness-live-contract/",
   "scripts/swift-precheck.sh",
   "apps/sdk-unreal/scripts/",
+  // What `pnpm install` reads before any gate step runs (#793 re-review F7).
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  ".npmrc",
 ];
 /**
  * How every liveSuite.runner starts (#783): the harness wrapper boots the

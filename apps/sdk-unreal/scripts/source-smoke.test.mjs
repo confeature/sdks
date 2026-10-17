@@ -47,6 +47,22 @@ test("checklist: every entry is a UFUNCTION or UPROPERTY member", () => {
   assert.equal(checkChecklist(`FName(TEXT("GetValueBool"))`, commented).length, 1);
 });
 
+test("checklist: a block comment, an #if 0 region or a macro named in prose is not reflection", () => {
+  const entry = `FName(TEXT("GetValueBool"))`;
+  const block = HEADER.replace(
+    "bool GetValueBool(const FString& Key, bool DefaultValue, const FConfeatureUser& User);",
+    "/* bool GetValueBool(const FString& Key); */",
+  );
+  assert.equal(checkChecklist(entry, block).length, 1);
+  const ifZero = HEADER.replace(
+    'UFUNCTION(BlueprintCallable, Category = "Confeature")',
+    '#if 0\n  UFUNCTION(BlueprintCallable, Category = "Confeature")',
+  ).replace("User);", "User);\n#endif");
+  assert.equal(checkChecklist(entry, ifZero).length, 1);
+  const prose = "\n  // Not a UFUNCTION( here.\n  bool GetValueBool(const FString& Key);\n";
+  assert.equal(checkChecklist(entry, prose).length, 1);
+});
+
 test("derivation: the checklist cites what it was derived from and an anchor date", () => {
   const ok = "derived from the cross-SDK surface\n// Anchored 2026-05-23: as it stood";
   assert.deepEqual(checkDerivation(ok), []);

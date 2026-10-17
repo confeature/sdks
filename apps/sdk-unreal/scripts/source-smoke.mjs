@@ -29,6 +29,7 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEntry } from "../../../tools/lib/is-entry.mjs";
 
 const HERE = fileURLToPath(import.meta.url);
 const PLUGIN = "apps/sdk-unreal/Plugins/Confeature";
@@ -78,16 +79,29 @@ export function reflected(lines, i) {
   for (let j = i - 1; j >= 0 && j >= i - 8; j--) {
     const line = lines[j].trim();
     if (line === "" || line.startsWith("//")) continue;
-    if (/\b(UFUNCTION|UPROPERTY)\s*\(/.test(line)) return true;
+    // The macro opens its line: one named inside a comment's text is not it.
+    if (/^(UFUNCTION|UPROPERTY)\s*\(/.test(line)) return true;
     if (/[;{}]$/.test(line)) return false;
   }
   return false;
 }
 
+/**
+ * The header as the compiler reads it, for these checks: block comments and
+ * `#if 0` regions blanked, line count kept (#793 re-review F9). A declaration
+ * inside either is not declared.
+ */
+export function stripInactive(text) {
+  const blank = (m) => m.replace(/[^\n]/g, " ");
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/^[ \t]*#if\s+0\b[\s\S]*?^[ \t]*#endif\b.*$/gm, blank);
+}
+
 export function checkChecklist(checklistText, headerText) {
   const names = checklistNames(checklistText);
   if (names.length === 0) return ["the checklist names no entry"];
-  const lines = headerText.split("\n");
+  const lines = stripInactive(headerText).split("\n");
   const problems = [];
   for (const name of names) {
     const decl = new RegExp(`\\b${name}\\s*(?:\\(|;)`);
@@ -179,5 +193,6 @@ export function main(argv, { out = process.stdout } = {}) {
   return ok ? 0 : 1;
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === HERE)
-  process.exitCode = main(process.argv.slice(2));
+// Both sides realpathed: through a symlinked checkout the old check never
+// matched, and the smoke exited 0 having run nothing (#793 re-review F8).
+if (isEntry(process.argv[1], HERE)) process.exitCode = main(process.argv.slice(2));
