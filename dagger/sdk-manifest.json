@@ -45,8 +45,7 @@
       "name": "java",
       "daggerFn": "java-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#914" }
+      "localGate": false
     },
     {
       "name": "dotnet",
@@ -85,15 +84,13 @@
       "name": "kotlin-mp",
       "daggerFn": "kotlin-mp-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#914" }
+      "localGate": false
     },
     {
       "name": "android",
       "daggerFn": "android-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#914" }
+      "localGate": false
     },
     {
       "name": "elixir",

@@ -138,7 +138,7 @@ function androidSdkContainer(source: Directory): Container {
   // never touches the local prepushAll budget.
   return dag
     .container({ platform: "linux/amd64" as Platform })
-    .from("eclipse-temurin:17-jdk")
+    .from("eclipse-temurin:17.0.20_8-jdk")
     .withEnvVariable("CI", "true")
     .withEnvVariable("ANDROID_HOME", "/opt/android-sdk")
     .withEnvVariable("ANDROID_SDK_ROOT", "/opt/android-sdk")
@@ -305,6 +305,17 @@ function rustToolchain(source: Directory): Container {
   );
 }
 
+function javaToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("eclipse-temurin:21.0.11_10-jdk")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("GRADLE_USER_HOME", "/cache/gradle")
+    .withMountedCache("/cache/gradle", dag.cacheVolume("gradle-cache"))
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-java");
+}
+
 @object()
 export class Confeature {
   /**
@@ -445,16 +456,10 @@ export class Confeature {
    */
   @func()
   async javaTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("eclipse-temurin:21-jdk")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("GRADLE_USER_HOME", "/cache/gradle")
-      .withMountedCache("/cache/gradle", dag.cacheVolume("gradle-cache"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-java")
-      // `sh ./gradlew` runs the wrapper regardless of the file's exec bit;
-      // `--no-daemon` is mandatory in ephemeral containers (no reuse).
+    // `sh ./gradlew` runs the wrapper regardless of the file's exec bit;
+    // `--no-daemon` is mandatory in ephemeral containers (no reuse). `check`
+    // is the SDK's declared bar: tests, Spotless, JaCoCo verify.
+    const result = await javaToolchain(source)
       .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -658,7 +663,9 @@ export class Confeature {
   async androidTest(source: Directory): Promise<string> {
     const result = await androidSdkContainer(source)
       .withWorkdir("/work/apps/sdk-android")
-      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon testDebugUnitTest"])
+      // The SDK's declared bar (.claude/agents/sdk-android.md rule 8, #793
+      // FR-007): Android Lint, the unit tests, the release AAR build.
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon lint test assembleRelease"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 androidTest)`;
