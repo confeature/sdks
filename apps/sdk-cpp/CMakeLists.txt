@@ -147,6 +147,7 @@ if(CONFEATURE_ENABLE_TESTS)
         tests/evaluator_upstream_corpus_test.cpp
         tests/config_fetcher_test.cpp
         tests/wire_cases_test.cpp
+        tests/wire_cases_live_test.cpp
         tests/filesystem_cache_test.cpp
         tests/client_test.cpp
         tests/cache_key_fixtures_test.cpp

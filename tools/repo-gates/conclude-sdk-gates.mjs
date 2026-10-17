@@ -52,9 +52,10 @@ const quoted = (names) => names.map((n) => `\`${n}\``).join(", ");
 /**
  * select's outputs, read back and checked: every selection array holds
  * manifest names only (gate and known-red legs as `{ name, daggerFn, live }`,
- * a known-red one with its ticket), and gate_files plain paths. `live` must be
- * a boolean: the leg's live-suite step runs on it (#918), so a leg that could
- * not say whether it has one could skip its live suite and pass. Returns the
+ * a known-red one with its ticket; macOS legs as `{ name, live }`, #924; smoke
+ * legs as bare names), and gate_files plain paths. `live` must be a boolean:
+ * the leg's live-suite step runs on it (#918), so a leg that could not say
+ * whether it has one could skip its live suite and pass. Returns the
  * parsed outputs, or the reasons they cannot be trusted.
  */
 function readSelection(outputs) {
@@ -81,17 +82,18 @@ function readSelection(outputs) {
       delete sel[k];
       continue;
     }
-    const legs = k === "gate" || k === "known_red";
+    const kind = KINDS.find((x) => x.output === k);
+    const leg = (x) =>
+      isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
     const bad = v.filter((x) =>
-      legs
-        ? !isObject(x) ||
-          typeof x.name !== "string" ||
-          !NAME.test(x.name) ||
-          typeof x.daggerFn !== "string" ||
-          !DAGGER_FN.test(x.daggerFn) ||
-          typeof x.live !== "boolean" ||
-          (k === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
-        : typeof x !== "string" || !NAME.test(x),
+      !kind.live
+        ? typeof x !== "string" || !NAME.test(x)
+        : kind.native !== undefined
+          ? !leg(x)
+          : !leg(x) ||
+            typeof x.daggerFn !== "string" ||
+            !DAGGER_FN.test(x.daggerFn) ||
+            (k === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket))),
     );
     if (bad.length > 0) {
       problems.push(

@@ -48,6 +48,7 @@
 #include <vector>
 
 #include "internal/config_fetcher.h"
+#include "wire_case_assertions.h"
 #include "workspace_root.h"
 
 using confeature::internal::ConfigFetcher;
@@ -55,6 +56,7 @@ using confeature::internal::FetchResult;
 using confeature::internal::FetchStatus;
 using confeature::tests::fixturesPath;
 using nlohmann::json;
+namespace wire = confeature::tests::wire;
 using namespace std::chrono_literals;
 
 namespace {
@@ -62,75 +64,25 @@ namespace {
 constexpr const char* kWireTestSdkKey =
     "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
-// Maps the fetcher's FIXED reason codes (#803 FR-002) onto the corpus's
-// normalised error-class vocabulary:
-//
-//   - "MALFORMED_JSON"         -> parseFailed   (JSON.parse failure OR wrong shape)
-//   - "HTTP 403" / "HTTP 404"  -> invalidSdkKey (CDN rejected the key — per ConfigCat
-//                                 only 403/404 are invalid-SDK-key statuses; 401 is a
-//                                 generic retryable failure)
-//   - "INVALID_SDK_KEY"        -> invalidSdkKey (key unsendable; no request made)
-//   - "HTTP <other non-2xx>"   -> fetchFailed
-//   - "timeout"                -> timeout       (CURLE_OPERATION_TIMEDOUT)
-//   - "body_read_failed"       -> fetchFailed   (a body truncated by a mid-response
-//                                 connection drop — never parseFailed; #590)
-//   - "network_error" /        -> fetchFailed
-//     "too_many_redirects" /
-//     "body_too_large" /
-//     "curl_init_failed"
-//
-// Any other reason maps to "unknown" and FAILS the case: folding an
-// unexpected failure into fetchFailed would hide it (mirrors sdk-go's
-// `goErrorToClass`).
-std::string cppErrorToClass(const std::string& reason) {
-  if (reason == "MALFORMED_JSON") {
-    return "parseFailed";
-  }
-  if (reason == "HTTP 403" || reason == "HTTP 404" || reason == "INVALID_SDK_KEY") {
-    return "invalidSdkKey";
-  }
-  if (reason.rfind("HTTP ", 0) == 0) {
-    return "fetchFailed";
-  }
-  if (reason == "timeout") {
-    return "timeout";
-  }
-  if (reason == "body_read_failed" || reason == "network_error" || reason == "too_many_redirects" ||
-      reason == "body_too_large" || reason == "curl_init_failed") {
-    return "fetchFailed";
-  }
-  return "unknown";
-}
-
-// The `given` / `expected` fields this consumer reads (schema 1.3). A case
-// carrying any other field FAILS: a new expectation is never skipped
-// silently (#803 FR-003 — the reason 12 suites missed `requestUrlPrefix`).
-const std::vector<std::string> kKnownGivenFields = {"previousEtag", "sdkKey", "baseUrl"};
-const std::vector<std::string> kKnownExpectedFields = {
-    "requestHeaderIfNoneMatch", "outcome",    "resultingEtag", "hasConfig", "errorClass",
-    "requestUrlPrefix",         "requestPath"};
-
-// Returns the first field of `block` this consumer does not read.
-std::optional<std::string> firstUnknownField(const json& block,
-                                             const std::vector<std::string>& known) {
-  for (auto it = block.begin(); it != block.end(); ++it) {
-    if (std::find(known.begin(), known.end(), it.key()) == known.end()) {
-      return it.key();
-    }
-  }
-  return std::nullopt;
-}
-
-// The request target's PATH as sent (still escaped, query excluded), so
-// #807's query parameter never breaks a path pin.
-std::string requestPath(const std::string& rawRequest) {
+// The request target of a raw HTTP/1.1 request line, as sent.
+std::string requestTarget(const std::string& rawRequest) {
   const auto start = rawRequest.find(' ');
   const auto end = rawRequest.find(' ', start + 1);
   if (start == std::string::npos || end == std::string::npos) {
     return {};
   }
-  const auto target = rawRequest.substr(start + 1, end - start - 1);
-  return target.substr(0, target.find('?'));
+  return rawRequest.substr(start + 1, end - start - 1);
+}
+
+// A header's value in a raw request, or nullopt when it is absent. libcurl
+// writes header names as given, so the match is on the exact name.
+std::optional<std::string> headerValue(const std::string& rawRequest, const std::string& name) {
+  const auto at = rawRequest.find("\r\n" + name + ": ");
+  if (at == std::string::npos) {
+    return std::nullopt;
+  }
+  const auto from = at + name.size() + 4;
+  return rawRequest.substr(from, rawRequest.find("\r\n", from) - from);
 }
 
 // Minimal blocking HTTP/1.1 server tailored to ConfigFetcher's surface.
@@ -221,6 +173,11 @@ class MockServer {
       return {};
     }
     return requests_.back();
+  }
+
+  std::size_t requestCount() const {
+    std::lock_guard<std::mutex> guard(requestsMutex_);
+    return requests_.size();
   }
 
   std::uint16_t port() const { return port_; }
@@ -335,18 +292,6 @@ std::string baseUrlFor(const MockServer& server) {
   return os.str();
 }
 
-// Loads the wire-cases corpus from the shared fixtures package. The
-// fixture grew 7→12 (#491) → 14 (#590 added the timeout + network-reset
-// `server.behavior` cases) — see wire-cases.json's $schema for the
-// authoritative shape.
-json loadCorpus() {
-  std::ifstream stream(fixturesPath() / "wire-cases.json");
-  REQUIRE(stream.is_open());
-  std::ostringstream buf;
-  buf << stream.rdbuf();
-  return json::parse(buf.str());
-}
-
 // Resolves a case's response body — either inlined raw text (`body`)
 // or a reference to a sibling fixture (`bodyRef`). Either may be null
 // for 304-style responses.
@@ -413,9 +358,18 @@ std::string buildResponse(const json& server, const std::string& body) {
 TEST_CASE("wire-cases.json — a field this consumer does not read fails the case", "[wire_cases]") {
   // Proves the strict field check fails closed (#803 FR-003).
   const auto expected = json::parse(R"({"outcome":"fetched","requestPath":"/p","bogus":1})");
-  REQUIRE(firstUnknownField(expected, kKnownExpectedFields) == std::string("bogus"));
+  REQUIRE(wire::firstUnknownField(expected, wire::kKnownExpectedFields) == std::string("bogus"));
   const auto given = json::parse(R"({"previousEtag":null,"sdkKey":"k","baseUrl":"b"})");
-  REQUIRE_FALSE(firstUnknownField(given, kKnownGivenFields).has_value());
+  REQUIRE_FALSE(wire::firstUnknownField(given, wire::kKnownGivenFields).has_value());
+}
+
+TEST_CASE("wire-cases.json — the error mapping fails closed", "[wire_cases]") {
+  // A reason the mapping does not know is "unknown", which fails its case,
+  // never a silent fetchFailed (#924).
+  REQUIRE(wire::cppErrorToClass("cancelled") == "unknown");
+  REQUIRE(wire::cppErrorToClass("") == "unknown");
+  REQUIRE(wire::cppErrorToClass("HTTP 403") == "invalidSdkKey");
+  REQUIRE(wire::cppErrorToClass("HTTP 503") == "fetchFailed");
 }
 
 TEST_CASE("wire-cases.json — wire-protocol conformance (sdk-cpp)", "[wire_cases]") {
@@ -423,26 +377,19 @@ TEST_CASE("wire-cases.json — wire-protocol conformance (sdk-cpp)", "[wire_case
   // wire-layer test. This consumer maps the C++ fetcher's outcome onto
   // the normalised vocabulary. Any drift here is a Principle II
   // regression — fix the SDK, never mutate the corpus.
-  const auto corpus = loadCorpus();
+  const auto corpus = wire::loadCorpus();
   REQUIRE(corpus.is_object());
   REQUIRE(corpus.contains("cases"));
   REQUIRE(corpus["cases"].is_array());
-  // 16 cases: #491 grew 7→12; #590 added the timeout + network-reset
+  // 17 cases: #491 grew 7→12; #590 added the timeout + network-reset
   // `server.behavior` cases; #803 the three request-path cases.
   REQUIRE(corpus["cases"].size() == 17);
 
   for (const auto& wireCase : corpus["cases"]) {
     const auto id = wireCase.at("id").get<std::string>();
     DYNAMIC_SECTION(id) {
-      const auto& given = wireCase.at("given");
+      wire::requireKnownFields(wireCase);
       const auto& server = wireCase.at("server");
-      const auto& expected = wireCase.at("expected");
-      const auto unknownGiven = firstUnknownField(given, kKnownGivenFields);
-      const auto unknownExpected = firstUnknownField(expected, kKnownExpectedFields);
-      INFO("unknown given." << unknownGiven.value_or("") << " / expected."
-                            << unknownExpected.value_or("") << " — this consumer must read it");
-      REQUIRE_FALSE(unknownGiven.has_value());
-      REQUIRE_FALSE(unknownExpected.has_value());
 
       // Behaviour adapter (#590): the corpus `server.behavior` discriminator
       // selects how the mock transport acts. Absent = "respond" (default).
@@ -471,89 +418,19 @@ TEST_CASE("wire-cases.json — wire-protocol conformance (sdk-cpp)", "[wire_case
       }
       mock.start();
 
-      std::optional<std::string> prevEtag;
-      if (given.contains("previousEtag") && !given["previousEtag"].is_null()) {
-        prevEtag = given["previousEtag"].get<std::string>();
-      }
-
-      std::string sdkKey = kWireTestSdkKey;
-      if (given.contains("sdkKey")) {
-        sdkKey = given["sdkKey"].get<std::string>();
-      }
-
+      const auto sdkKey = wire::sdkKeyFor(wireCase, kWireTestSdkKey);
       ConfigFetcher fetcher(sdkKey, "0.0.0-wire-test", baseUrlFor(mock), requestTimeout, nullptr);
-      const FetchResult result = fetcher.fetch(prevEtag);
+      const FetchResult result = fetcher.fetch(wire::previousEtagOf(wireCase));
 
       mock.stop();
 
-      // ---- Request-side invariants ------------------------------------
+      // Exactly one request per fetch: a retrying fetcher must not pass.
+      REQUIRE(mock.requestCount() == 1);
       const auto request = mock.lastRequest();
-      REQUIRE_FALSE(request.empty());
-      // The parsed path as sent (still escaped, query excluded), compared
-      // EXACTLY: the corpus's requestPath when the case pins one, else
-      // ConfigCat's /configuration-files/<sdkKey>/config_v6.json for the
-      // default legacy key, which FR-001 sends verbatim.
-      std::string wantPath = "/configuration-files/" + sdkKey + "/config_v6.json";
-      if (expected.contains("requestPath")) {
-        wantPath = expected["requestPath"].get<std::string>();
-      }
-      REQUIRE(requestPath(request) == wantPath);
-
-      // A custom base must lead the request URL (custom-base-url). The mock
-      // stands in for the network, so the custom-base fetcher's URL is
-      // checked without sending it.
-      REQUIRE(given.contains("baseUrl") == expected.contains("requestUrlPrefix"));
-      if (given.contains("baseUrl")) {
-        const ConfigFetcher custom(sdkKey, "0.0.0-wire-test", given["baseUrl"].get<std::string>(),
-                                   requestTimeout, nullptr);
-        REQUIRE(custom.url().has_value());
-        const auto prefix = expected["requestUrlPrefix"].get<std::string>();
-        INFO("url=" << *custom.url() << " prefix=" << prefix);
-        REQUIRE(custom.url()->rfind(prefix, 0) == 0);
-      }
-
-      // If-None-Match round-trip: corpus uses three-state semantics —
-      // explicit null means the header MUST be absent; a string value
-      // means the header MUST equal it verbatim. Absent key = unasserted.
-      if (expected.contains("requestHeaderIfNoneMatch")) {
-        const auto& expectedHeader = expected["requestHeaderIfNoneMatch"];
-        if (expectedHeader.is_null()) {
-          REQUIRE(request.find("If-None-Match:") == std::string::npos);
-        } else {
-          const std::string wantLine = "If-None-Match: " + expectedHeader.get<std::string>();
-          REQUIRE(request.find(wantLine) != std::string::npos);
-        }
-      }
-
-      // ---- Outcome assertions -----------------------------------------
-      const auto outcome = expected.at("outcome").get<std::string>();
-      if (outcome == "fetched") {
-        REQUIRE(result.status == FetchStatus::Fetched);
-        REQUIRE(result.body.has_value());
-        if (expected.contains("resultingEtag") && !expected["resultingEtag"].is_null()) {
-          REQUIRE(result.etag.has_value());
-          REQUIRE(result.etag.value() == expected["resultingEtag"].get<std::string>());
-        }
-      } else if (outcome == "notModified") {
-        REQUIRE(result.status == FetchStatus::NotModified);
-        REQUIRE_FALSE(result.body.has_value());
-        if (expected.contains("resultingEtag") && !expected["resultingEtag"].is_null()) {
-          REQUIRE(result.etag.has_value());
-          REQUIRE(result.etag.value() == expected["resultingEtag"].get<std::string>());
-        }
-      } else if (outcome == "failed") {
-        REQUIRE(result.status == FetchStatus::Failed);
-        REQUIRE(result.error.has_value());
-        const auto mapped = cppErrorToClass(result.error.value());
-        const auto wantClass = expected.at("errorClass").get<std::string>();
-        INFO("raw error=" << result.error.value() << " mapped=" << mapped << " want=" << wantClass);
-        REQUIRE(mapped == wantClass);
-      } else {
-        FAIL("unknown outcome in corpus: " << outcome);
-      }
-      if (expected.contains("hasConfig")) {
-        REQUIRE(result.body.has_value() == expected["hasConfig"].get<bool>());
-      }
+      wire::assertWireCase(
+          wireCase, sdkKey,
+          wire::SentRequest{wire::pathOf(requestTarget(request)), headerValue(request, "If-None-Match")},
+          result);
     }
   }
 }

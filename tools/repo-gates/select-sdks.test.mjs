@@ -168,6 +168,12 @@ const fixture = () => ({
     { name: "live", daggerFn: "live-test", liveSuite: { runner: "node run" } },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
+    {
+      name: "maclive",
+      daggerFn: null,
+      ci: { native: "macos" },
+      liveSuite: { runner: "node run" },
+    },
   ],
 });
 const route = (names, { event = "push", manifest = fixture(), base = manifest } = {}) =>
@@ -181,9 +187,20 @@ describe("the routing into job kinds", () => {
         { name: "b", daggerFn: "b-test", live: false },
       ],
       known_red: [],
-      swift: ["mac"],
+      swift: [{ name: "mac", live: false }],
       smoke: ["ue"],
     });
+  });
+
+  // #924: the macOS job runs a swift SDK's liveSuite.runner natively, after
+  // its suite, so its leg says whether it has one exactly as a Dagger leg does.
+  // MUTATION: route a macos SDK as a bare name again and the job's live step
+  // has nothing to read.
+  it("a macOS leg carries live: true exactly when its SDK has a liveSuite.runner", () => {
+    expect(route(["mac", "maclive"]).swift).toEqual([
+      { name: "mac", live: false },
+      { name: "maclive", live: true },
+    ]);
   });
 
   // #918: an SDK with a liveSuite.runner runs `live-suite --sdk <name>` as a
@@ -243,6 +260,10 @@ describe("the routing into job kinds", () => {
 });
 
 describe("the manifest's CI shape", () => {
+  // #924: the macOS job runs it natively (MUTATION: refuse every liveSuite
+  // without a daggerFn again, the T11 deviation, and this goes red).
+  it("accepts a liveSuite on a macOS SDK, whose job runs it", () =>
+    expect(manifestProblems(fixture())).toEqual([]));
   it("the real manifest has none of these problems", () =>
     expect(manifestProblems(REAL)).toEqual([]));
 
@@ -293,9 +314,10 @@ describe("the manifest's CI shape", () => {
       /liveSuite\.runner/,
     ],
     [
-      // No leg of a native SDK runs live-suite yet: its suite would be skipped.
-      "a liveSuite on a native SDK",
-      { name: "x", daggerFn: null, ci: { native: "macos" }, liveSuite: { runner: "r" } },
+      // The smoke job runs no live suite (#924: only the Dagger legs and the
+      // macOS job do), so a liveSuite there would never run.
+      "a liveSuite on a smoke SDK",
+      { name: "x", daggerFn: null, ci: { native: "smoke" }, liveSuite: { runner: "r" } },
       /no leg runs it/,
     ],
     [

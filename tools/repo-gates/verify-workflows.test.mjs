@@ -1819,6 +1819,11 @@ describe("19 the SDK gates' own shape (#793)", () => {
   const live = (job) =>
     job.steps.find((x) => x.name === "Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)");
 
+  const precheck = (jobs) =>
+    jobs.swift.steps.find((x) => x.run === "bash scripts/swift-precheck.sh");
+  const nativeLive = (jobs) =>
+    jobs.swift.steps.find((x) => x.run === "node tools/repo-gates/run-live-suite.mjs");
+
   it("control: the real tree is clean", () => expect(after(() => {})).toEqual([]));
 
   it.each([
@@ -2144,6 +2149,75 @@ describe("19 the SDK gates' own shape (#793)", () => {
         new RegExp(`${job}: its live-suite step does not use the suite step's action`),
       ],
     ]),
+    // The macOS job's steps (#924): the precheck, then the live suite natively.
+    [
+      "swift: no live step",
+      ({ jobs }) =>
+        void (jobs.swift.steps = jobs.swift.steps.filter((x) => x !== nativeLive(jobs))),
+      /swift: has no step running `node tools\/repo-gates\/run-live-suite\.mjs`/,
+    ],
+    [
+      "swift: a second live step",
+      ({ jobs }) => void jobs.swift.steps.push(structuredClone(nativeLive(jobs))),
+      /swift: runs 2 live steps, not exactly one/,
+    ],
+    [
+      "swift: a live step that runs whatever the leg says",
+      ({ jobs }) => void (nativeLive(jobs).if = "always()"),
+      /swift: its live step's if: is not exactly matrix\.sdk\.live/,
+    ],
+    [
+      "swift: a live step for a fixed SDK",
+      ({ jobs }) => void (nativeLive(jobs).env.SDK = "swift"),
+      /swift: its live step's env: is not exactly SDK: \$\{\{ matrix\.sdk\.name \}\}/,
+    ],
+    [
+      "swift: the live step before the precheck",
+      ({ jobs }) => {
+        const st = jobs.swift.steps;
+        const [l] = st.splice(st.indexOf(nativeLive(jobs)), 1);
+        st.splice(st.indexOf(precheck(jobs)), 0, l);
+      },
+      /swift: its live step does not come after its suite/,
+    ],
+    [
+      "swift: the precheck behind an if:",
+      ({ jobs }) => void (precheck(jobs).if = "matrix.sdk.live"),
+      /swift: has no unconditional step running `bash scripts\/swift-precheck\.sh`/,
+    ],
+    [
+      "swift: no workspace install before the live step",
+      ({ jobs }) =>
+        void (jobs.swift.steps = jobs.swift.steps.filter(
+          (x) => x.run !== "pnpm install --frozen-lockfile",
+        )),
+      /swift: has no `pnpm install --frozen-lockfile` step between its suite and its live step/,
+    ],
+    [
+      "swift: no harness build before the live step",
+      ({ jobs }) =>
+        void (jobs.swift.steps = jobs.swift.steps.filter((x) => !/--filter/.test(x.run ?? ""))),
+      /swift: has no `pnpm --filter @confeature\/test-harness-live-contract build` step/,
+    ],
+    [
+      "swift: Node at another version",
+      ({ jobs }) =>
+        void (jobs.swift.steps.find((x) => /setup-node/.test(x.uses ?? "")).with["node-version"] =
+          "22"),
+      /swift: has no `actions\/setup-node@[0-9a-f]+ with node-version: \$\{\{ env\.NODE_VERSION \}\}` step/,
+    ],
+    [
+      "swift: pnpm set up after the install",
+      ({ jobs }) => {
+        const st = jobs.swift.steps;
+        const [p] = st.splice(
+          st.findIndex((x) => /pnpm\/action-setup/.test(x.uses ?? "")),
+          1,
+        );
+        st.splice(st.indexOf(nativeLive(jobs)), 0, p);
+      },
+      /swift: its live-suite preparation is not in order/,
+    ],
     [
       "the workflow removed",
       ({ workflows }) => void delete workflows[G],

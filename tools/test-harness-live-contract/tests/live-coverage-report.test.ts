@@ -62,7 +62,7 @@ describe("buildReport (live-coverage-report)", () => {
     expect(r.pending).toEqual(["x"]);
   });
 
-  it("the real manifest: every SDK is covered, exempt or counted as no live suite yet", () => {
+  it("the real manifest: every SDK is covered or exempt, none with no live suite yet (#924)", () => {
     const real = JSON.parse(
       readFileSync(
         pathResolve(fileURLToPath(import.meta.url), "../../../../dagger/sdk-manifest.json"),
@@ -70,7 +70,8 @@ describe("buildReport (live-coverage-report)", () => {
       ),
     ) as { sdks: unknown[] };
     const r = buildReport(real);
-    expect(r.covered + r.exempt + r.pending.length).toBe(real.sdks.length);
+    expect(r.pending).toEqual([]);
+    expect(r.covered + r.exempt).toBe(real.sdks.length);
     expect(r.covered).toBeGreaterThan(0);
   });
 });

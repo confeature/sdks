@@ -30,7 +30,10 @@
  * request cannot waive its own red; one with `ci.native` goes to `swift`
  * (`macos`) or `smoke`. A Dagger leg is `{ name, daggerFn, live }`: `live` is
  * true exactly when the SDK has a `liveSuite.runner` (#918), and the leg then
- * runs `live-suite --sdk <name>` as a second step, after its suite.
+ * runs `live-suite --sdk <name>` as a second step, after its suite. A macOS
+ * leg is `{ name, live }` (#924): its job runs the same runner natively, after
+ * its suite, through run-live-suite.mjs. A smoke leg is the bare name: that
+ * job runs no live suite.
  *
  * Output: one `key=value` line per OUTPUT_KEYS entry, appended to
  * $GITHUB_OUTPUT when it is set, else printed. Every selection value is
@@ -74,15 +77,17 @@ const CI_KEYS = ["native", "knownRed"];
 
 /**
  * The job kinds of sdk-gates.yml: each matrix job's id, the output that feeds
- * it, the ci.native it runs (none for the Dagger legs), and whether the
- * aggregate counts its result. verify-workflows.mjs rule 19 and
+ * it, the ci.native it runs (none for the Dagger legs), whether the
+ * aggregate counts its result, and whether its job runs an SDK's live suite
+ * after its suite (`live`: the Dagger legs since #918, the macOS job since
+ * #924; the smoke job never). verify-workflows.mjs rule 19 and
  * conclude-sdk-gates.mjs read this table; neither carries its own.
  */
 export const KINDS = [
-  { job: "gate", output: "gate", counted: true },
-  { job: "gate-known-red", output: "known_red", counted: false },
-  { job: "swift", output: "swift", native: "macos", counted: true },
-  { job: "smoke", output: "smoke", native: "smoke", counted: true },
+  { job: "gate", output: "gate", counted: true, live: true },
+  { job: "gate-known-red", output: "known_red", counted: false, live: true },
+  { job: "swift", output: "swift", native: "macos", counted: true, live: true },
+  { job: "smoke", output: "smoke", native: "smoke", counted: true, live: false },
 ];
 /** The select job's own id, whose outputs every other job reads. */
 export const SELECT_JOB = "select";
@@ -114,8 +119,9 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * Why each manifest entry cannot be routed, as `{ sdk, why }`. An SDK runs
  * through exactly one of a Dagger function (`daggerFn`) or a native runner
  * (`ci.native`); a known-red waiver needs a Dagger leg to run red in; every
- * ticket is `#<issue>`. A `liveSuite` has a runner and needs a Dagger leg to
- * run in (#918); an SDK has a liveSuite or a `liveExempt` reason, never both.
+ * ticket is `#<issue>`. A `liveSuite` has a runner and needs a job that runs
+ * it: a Dagger leg (#918) or a native kind whose KINDS entry is `live`, the
+ * macOS job (#924); an SDK has a liveSuite or a `liveExempt` reason, never both.
  * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
 export function manifestProblems(manifest) {
@@ -151,8 +157,11 @@ export function manifestProblems(manifest) {
     if (live !== undefined) {
       if (typeof live?.runner !== "string" || live.runner.trim() === "")
         add("liveSuite.runner is not a command (a liveSuite with no runner runs nothing)");
-      if (!dagger)
-        add("liveSuite on an SDK with no Dagger leg: no leg runs it, so it would never run");
+      const runsLive = dagger || KINDS.some((k) => k.native === ci?.native && k.live);
+      if (!runsLive)
+        add(
+          "liveSuite on an SDK whose job runs no live suite (neither a Dagger leg nor the macOS job): no leg runs it, so it would never run",
+        );
       if (s?.liveExempt !== undefined)
         add("has both a liveSuite and a liveExempt: an SDK has a live suite or a reason, not both");
     }
@@ -275,7 +284,10 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
   for (const name of names) {
     const s = byName.get(name);
     if (s?.ci?.native !== undefined) {
-      out[KINDS.find((k) => k.native === s.ci.native).output].push(name);
+      const kind = KINDS.find((k) => k.native === s.ci.native);
+      out[kind.output].push(
+        kind.live ? { name, live: typeof s.liveSuite?.runner === "string" } : name,
+      );
       continue;
     }
     if (typeof s?.daggerFn !== "string" || !DAGGER_FN.test(s.daggerFn))

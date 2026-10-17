@@ -44,7 +44,8 @@ const needs = (sel = {}, results = {}, selectResult = "success") => ({
 const NODE = { name: "node", daggerFn: "js-test", live: true };
 const RUST_RED = { name: "rust", daggerFn: "rust-test", live: false, ticket: "#806" };
 /** One selected SDK for each kind, the shape its output carries. */
-const ONE = { gate: [NODE], known_red: [RUST_RED], swift: ["swift"], smoke: ["unreal"] };
+const SWIFT = { name: "swift", live: true };
+const ONE = { gate: [NODE], known_red: [RUST_RED], swift: [SWIFT], smoke: ["unreal"] };
 
 describe("the pass rule, every result for every kind", () => {
   const RESULTS = ["success", "failure", "cancelled", "skipped", "missing"];
@@ -152,6 +153,22 @@ describe("the aggregate", () => {
       (n) =>
         void ((n.select.outputs.gate = '[{"name":"node","daggerFn":"js-test","live":"true"}]'),
         (n.gate.result = "success")),
+    ],
+    // #924: the macOS job's live step runs on `live` too, so its leg must
+    // say it as a boolean; a bare name is the pre-#924 shape, now refused.
+    [
+      "a macOS leg that is a bare name",
+      (n) => void ((n.select.outputs.swift = '["swift"]'), (n.swift.result = "success")),
+    ],
+    [
+      "a macOS leg with no live",
+      (n) => void ((n.select.outputs.swift = '[{"name":"swift"}]'), (n.swift.result = "success")),
+    ],
+    [
+      "a macOS leg whose name is not an SDK name",
+      (n) =>
+        void ((n.select.outputs.swift = '[{"name":"a b","live":true}]'),
+        (n.swift.result = "success")),
     ],
     [
       "a leg whose daggerFn is not one function name",

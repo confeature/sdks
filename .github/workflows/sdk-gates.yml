@@ -19,7 +19,8 @@
 #   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
 #                   the BASE manifest (ci.knownRed): shown red, never counted.
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
-#                   whose toolchain is Apple's, on a macos-15 runner.
+#                   whose toolchain is Apple's, on a macos-15 runner; then its
+#                   live wire-cases natively (run-live-suite.mjs, #924).
 #   smoke           Unreal's source-quality smoke (ci.native: smoke), labelled
 #                   as such: no hosted runner has an Unreal Engine.
 #   sdk gates       the aggregate, and the one required check on main:
@@ -288,9 +289,12 @@ jobs:
 
   # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
   # the same script the local pre-push runs, which fails closed under CI when
-  # swift or swift-format is missing. Xcode is selected by exact path.
+  # swift or swift-format is missing. Xcode is selected by exact path. Then,
+  # when the manifest gives the SDK a liveSuite.runner (select-sdks.mjs sets
+  # live, #924), its live wire-cases natively: no Dagger container has
+  # Apple's toolchain, so the harness runs here, on loopback, on the runner.
   swift:
-    name: swift (${{ matrix.sdk }})
+    name: swift (${{ matrix.sdk.name }})
     needs: select
     if: needs.select.outputs.swift != '[]'
     runs-on: macos-15
@@ -310,6 +314,36 @@ jobs:
 
       - name: Build, test and lint (scripts/swift-precheck.sh)
         run: bash scripts/swift-precheck.sh
+
+      # The harness's toolchain, as verify.yml sets it up: pnpm, the pinned
+      # Node, the workspace from the frozen lockfile (wrangler and its darwin
+      # workerd), and the harness's dist/, which every runner starts.
+      - name: Setup pnpm
+        if: matrix.sdk.live
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        if: matrix.sdk.live
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install the workspace
+        if: matrix.sdk.live
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the live-contract harness
+        if: matrix.sdk.live
+        run: pnpm --filter @confeature/test-harness-live-contract build
+
+      # The SDK's manifest liveSuite.runner, run as Dagger's live-suite runs
+      # it (repository root, bash -euo pipefail); a red live suite reddens
+      # the leg.
+      - name: Run the live suite (tools/repo-gates/run-live-suite.mjs)
+        if: matrix.sdk.live
+        env:
+          SDK: ${{ matrix.sdk.name }}
+        run: node tools/repo-gates/run-live-suite.mjs
 
   # The labelled source-quality smoke (ci.native: smoke): NOT A BUILD. No
   # hosted runner has an Unreal Engine, so apps/sdk-<name>/scripts/

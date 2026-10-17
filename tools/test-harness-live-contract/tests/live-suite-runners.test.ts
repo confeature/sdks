@@ -8,9 +8,8 @@
  * `live-suite --sdk <name>` runs these strings verbatim (#918), so this is the
  * one place to hold the line.
  *
- * An SDK without a `liveSuite` is accepted in two forms only (#918, plan 867
- * FR-016): it carries a `liveExempt` reason, or it is "no live suite yet",
- * which live-coverage-report.mjs counts and lists, never as covered. The
+ * An SDK without a `liveSuite` carries a `liveExempt` reason (#918, plan 867
+ * FR-016); the transitional "no live suite yet" state ended with #924. The
  * manifest's structure (a runner present, a liveSuite only where a Dagger leg
  * runs it, never beside a liveExempt) is tools/repo-gates/select-sdks.mjs's
  * manifestProblems, checked on every verify; it is not restated here.
@@ -83,14 +82,15 @@ describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
     },
   );
 
-  it("an SDK with no liveSuite is exempt with a reason, or counted as no live suite yet", () => {
-    const without = manifest.sdks.filter((s) => s.liveSuite === undefined);
+  // #924 ended the "no live suite yet" state, as T10 ended ci.pending: an SDK
+  // is live or exempt with a stated reason, and a new SDK cannot land with
+  // neither (MUTATION: delete one SDK's liveSuite and this goes red).
+  it("every SDK has a liveSuite or a liveExempt reason: none is 'no live suite yet'", () => {
+    const neither = manifest.sdks
+      .filter((s) => s.liveSuite === undefined && s.liveExempt === undefined)
+      .map((s) => s.name);
+    expect(neither, "SDKs with neither a liveSuite nor a liveExempt").toEqual([]);
     const report = buildReport(manifest) as { pending: string[] };
-    for (const s of without) {
-      if (s.liveExempt !== undefined) continue;
-      expect(report.pending, `${s.name} has neither and is not reported as a gap`).toContain(
-        s.name,
-      );
-    }
+    expect(report.pending).toEqual([]);
   });
 });

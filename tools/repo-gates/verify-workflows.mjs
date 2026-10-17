@@ -117,7 +117,10 @@
  *      produces a required check. Each `requiredChecks` name of
  *      release-settings.json is produced by exactly one job across every
  *      workflow, and every manifest SDK has exactly one of daggerFn or
- *      ci.native (manifestProblems). Rules 2 and 18 already read every
+ *      ci.native (manifestProblems). Each Dagger leg runs its suite, then
+ *      its live suite when the leg is `live` (daggerLegProblems); the macOS
+ *      job does the same natively, through run-live-suite.mjs (#924,
+ *      nativeLegProblems). Rules 2 and 18 already read every
  *      workflow; continueOnErrorFindings and rule 3's cache rules read it
  *      because it is listed (CACHE_FREE_WORKFLOWS, SDK_GATES_WORKFLOW).
  *
@@ -2923,6 +2926,8 @@ const SDK_GATE_TRIGGERS = ["push", "pull_request", "schedule"];
 /** The two scripts sdk-gates.yml runs: the selection and the verdict. */
 export const SELECT_SCRIPT = "tools/repo-gates/select-sdks.mjs";
 export const CONCLUDE_SCRIPT = "tools/repo-gates/conclude-sdk-gates.mjs";
+/** The macOS job's live step (#924): an SDK's liveSuite.runner, natively. */
+export const LIVE_SCRIPT = "tools/repo-gates/run-live-suite.mjs";
 /** A daily cron: a minute and an hour, every day. */
 const DAILY_CRON = /^\d{1,2} \d{1,2} \* \* \*$/;
 /** Dagger's cloud and cache switches, in any env (a cache a pull request writes, a trace sent away). */
@@ -3016,6 +3021,81 @@ function daggerLegProblems(job) {
     if (live.uses.trim() !== suite.uses.trim())
       out.push("its live-suite step does not use the suite step's action");
   }
+  return out;
+}
+
+/** The macOS job's suite and its live step (#924), exactly. */
+const NATIVE_SUITE_RUN = "bash scripts/swift-precheck.sh";
+const NATIVE_LIVE_RUN = `node ${LIVE_SCRIPT}`;
+const NATIVE_LIVE_ENV = { SDK: "${{ matrix.sdk.name }}" };
+const NODE_VERSION_REF = "${{ env.NODE_VERSION }}";
+/**
+ * What the macOS job prepares, in order, between its suite and its live step:
+ * pnpm and the workflow's pinned Node, as verify.yml sets them up; the
+ * workspace from the frozen lockfile (the harness's wrangler and workerd);
+ * the harness's dist/, which every liveSuite.runner starts.
+ */
+const NATIVE_LIVE_PREP = [
+  { label: PIN.pnpm, is: (st) => String(st?.uses ?? "").trim() === PIN.pnpm },
+  {
+    label: `${PIN.setupNode} with node-version: ${NODE_VERSION_REF}`,
+    is: (st) =>
+      String(st?.uses ?? "").trim() === PIN.setupNode &&
+      st?.with?.["node-version"] === NODE_VERSION_REF,
+  },
+  {
+    label: "pnpm install --frozen-lockfile",
+    is: (st) => String(st?.run ?? "").trim() === "pnpm install --frozen-lockfile",
+  },
+  {
+    label: "pnpm --filter @confeature/test-harness-live-contract build",
+    is: (st) =>
+      String(st?.run ?? "").trim() === "pnpm --filter @confeature/test-harness-live-contract build",
+  },
+];
+
+/**
+ * Rule 19's half over the macOS job's steps (#924): the native counterpart of
+ * daggerLegProblems. The job runs its suite (scripts/swift-precheck.sh,
+ * unconditional), then prepares Node, the workspace and the harness, then runs
+ * exactly one live step, `node tools/repo-gates/run-live-suite.mjs` with
+ * `SDK: ${{ matrix.sdk.name }}`, only when select-sdks.mjs marks the leg
+ * `live`. The runner itself is the manifest's, read by that script; which SDK
+ * has one is the selector's.
+ */
+function nativeLegProblems(job) {
+  const out = [];
+  const steps = stepsOf(job);
+  const run = (st) => String(st?.run ?? "").trim();
+  const suite = steps.find((st) => run(st) === NATIVE_SUITE_RUN && st.if === undefined);
+  const lives = steps.filter((st) => run(st) === NATIVE_LIVE_RUN);
+  if (suite === undefined) out.push(`has no unconditional step running \`${NATIVE_SUITE_RUN}\``);
+  if (lives.length === 0) {
+    out.push(`has no step running \`${NATIVE_LIVE_RUN}\``);
+    return out;
+  }
+  if (lives.length !== 1) out.push(`runs ${lives.length} live steps, not exactly one`);
+  const live = lives[0];
+  if (String(live.if ?? "").trim() !== LIVE_IF)
+    out.push(`its live step's if: is not exactly ${LIVE_IF}`);
+  if (canonical(live.env ?? null) !== canonical(NATIVE_LIVE_ENV))
+    out.push(`its live step's env: is not exactly SDK: ${NATIVE_LIVE_ENV.SDK}`);
+  if (suite === undefined) return out;
+  const from = steps.indexOf(suite);
+  const to = steps.indexOf(live);
+  if (to < from) {
+    out.push("its live step does not come after its suite");
+    return out;
+  }
+  const between = steps.slice(from + 1, to);
+  const at = NATIVE_LIVE_PREP.map((p) => between.findIndex(p.is));
+  NATIVE_LIVE_PREP.forEach((p, i) => {
+    if (at[i] === -1) out.push(`has no \`${p.label}\` step between its suite and its live step`);
+  });
+  if (!at.includes(-1) && at.some((x, i) => i > 0 && x < at[i - 1]))
+    out.push(
+      `its live-suite preparation is not in order (${NATIVE_LIVE_PREP.map((p) => p.label).join(", then ")})`,
+    );
   return out;
 }
 
@@ -3119,6 +3199,7 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
     )
       add(kind.job, `its matrix is not exactly sdk: \${{ fromJSON(${output}) }}`);
     if (kind.native === undefined) for (const why of daggerLegProblems(job)) add(kind.job, why);
+    else if (kind.live) for (const why of nativeLegProblems(job)) add(kind.job, why);
   }
   // The select job: it runs the selector, and hands on every output it writes.
   const select = jobs[SELECT_JOB];

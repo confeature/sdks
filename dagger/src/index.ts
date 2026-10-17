@@ -440,6 +440,7 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   dotnet: { build: dotnetToolchain },
   dart: { build: dartToolchain },
   elixir: { build: elixirToolchain },
+  cpp: { build: cppToolchain },
 };
 
 /**

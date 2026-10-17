@@ -134,11 +134,15 @@ Each SDK's live suite runs inside that SDK's leg of `.github/workflows/sdk-gates
 after its suite (`live-suite --sdk <name>`), so a red live suite reddens the leg (#918; the
 release-time `contract-live.yml` matrix it replaces is retired). **To add an SDK**, give it a
 `liveSuite` in `dagger/sdk-manifest.json` (`runner` + `path`) and its builder in `LIVE_TOOLCHAINS`
-in `dagger/src/index.ts`: no workflow edit. Every `runner` goes through the harness wrapper
+in `dagger/src/index.ts`: no workflow edit. Swift, which no Dagger container can build, runs
+its `runner` natively in the macOS job after its precheck, through
+`tools/repo-gates/run-live-suite.mjs` (#924): the harness starts there on the darwin workerd the
+workspace install brings. Every `runner` goes through the harness wrapper
 (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
 live suite never passes by skipping (#783). An SDK that cannot have one carries `liveExempt:
-"<reason>"` instead. `scripts/live-coverage-report.mjs` lists the roster: live, exempt with its
-reason, or "no live suite yet".
+"<reason>"` instead; since #924 every SDK has one or the other, and
+`tests/live-suite-runners.test.ts` fails on an SDK with neither. `scripts/live-coverage-report.mjs`
+lists the roster: live, or exempt with its reason.
 
 ## License
 
