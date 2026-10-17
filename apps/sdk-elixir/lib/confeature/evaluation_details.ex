@@ -7,7 +7,7 @@ defmodule Confeature.EvaluationDetails do
   `Confeature.Snapshot.get_value_details/3`.
 
   Field layout mirrors upstream `ConfigCat.EvaluationDetails` 1:1
-  (`TypedStruct` with the same 9 fields, including the `:default_value?`
+  (the same 9 fields as its `TypedStruct`, including the `:default_value?`
   predicate name and `DateTime.t()` for `:fetch_time`). A consumer
   migrating from `configcat` reads the same field names in the same
   positions: only the module alias changes.
@@ -26,21 +26,39 @@ defmodule Confeature.EvaluationDetails do
   targeting tree and populates them.
   """
 
-  use TypedStruct
+  # A plain struct, not `use TypedStruct`: that macro reached this package
+  # only as a test-only transitive dependency of the `configcat` oracle, so
+  # a customer's `mix deps.compile` failed with "module TypedStruct is not
+  # loaded" (#805). Same 9 fields, same defaults, same enforced keys and the
+  # same `t()` TypedStruct generated (a non-enforced field with no default
+  # is nilable), with no new dependency.
 
   alias Confeature.User
 
-  typedstruct do
-    field(:default_value?, boolean(), default: false)
-    field(:error, String.t())
-    field(:fetch_time, DateTime.t())
-    field(:key, String.t(), enforce: true)
-    field(:matched_targeting_rule, map())
-    field(:matched_percentage_option, map())
-    field(:user, User.t())
-    field(:value, term(), enforce: true)
-    field(:variation_id, String.t())
-  end
+  @enforce_keys [:key, :value]
+  defstruct [
+    :error,
+    :fetch_time,
+    :key,
+    :matched_targeting_rule,
+    :matched_percentage_option,
+    :user,
+    :value,
+    :variation_id,
+    default_value?: false
+  ]
+
+  @type t() :: %__MODULE__{
+          default_value?: boolean(),
+          error: String.t() | nil,
+          fetch_time: DateTime.t() | nil,
+          key: String.t(),
+          matched_targeting_rule: map() | nil,
+          matched_percentage_option: map() | nil,
+          user: User.t() | nil,
+          value: term(),
+          variation_id: String.t() | nil
+        }
 
   @doc "Build an `EvaluationDetails` struct from keyword opts."
   @spec new(keyword()) :: t()

@@ -622,7 +622,10 @@ export class Confeature {
         "bash",
         "-eu",
         "-c",
-        "mix local.hex --force && mix local.rebar --force && mix deps.get && mix test",
+        // The prod compile is what a customer's `mix deps.compile` does: the
+        // suite alone ran under MIX_ENV=test, where a test-only transitive
+        // dependency (TypedStruct) hid a missing one (#805).
+        "mix local.hex --force && mix local.rebar --force && mix deps.get && mix test && MIX_ENV=prod mix compile --warnings-as-errors",
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];

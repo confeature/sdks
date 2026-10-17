@@ -36,7 +36,8 @@ defmodule Confeature.Internal.EvalLogger do
   @error 1
   @warn 2
   @info 3
-  @debug 4
+  # debug is 4 in that ordering; no trace path gates on it, so it has no
+  # attribute (an unused one fails `mix compile --warnings-as-errors`).
 
   defmodule TraceLevel do
     @moduledoc false

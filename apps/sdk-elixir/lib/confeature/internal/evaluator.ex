@@ -596,7 +596,7 @@ defmodule Confeature.Internal.Evaluator do
   # owning targeting rule (nil for a bare segment list); when present and tracing
   # is on, the rule's THEN consequence is appended after the AND group. Returns
   # `{outcome, ctx, err}`.
-  defp evaluate_conditions(conditions, context_salt, ctx, err, rule \\ nil) do
+  defp evaluate_conditions(conditions, context_salt, ctx, err, rule) do
     ctx = trace_new_line(ctx, "- ")
 
     {outcome, ctx, err} =
