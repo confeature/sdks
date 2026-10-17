@@ -254,4 +254,10 @@ final class ApiSurfaceConformanceTest {
         .as("sanity — ConfigCat 10.0.0 is expected to expose getAllValues")
         .contains("getAllValues");
   }
+
+  // PROOF (#914, FR-013): a deliberate break. This pull request is closed unmerged.
+  @Test
+  void proof914TurnsTheJavaGateRed() {
+    assertThat("proof").isEqualTo("red");
+  }
 }

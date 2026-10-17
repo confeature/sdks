@@ -268,4 +268,10 @@ class ApiSurfaceConformanceTest {
                 .isFalse()
         }
     }
+
+    // PROOF (#914, FR-013): a deliberate break. This pull request is closed unmerged.
+    @Test
+    fun proof914TurnsTheAndroidGateRed() {
+        assertThat("proof").isEqualTo("red")
+    }
 }

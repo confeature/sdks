@@ -301,4 +301,10 @@ class ApiSurfaceConformanceTest {
             )
         }
     }
+
+    // PROOF (#914, FR-013): a deliberate break. This pull request is closed unmerged.
+    @Test
+    fun proof914TurnsTheKotlinMpGateRed() {
+        assertTrue("proof" == "red", "proof/914: the gate must go red")
+    }
 }
