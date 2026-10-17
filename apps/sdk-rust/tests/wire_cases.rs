@@ -22,186 +22,46 @@
 //! AutoPoll ticker hooks) that the corpus does not assert.
 //!
 //! See epic #146 (contract testing framework) + #148 slice 5 + spec 112.
+//!
+//! The expectation rules live in `common::wire_case`, shared with the live
+//! suite (`tests/wire_cases_live.rs`, #921): this file supplies only the
+//! hermetic transport.
 
 mod common;
 
-use common::raw_http::{Behavior, RawRequest, RawServer};
-use confeature::__wire_test_api::{ConfigFetcher, FetchResult, FetchStatus};
+use common::raw_http::{Behavior, RawServer};
+use common::wire_case::{
+    assert_wire_case, load_corpus, resolve_body, rust_error_to_class, sdk_key_for, SentRequest,
+    WireCase,
+};
+use confeature::__wire_test_api::{ConfigFetcher, FetchResult};
 use confeature::{LogFacadeLogger, LogLevel};
-use serde::Deserialize;
-use serde_json::Value;
-use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
 const WIRE_TEST_SDK_KEY: &str =
     "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
-// ---------------------------------------------------------------------
-// Corpus shape. `given` and `expected` DENY unknown fields (schema 1.3,
-// #803 FR-003): a new expectation the Rust consumer does not read FAILS
-// the suite instead of being skipped silently.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-struct WireCorpus {
-    cases: Vec<WireCase>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WireCase {
-    id: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    description: String,
-    given: WireGiven,
-    server: WireServer,
-    expected: WireExpected,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireGiven {
-    #[serde(rename = "previousEtag")]
-    previous_etag: Option<String>,
-    /// Non-default base URL (custom-base-url case, #336).
-    #[serde(default, rename = "baseUrl")]
-    base_url: Option<String>,
-    /// The SDK key to configure (request-path cases, #803). Falls back to
-    /// [`WIRE_TEST_SDK_KEY`] when absent.
-    #[serde(default, rename = "sdkKey")]
-    sdk_key: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WireServer {
-    /// Selects how the mock transport acts (#490 / #590): "respond"
-    /// (default, absent) delivers status+headers+body;
-    /// "timeout" hangs past the client's request timeout; and
-    /// "close-mid-response" drops the connection mid-body. An
-    /// unrecognised value FAILS the case loudly (never falls through to
-    /// respond). Mirrors sdk-go's `wireServer.Behavior` (commit a804507).
-    #[serde(default)]
-    behavior: Option<String>,
-    status: u16,
-    #[serde(default)]
-    headers: std::collections::BTreeMap<String, String>,
-    #[serde(default, rename = "bodyRef")]
-    body_ref: Option<String>,
-    #[serde(default)]
-    body: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireExpected {
-    /// Three-state — see [`IfNoneMatchExpectation`] below.
-    #[serde(default, rename = "requestHeaderIfNoneMatch")]
-    request_header_if_none_match: IfNoneMatchExpectation,
-    outcome: String,
-    #[serde(default, rename = "resultingEtag")]
-    resulting_etag: Option<String>,
-    #[serde(default, rename = "errorClass")]
-    error_class: Option<String>,
-    #[serde(default, rename = "hasConfig")]
-    has_config: Option<bool>,
-    /// The outgoing URL starts with this (custom-base-url case, #336).
-    #[serde(default, rename = "requestUrlPrefix")]
-    request_url_prefix: Option<String>,
-    /// The exact request path AS SENT, query excluded, compared byte for
-    /// byte with the raw request line (#803 FR-003).
-    #[serde(default, rename = "requestPath")]
-    request_path: Option<String>,
-}
-
-/// Three-state semantics for `expected.requestHeaderIfNoneMatch`:
-///
-/// - **absent** (key not present in the case JSON) -> don't assert
-///   anything about the outbound `If-None-Match` header.
-/// - **explicit `null`** -> header MUST NOT be sent.
-/// - **explicit string** -> header MUST equal that string.
-#[derive(Debug, Default)]
-enum IfNoneMatchExpectation {
-    #[default]
-    Absent,
-    Null,
-    Value(String),
-}
-
-impl<'de> Deserialize<'de> for IfNoneMatchExpectation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // serde calls `deserialize` only when the key IS present (Absent
-        // falls through `#[serde(default)]`). So we only see Null or
-        // String here.
-        let v = Option::<String>::deserialize(deserializer)?;
-        Ok(match v {
-            Some(s) => IfNoneMatchExpectation::Value(s),
-            None => IfNoneMatchExpectation::Null,
-        })
-    }
-}
-
-// ---------------------------------------------------------------------
-// Body resolution — `bodyRef` reads a sibling fixture, `body` is raw.
-// ---------------------------------------------------------------------
-
-fn resolve_body(case: &WireCase) -> Option<Vec<u8>> {
-    if let Some(ref reference) = case.server.body_ref {
-        let path = common::workspace_root()
-            .join("packages")
-            .join("test-fixtures-sdk-parity")
-            .join("fixtures")
-            .join(reference);
-        let raw = fs::read(&path).unwrap_or_else(|e| {
-            panic!(
-                "wire_cases: failed to read bodyRef {} from {}: {e}",
-                reference,
-                path.display()
-            )
-        });
-        return Some(raw);
-    }
-    case.server.body.as_ref().map(|s| s.as_bytes().to_vec())
-}
-
-fn load_corpus() -> WireCorpus {
-    let path = common::workspace_root()
-        .join("packages")
-        .join("test-fixtures-sdk-parity")
-        .join("fixtures")
-        .join("wire-cases.json");
-    let raw = fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read wire-cases.json from {}: {e}", path.display()));
-    let corpus: WireCorpus =
-        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse wire-cases.json: {e}"));
-    assert!(
-        !corpus.cases.is_empty(),
-        "wire-cases.json carries no cases — fixture is FROZEN at 12 cases"
+/// The error-class mapping fails closed (#921, as sdk-ruby/sdk-php did in
+/// #920): a missing or unknown reason matches no corpus class, so it can
+/// never pass a fetchFailed case by default.
+#[test]
+fn error_mapping_fails_closed() {
+    assert_eq!(rust_error_to_class(None), "unmapped:None");
+    assert_eq!(
+        rust_error_to_class(Some("something_new")),
+        "unmapped:Some(\"something_new\")"
     );
-    corpus
-}
-
-// ---------------------------------------------------------------------
-// Error-class mapping — `FetchResult.error` strings -> corpus vocabulary.
-// Mirrors `_python_error_to_class` (apps/sdk-python/tests/wire/
-// test_wire_cases.py) and sdk-go's `goErrorToClass`. When the fetcher
-// switches to a typed error enum, this becomes a `match` on the enum.
-// ---------------------------------------------------------------------
-fn rust_error_to_class(error: Option<&str>) -> &'static str {
-    match error {
-        None => "fetchFailed",
-        Some("MALFORMED_JSON") => "parseFailed",
-        // Per ConfigCat only 403/404 are invalid-SDK-key statuses (401 is a
-        // generic retryable failure). See #512.
-        Some("HTTP 403") | Some("HTTP 404") => "invalidSdkKey",
-        Some(s) if s.starts_with("HTTP ") => "fetchFailed",
-        Some("INVALID_SDK_KEY") => "invalidSdkKey",
-        Some("timeout") => "timeout",
-        _ => "fetchFailed",
+    for reason in [
+        "connect_error",
+        "body_read_failed",
+        "request_error",
+        "HTTP 503",
+    ] {
+        assert_eq!(rust_error_to_class(Some(reason)), "fetchFailed", "{reason}");
     }
+    assert_eq!(rust_error_to_class(Some("HTTP 403")), "invalidSdkKey");
+    assert_eq!(rust_error_to_class(Some("timeout")), "timeout");
 }
 
 // ---------------------------------------------------------------------
@@ -263,9 +123,10 @@ async fn run_case(case: &WireCase) {
     };
     let mut server = RawServer::start(server_behavior).await;
 
+    let sdk_key = sdk_key_for(case, WIRE_TEST_SDK_KEY);
     let fetcher = ConfigFetcher::new(
         Some(server.base_url.clone()),
-        sdk_key_for(case).to_string(),
+        sdk_key.to_string(),
         "0.0.0-wire-test",
         Some(request_timeout),
         None,
@@ -276,7 +137,6 @@ async fn run_case(case: &WireCase) {
     let prev_etag = case.given.previous_etag.as_deref();
     let result: FetchResult = fetcher.fetch(prev_etag).await;
 
-    // ---- Request-side assertions ------------------------------------
     let requests = server.requests();
     assert_eq!(
         requests.len(),
@@ -285,180 +145,11 @@ async fn run_case(case: &WireCase) {
         case.id,
         requests
     );
-    assert_request_side(case, &requests[0]);
-
-    // ---- Outcome assertions -----------------------------------------
-    assert_outcome(case, &result);
-}
-
-/// The SDK key a case configures: `given.sdkKey` when present (#803).
-fn sdk_key_for(case: &WireCase) -> &str {
-    case.given.sdk_key.as_deref().unwrap_or(WIRE_TEST_SDK_KEY)
-}
-
-/// `expected.requestUrlPrefix` (custom-base-url, #336): a fetcher
-/// configured with `given.baseUrl` must target a URL starting with the
-/// prefix. Checked on [`ConfigFetcher::url`] — the one function that forms
-/// the URL `fetch` GETs — because the case's host is not routable from the
-/// test; the round-trip itself runs against the mock.
-fn assert_request_url_prefix(case: &WireCase) {
-    let Some(prefix) = &case.expected.request_url_prefix else {
-        return;
+    let raw = &requests[0];
+    let sent = SentRequest {
+        path: raw.path(),
+        url: raw.target(),
+        if_none_match: raw.header("if-none-match"),
     };
-    let base =
-        case.given.base_url.clone().unwrap_or_else(|| {
-            panic!("case {:?}: requestUrlPrefix without given.baseUrl", case.id)
-        });
-    let fetcher = ConfigFetcher::new(
-        Some(base),
-        sdk_key_for(case).to_string(),
-        "0.0.0-wire-test",
-        None,
-        None,
-        Arc::new(LogFacadeLogger::new(LogLevel::Off)),
-    )
-    .expect("ConfigFetcher::new");
-    let url = fetcher.url().expect("a configured key has a URL");
-    assert!(
-        url.starts_with(prefix.as_str()),
-        "case {:?}: URL {} does not start with {}",
-        case.id,
-        url,
-        prefix
-    );
-}
-
-/// Shared request-side assertions: the RAW request path (byte-exact when
-/// the case pins `expected.requestPath`) + the custom base URL +
-/// If-None-Match round-trip. Runs identically for every behaviour.
-fn assert_request_side(case: &WireCase, captured: &RawRequest) {
-    let path = captured.path();
-    match &case.expected.request_path {
-        Some(expected) => assert_eq!(
-            path, expected,
-            "case {:?}: request path on the wire mismatch (request line {:?})",
-            case.id, captured.request_line
-        ),
-        None => assert!(
-            path.starts_with("/configuration-files/") && path.ends_with("/config_v6.json"),
-            "case {:?}: path {} is not /configuration-files/<sdkKey>/config_v6.json",
-            case.id,
-            path
-        ),
-    }
-    assert_request_url_prefix(case);
-
-    let if_none_match = captured.header("if-none-match");
-    match &case.expected.request_header_if_none_match {
-        IfNoneMatchExpectation::Absent => { /* don't assert */ }
-        IfNoneMatchExpectation::Null => {
-            assert!(
-                if_none_match.is_none(),
-                "case {:?}: previousEtag=null MUST NOT send If-None-Match; got {:?}",
-                case.id,
-                if_none_match
-            );
-        }
-        IfNoneMatchExpectation::Value(expected) => {
-            assert_eq!(
-                if_none_match,
-                Some(expected.as_str()),
-                "case {:?}: If-None-Match mismatch",
-                case.id
-            );
-        }
-    }
-}
-
-/// Shared outcome assertions: maps the fetcher's typed status + stringly
-/// error onto the corpus's `{fetched, notModified, failed}` x errorClass
-/// vocabulary. Runs identically for every behaviour.
-fn assert_outcome(case: &WireCase, result: &FetchResult) {
-    if let Some(has_config) = case.expected.has_config {
-        assert_eq!(
-            result.body.is_some(),
-            has_config,
-            "case {:?}: hasConfig mismatch (status={:?})",
-            case.id,
-            result.status
-        );
-    }
-    match case.expected.outcome.as_str() {
-        "fetched" => {
-            assert_eq!(
-                result.status,
-                FetchStatus::Fetched,
-                "case {:?}: expected outcome=fetched, got status={:?} error={:?}",
-                case.id,
-                result.status,
-                result.error
-            );
-            assert!(
-                result.body.is_some(),
-                "case {:?}: fetched outcome MUST carry a body",
-                case.id
-            );
-            // Sanity-check the body is the parsed config-v6 shape.
-            if let Some(Value::Object(ref obj)) = result.body {
-                assert!(
-                    obj.contains_key("f"),
-                    "case {:?}: parsed body missing 'f' key",
-                    case.id
-                );
-            }
-            if let Some(expected) = &case.expected.resulting_etag {
-                assert_eq!(
-                    result.etag.as_deref(),
-                    Some(expected.as_str()),
-                    "case {:?}: resulting ETag mismatch",
-                    case.id
-                );
-            }
-        }
-        "notModified" => {
-            assert_eq!(
-                result.status,
-                FetchStatus::NotModified,
-                "case {:?}: expected outcome=notModified, got status={:?} error={:?}",
-                case.id,
-                result.status,
-                result.error
-            );
-            assert!(
-                result.body.is_none(),
-                "case {:?}: notModified outcome MUST NOT carry a body",
-                case.id
-            );
-            if let Some(expected) = &case.expected.resulting_etag {
-                assert_eq!(
-                    result.etag.as_deref(),
-                    Some(expected.as_str()),
-                    "case {:?}: notModified resulting ETag mismatch",
-                    case.id
-                );
-            }
-        }
-        "failed" => {
-            assert_eq!(
-                result.status,
-                FetchStatus::Failed,
-                "case {:?}: expected outcome=failed, got status={:?} body={:?}",
-                case.id,
-                result.status,
-                result.body
-            );
-            let expected_class = case
-                .expected
-                .error_class
-                .as_deref()
-                .expect("failed outcome MUST carry errorClass in the corpus");
-            let mapped = rust_error_to_class(result.error.as_deref());
-            assert_eq!(
-                mapped, expected_class,
-                "case {:?}: errorClass mismatch (mapped from raw error={:?})",
-                case.id, result.error
-            );
-        }
-        other => panic!("case {:?}: unknown outcome {:?} in corpus", case.id, other),
-    }
+    assert_wire_case(case, sdk_key, &sent, &result);
 }

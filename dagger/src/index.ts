@@ -425,6 +425,8 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   python: { build: pythonToolchain },
   ruby: { build: rubyToolchain },
   php: { build: phpToolchain },
+  go: { build: goToolchain },
+  rust: { build: rustToolchain },
 };
 
 /**

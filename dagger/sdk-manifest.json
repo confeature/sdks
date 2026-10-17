@@ -28,7 +28,15 @@
         "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py"
       }
     },
-    { "name": "go", "daggerFn": "go-test", "status": "covered" },
+    {
+      "name": "go",
+      "daggerFn": "go-test",
+      "status": "covered",
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-go && go test -count=1 -v wire_cases_live_test.go wire_case_assertions_test.go'",
+        "path": "apps/sdk-go/wire_cases_live_test.go"
+      }
+    },
 
     {
       "name": "deno",
@@ -103,7 +111,11 @@
       "name": "rust",
       "daggerFn": "rust-test",
       "status": "covered",
-      "localGate": false
+      "localGate": false,
+      "liveSuite": {
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-rust && cargo test --test \"$(basename tests/wire_cases_live.rs .rs)\" -- --nocapture'",
+        "path": "apps/sdk-rust/tests/wire_cases_live.rs"
+      }
     },
     {
       "name": "dart",

@@ -16,6 +16,7 @@
 //! are free.
 
 pub mod raw_http;
+pub mod wire_case;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
