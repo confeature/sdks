@@ -103,7 +103,26 @@ const ALL_EVENTS = ["push", "schedule"];
  * runs its own copy of them, so its green is self-attested, and the
  * aggregate says so on its first line. The manifest is under dagger/.
  */
-export const GATE_PREFIXES = [".github/", "tools/repo-gates/", "dagger/"];
+export const GATE_PREFIXES = [
+  ".github/",
+  "tools/repo-gates/",
+  "dagger/",
+  // What the workflow's steps run, beyond the three above (#793 review): the
+  // entry-point helper, the Dagger wrapper, the live wrapper whose exit code
+  // is a live leg's verdict, the Swift precheck, and the Unreal smoke.
+  "tools/lib/",
+  "tools/dagger-call/",
+  "tools/test-harness-live-contract/",
+  "scripts/swift-precheck.sh",
+  "apps/sdk-unreal/scripts/",
+];
+/**
+ * How every liveSuite.runner starts (#783): the harness wrapper boots the
+ * harness and hands the suite `CONFEATURE_LIVE`. A bare runner skips every
+ * case and exits 0, so its leg would pass having checked nothing.
+ */
+export const LIVE_WRAPPER =
+  "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
 /** A path printed as it is: no newline, no `$`, no backtick, no `:`, no segment led by a dash. */
 export const PLAIN_PATH = /^[A-Za-z0-9._][A-Za-z0-9._-]*(?:\/[A-Za-z0-9._][A-Za-z0-9._-]*)*$/;
 /** At most this many gate files are named; the rest are counted. */
@@ -121,7 +140,8 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * (`ci.native`); a known-red waiver needs a Dagger leg to run red in; every
  * ticket is `#<issue>`. A `liveSuite` has a runner and needs a job that runs
  * it: a Dagger leg (#918) or a native kind whose KINDS entry is `live`, the
- * macOS job (#924); an SDK has a liveSuite or a `liveExempt` reason, never both.
+ * macOS job (#924), and runs through LIVE_WRAPPER; an SDK has a liveSuite or a
+ * `liveExempt` reason, never both.
  * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
 export function manifestProblems(manifest) {
@@ -157,6 +177,13 @@ export function manifestProblems(manifest) {
     if (live !== undefined) {
       if (typeof live?.runner !== "string" || live.runner.trim() === "")
         add("liveSuite.runner is not a command (a liveSuite with no runner runs nothing)");
+      else if (
+        !live.runner.startsWith(LIVE_WRAPPER) ||
+        live.runner.slice(LIVE_WRAPPER.length).trim() === ""
+      )
+        add(
+          `liveSuite.runner does not run a command through the harness wrapper (${LIVE_WRAPPER.trim()}): without it the suite skips every case and passes`,
+        );
       const runsLive = dagger || KINDS.some((k) => k.native === ci?.native && k.live);
       if (!runsLive)
         add(

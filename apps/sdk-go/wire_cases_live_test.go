@@ -113,7 +113,8 @@ func holdFor(t *testing.T, c wireCase, state harnessState) time.Duration {
 		return 0
 	}
 	var fault struct {
-		MS int `json:"ms"`
+		Kind string `json:"kind"`
+		MS   int    `json:"ms"`
 	}
 	if raw, ok := state.Faults[c.ID]; ok {
 		// A non-object fault leaves MS at 0, which fails just below.
@@ -121,7 +122,8 @@ func holdFor(t *testing.T, c wireCase, state harnessState) time.Duration {
 			t.Logf("%s: fault %s is not an object: %v", c.ID, raw, err)
 		}
 	}
-	if fault.MS <= 0 {
+	// The kind as well as the hold, as the JS suites read it (#793 review).
+	if fault.Kind != "timeout" || fault.MS <= 0 {
 		t.Fatalf("%s is seeded without a timeout fault", c.ID)
 	}
 	return time.Duration(fault.MS) * time.Millisecond

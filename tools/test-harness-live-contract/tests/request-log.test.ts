@@ -14,11 +14,14 @@ describe("the request log behind GET /admin/requests (#783)", () => {
     expect(log).toHaveLength(MAX_REQUESTS_PER_KEY);
     expect(log[0]).toEqual(req(5));
     expect(log.at(-1)).toEqual(req(MAX_REQUESTS_PER_KEY + 4));
+    // The count exec mode's floor reads is not bounded with the log (#793 review).
+    expect(state.served).toBe(MAX_REQUESTS_PER_KEY + 5);
   });
 
   it("does not log an unseeded key — the log is bounded by the seed, not by callers", () => {
     const state = new AdminState();
     state.recordRequest("never-seeded", req(0));
     expect(state.requests.size).toBe(0);
+    expect(state.served).toBe(0);
   });
 });

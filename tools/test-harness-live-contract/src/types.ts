@@ -84,6 +84,8 @@ export type HarnessHandle = {
   url: string;
   /** Graceful shutdown — disposes Miniflare, closes the proxy. Resolves when done. */
   stop(): Promise<void>;
+  /** Config requests served for a seeded key since boot (AdminState.served). */
+  served(): number;
 };
 
 // ---------------------------------------------------------------------------

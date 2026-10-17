@@ -59,7 +59,29 @@ describe("runWithHarness — an interrupted run is never a pass (#783 review)", 
 });
 
 describe("execAgainstHarness — the CLI's exec-mode exit code (#783 review)", () => {
-  const handle = (stop: () => Promise<void>) => ({ url: "http://127.0.0.1:1", stop });
+  const handle = (stop: () => Promise<void>, served = 1) => ({
+    url: "http://127.0.0.1:1",
+    stop,
+    served: () => served,
+  });
+
+  it("a <cmd> that exits 0 having asked the harness nothing fails (1), and still stops it", async () => {
+    let stopped = false;
+    const quiet = handle(async () => {
+      stopped = true;
+    }, 0);
+    // MUTATION: drop the floor and a suite that skipped every case passes.
+    expect(await execAgainstHarness(quiet, [node, "-e", "process.exit(0)"])).toBe(1);
+    expect(stopped).toBe(true);
+    // A failure keeps its own code; one served request is enough to pass.
+    expect(await execAgainstHarness(quiet, [node, "-e", "process.exit(4)"])).toBe(4);
+    expect(
+      await execAgainstHarness(
+        handle(async () => {}),
+        [node, "-e", "process.exit(0)"],
+      ),
+    ).toBe(0);
+  });
 
   it("passes <cmd>'s code through and stops the harness", async () => {
     let stopped = false;

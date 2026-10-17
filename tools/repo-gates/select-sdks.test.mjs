@@ -16,7 +16,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  GATE_PREFIXES,
   KINDS,
+  LIVE_WRAPPER,
   MANIFEST,
   NAME,
   OUTPUT_KEYS,
@@ -165,14 +167,14 @@ const fixture = () => ({
   sdks: [
     { name: "a", daggerFn: "a-test" },
     { name: "b", daggerFn: "b-test" },
-    { name: "live", daggerFn: "live-test", liveSuite: { runner: "node run" } },
+    { name: "live", daggerFn: "live-test", liveSuite: { runner: `${LIVE_WRAPPER}node run` } },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
     {
       name: "maclive",
       daggerFn: null,
       ci: { native: "macos" },
-      liveSuite: { runner: "node run" },
+      liveSuite: { runner: `${LIVE_WRAPPER}node run` },
     },
   ],
 });
@@ -314,15 +316,37 @@ describe("the manifest's CI shape", () => {
       /liveSuite\.runner/,
     ],
     [
+      // #793 review: the wrapper rule ran only in the harness's own tests,
+      // which no CI job ran. MUTATION: drop it and these two pass.
+      "a liveSuite whose runner skips the harness wrapper",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: "vp test run t.live.test.ts" } },
+      /harness wrapper/,
+    ],
+    [
+      "a liveSuite whose runner is the wrapper alone",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: LIVE_WRAPPER } },
+      /harness wrapper/,
+    ],
+    [
       // The smoke job runs no live suite (#924: only the Dagger legs and the
       // macOS job do), so a liveSuite there would never run.
       "a liveSuite on a smoke SDK",
-      { name: "x", daggerFn: null, ci: { native: "smoke" }, liveSuite: { runner: "r" } },
+      {
+        name: "x",
+        daggerFn: null,
+        ci: { native: "smoke" },
+        liveSuite: { runner: `${LIVE_WRAPPER}r` },
+      },
       /no leg runs it/,
     ],
     [
       "both a liveSuite and a liveExempt",
-      { name: "x", daggerFn: "x-test", liveSuite: { runner: "r" }, liveExempt: "why" },
+      {
+        name: "x",
+        daggerFn: "x-test",
+        liveSuite: { runner: `${LIVE_WRAPPER}r` },
+        liveExempt: "why",
+      },
       /both a liveSuite and a liveExempt/,
     ],
     [
@@ -363,6 +387,18 @@ describe("the gate files a pull request changes", () => {
       ],
       unnamed: 0,
     }));
+  // #793 review: the list missed scripts the workflow runs, so an edit to one
+  // read "Gate files changed: none". MUTATION: drop a prefix and this fails.
+  it("covers every script sdk-gates.yml runs", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/sdk-gates.yml"), "utf8");
+    const run = [...wf.matchAll(/\b(?:node|bash|sh)\s+((?:tools|scripts|apps)\/[\w./-]+)/g)];
+    expect(run.length).toBeGreaterThan(0);
+    for (const [, path] of run)
+      expect(
+        GATE_PREFIXES.some((g) => path.startsWith(g)),
+        path,
+      ).toBe(true);
+  });
   it("counts a gate file whose name is not plain, and never prints it", () => {
     const got = gateFiles([
       "dagger/a\nb",
@@ -567,6 +603,16 @@ describe("the CLI", SPAWNS, () => {
     const got = select(root, prEnv(base, sha));
     expect(got.status).not.toBe(0);
     expect(got.stderr).toMatch(/HEAD_SHA/);
+  });
+  // #793 review: the same refusal on the other end of the range.
+  it.each([
+    ["a BASE_SHA that is an option", "--output=/tmp/x"],
+    ["no BASE_SHA", ""],
+  ])("%s is refused before git runs", (_name, sha) => {
+    const { root, base } = repo();
+    const got = select(root, prEnv(sha, base));
+    expect(got.status).not.toBe(0);
+    expect(got.stderr).toMatch(/BASE_SHA/);
   });
 
   it("an event it does not know is red", () => {

@@ -59,14 +59,23 @@ export function runWithHarness(
  * Exec mode end to end, minus the boot: run <cmd> against the ready harness,
  * stop the harness, and resolve to the code the CLI exits with — <cmd>'s own,
  * except that a failed teardown is never a pass (a timeout is 137, the CLI's
- * documented teardown code; any other stop error turns 0 into 1).
+ * documented teardown code; any other stop error turns 0 into 1), and that a
+ * <cmd> which exits 0 without one request for a seeded key is 1: a suite that
+ * skipped every case, or never reached the harness, checked nothing (#793
+ * review). Every live runner goes through here, whatever its test runner.
  */
 export async function execAgainstHarness(
-  handle: Pick<HarnessHandle, "url" | "stop">,
+  handle: Pick<HarnessHandle, "url" | "stop" | "served">,
   cmd: readonly string[],
   signals: EventEmitter = process,
 ): Promise<number> {
-  const code = await runWithHarness(handle.url, cmd, signals);
+  let code = await runWithHarness(handle.url, cmd, signals);
+  const served = handle.served();
+  process.stderr.write(`--exec: the harness served ${String(served)} seeded request(s)\n`);
+  if (code === 0 && served === 0) {
+    process.stderr.write("--exec: <cmd> exited 0 but asked the harness nothing: not a pass\n");
+    code = 1;
+  }
   try {
     await handle.stop();
   } catch (err) {

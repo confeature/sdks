@@ -66,6 +66,12 @@ describe("the script", () => {
     expect(readFileSync(join(root, "ran.txt"), "utf8").trim()).toBe(realpathSync(root));
   });
 
+  // MUTATION: return r.status as it is and a runner killed by a signal is null, read as 0.
+  it("a runner killed by a signal is red (1)", () => {
+    const root = checkout([{ name: "swift", liveSuite: { runner: "kill -9 $$" } }]);
+    expect(run(root, { SDK: "swift" }).status).toBe(1);
+  });
+
   it("passes the runner's own exit code through", () => {
     const root = checkout([{ name: "swift", liveSuite: { runner: "exit 7" } }]);
     expect(run(root, { SDK: "swift" }).status).toBe(7);

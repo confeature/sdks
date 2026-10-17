@@ -36,17 +36,17 @@ defmodule Confeature.EvaluationDetails do
   alias Confeature.User
 
   @enforce_keys [:key, :value]
-  defstruct [
-    :error,
-    :fetch_time,
-    :key,
-    :matched_targeting_rule,
-    :matched_percentage_option,
-    :user,
-    :value,
-    :variation_id,
-    default_value?: false
-  ]
+  # Every field as a keyword, so the order stays TypedStruct's: an atom list
+  # must put its one defaulted field last (#793 review).
+  defstruct default_value?: false,
+            error: nil,
+            fetch_time: nil,
+            key: nil,
+            matched_targeting_rule: nil,
+            matched_percentage_option: nil,
+            user: nil,
+            value: nil,
+            variation_id: nil
 
   @type t() :: %__MODULE__{
           default_value?: boolean(),

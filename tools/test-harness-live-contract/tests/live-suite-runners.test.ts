@@ -5,8 +5,9 @@
  * `vp test run …` with no wrapper — would run the suite without
  * `CONFEATURE_LIVE`, the suite would skip every test, exit 0, and its leg
  * would pass with nothing asserted: the false green #783 removed. Dagger's
- * `live-suite --sdk <name>` runs these strings verbatim (#918), so this is the
- * one place to hold the line.
+ * `live-suite --sdk <name>` runs these strings verbatim (#918). select-sdks.mjs's
+ * manifestProblems refuses the same on every verify (#793 review), and the
+ * wrapper itself fails a suite that asked the harness nothing.
  *
  * An SDK without a `liveSuite` carries a `liveExempt` reason (#918, plan 867
  * FR-016); the transitional "no live suite yet" state ended with #924. The

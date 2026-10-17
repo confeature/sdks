@@ -91,7 +91,7 @@ export async function startHarness(config: HarnessConfig): Promise<HarnessHandle
     await Promise.race([teardown, deadline]);
   };
 
-  return { url: proxy.url, stop };
+  return { url: proxy.url, stop, served: () => state.served };
 }
 
 /**

@@ -52,9 +52,16 @@ export class AdminState {
    * and the log must stay bounded by the seed, not by the callers.
    */
   readonly requests = new Map<string, RecordedRequest[]>();
+  /**
+   * How many config requests for a seeded key the proxy has served since
+   * boot. Never reset, never bounded: exec mode reads it to refuse a suite
+   * that exited 0 without asking the harness anything (#793 review).
+   */
+  served = 0;
 
   recordRequest(sdkKey: string, request: RecordedRequest): void {
     if (!this.keys.has(sdkKey)) return;
+    this.served++;
     const log = this.requests.get(sdkKey) ?? [];
     log.push(request);
     // Bounded: a long-lived CLI session must not grow without limit. A runner
