@@ -410,4 +410,9 @@ final class ApiSurfaceConformanceTests: XCTestCase {
             ApiSurfaceConformanceTests._conformsToConfigCatObjc
         #endif
     }
+
+    // PROOF (#917, FR-013): a deliberate break. This pull request is closed unmerged.
+    func testProof917TurnsTheSwiftGateRed() {
+        XCTAssertEqual("proof", "red")
+    }
 }

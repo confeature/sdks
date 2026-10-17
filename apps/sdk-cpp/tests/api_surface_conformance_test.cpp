@@ -624,3 +624,8 @@ TEST_CASE("Confeature supersets recorded", "[api_surface_conformance]") {
 }
 
 }  // namespace
+
+// PROOF (#916, FR-013): a deliberate break. This pull request is closed unmerged.
+TEST_CASE("proof/916 turns the cpp gate red", "[proof]") {
+    REQUIRE(std::string("proof") == std::string("red"));
+}

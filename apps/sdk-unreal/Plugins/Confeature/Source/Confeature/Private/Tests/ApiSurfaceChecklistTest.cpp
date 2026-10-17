@@ -118,6 +118,8 @@ bool FConfeatureApiSurfaceChecklistTest::RunTest(const FString& /*Parameters*/)
 	// surface. Every entry is asserted against UConfeatureClient.
 	const TArray<FChecklistEntry> Checklist = {
 		// --- Typed flag-read surface ---------------------------------
+		// PROOF (#916, FR-013): an entry UConfeatureClient does not declare.
+		{ FName(TEXT("Proof916NotDeclared")), nullptr, {} },
 		{ FName(TEXT("GetValueBool")), FBoolProperty::StaticClass(),
 			{ FStrProperty::StaticClass(), FBoolProperty::StaticClass(),
 				FStructProperty::StaticClass() },
