@@ -83,7 +83,8 @@
  *      never ORed away): a dry run publishes nothing.
  *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs PUBLIC_GATE_STEPS
  *      (`pnpm run verify` and the CLI's deno suite) on every push to main and
- *      every pull request, unfiltered, under plain bash, with no step env,
+ *      every pull request, unfiltered (gateTriggerProblems, shared with rule
+ *      19 over GATE_WORKFLOWS), under plain bash, with no step env,
  *      working-directory or continue-on-error, in jobs that need nothing.
  *      Below the workflow, a pack or credentialed job's or step's env: never
  *      redefines a workflow env name, and its *_VERSION values are exact (or
@@ -103,6 +104,22 @@
  *      exactly ACTION_SURFACE's.
  *  18. RECORDED WRITE PERMISSIONS (round 9). Each write permission any
  *      workflow grants is one WRITE_PERMISSIONS records, job by job.
+ *  19. THE SDK GATES' OWN SHAPE (#793). sdk-gates.yml runs on exactly push to
+ *      main, every pull request and one daily schedule, unfiltered (the
+ *      helper rule 13 uses); every job sets timeout-minutes and runs on
+ *      GATE_RUNNERS only; concurrency is keyed on github.ref, never head_ref;
+ *      top-level permissions are contents: read; no job binds an environment;
+ *      no expression names a token or a secret; every checkout keeps no
+ *      credential; no Dagger cloud or cache configuration. Each matrix of
+ *      KINDS (select-sdks.mjs) is fed by its own select output, guarded by
+ *      `!= '[]'` and fail-fast: false; one aggregate runs
+ *      conclude-sdk-gates.mjs, needs every other job, runs always() and
+ *      produces a required check. Each `requiredChecks` name of
+ *      release-settings.json is produced by exactly one job across every
+ *      workflow, and every manifest SDK has exactly one of daggerFn or
+ *      ci.native (manifestProblems). Rules 2 and 18 already read every
+ *      workflow; continueOnErrorFindings and rule 3's cache rules read it
+ *      because it is listed (CACHE_FREE_WORKFLOWS, SDK_GATES_WORKFLOW).
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -115,6 +132,13 @@ import { parse as parseYaml } from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
 import { lexStrict } from "./strict-shell.mjs";
 import { OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS } from "../sdk-pack/resolve-publish.mjs";
+import {
+  DAGGER_FN,
+  KINDS,
+  OUTPUT_KEYS as SELECT_OUTPUT_KEYS,
+  SELECT_JOB,
+  manifestProblems,
+} from "./select-sdks.mjs";
 
 export const SETTINGS = "tools/repo-gates/release-settings.json";
 export const MANIFEST = "dagger/sdk-manifest.json";
@@ -122,8 +146,24 @@ export const WORKFLOWS = ".github/workflows";
 export const PUBLISH_WORKFLOW = "sdk-publish.yml";
 export const CLI_WORKFLOW = "cli-release.yml";
 export const VERIFY_WORKFLOW = "verify.yml";
+/** The per-push SDK gates (#793), held by rule 19. */
+export const SDK_GATES_WORKFLOW = "sdk-gates.yml";
+/**
+ * The gate workflows whose triggers must stay unfiltered: one check
+ * (gateTriggerProblems) serves rule 13 for verify.yml and rule 19 for
+ * sdk-gates.yml, so the two cannot drift apart.
+ */
+export const GATE_WORKFLOWS = [VERIFY_WORKFLOW, SDK_GATES_WORKFLOW];
+/**
+ * The workflows that restore no cache, beside the pack and credentialed jobs
+ * rule 3 already holds: a gate a pull request runs must not leave a cache main
+ * restores (plan 867, "Decided without asking").
+ */
+export const CACHE_FREE_WORKFLOWS = [SDK_GATES_WORKFLOW];
 
 const EXACT = /^\d+\.\d+\.\d+$/;
+/** Code-unit order, the order `.sort()` gives strings, said explicitly. */
+const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** GitHub's filter-pattern semantics for the patterns used here: `*` matches anything but `/`. */
 export function globMatches(glob, ref) {
@@ -1512,6 +1552,8 @@ function usesRules(file, where, step, ctx) {
     CACHE_INPUTS.some((k) => k in w && !isFalse(w[k])) ||
     (DEFAULT_CACHE.has(repo) && !isFalse(w[DEFAULT_CACHE.get(repo)]));
   if (isPackOrPublish && caches) add(file, where, "a pack or credentialed job restores a cache");
+  else if (CACHE_FREE_WORKFLOWS.includes(file) && caches)
+    add(file, where, "a gate job restores a cache (a pull request's cache would reach main)");
   if (credentialed && repo === "actions/checkout" && w["persist-credentials"] !== false)
     add(
       file,
@@ -1746,14 +1788,18 @@ export const WRITE_PERMISSIONS = {
  * No step or job of the release workflows may fail without failing its job
  * (rounds 9, 10; the one place it is checked): a guard with continue-on-error (the on-main check, a digest
  * check) would let the build, the pack or the upload after it run anyway.
+ * sdk-gates.yml is listed too (rule 19): a leg that fails green is an SDK
+ * reported green while it is red.
  */
 export function continueOnErrorFindings(workflows) {
   const out = [];
-  // The release workflows, and any other holding a credentialed job (round
-  // 11: a write-token job in a new workflow could fail green).
+  // The release workflows, the SDK gates, and any other holding a
+  // credentialed job (round 11: a write-token job in a new workflow could
+  // fail green).
   const files = Object.keys(workflows).filter(
     (file) =>
       SURFACE_WORKFLOWS.includes(file) ||
+      file === SDK_GATES_WORKFLOW ||
       Object.entries(workflows[file]?.jobs ?? {}).some(([id, job]) =>
         isCredentialed(file, id, job, workflows[file]),
       ),
@@ -1800,7 +1846,7 @@ export function writePermissionFindings(workflows) {
       });
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
       const got = writesOf(job?.permissions);
-      const want = [...(WRITE_PERMISSIONS[`${file}#${jobId}`] ?? [])].sort();
+      const want = [...(WRITE_PERMISSIONS[`${file}#${jobId}`] ?? [])].sort(byText);
       if (got.join(",") !== want.join(","))
         out.push({
           file,
@@ -2315,6 +2361,37 @@ export function findings({ settings, manifest, workflows, commands = ENVIRONMENT
   return out;
 }
 
+/**
+ * Rules 13 and 19's trigger check, the one spelling of it over GATE_WORKFLOWS
+ * (plan 867 §5): a gate workflow runs on every push to main (`push:
+ * branches: [main]`, exactly, which also keeps tag pushes out) and every pull
+ * request, with no paths, branches, tags or types filter on either. A filter
+ * would leave a required check pending, or let a change skip the gate.
+ */
+export function gateTriggerProblems(file, doc) {
+  if (!GATE_WORKFLOWS.includes(file)) throw new Error(`${file} is not one of GATE_WORKFLOWS`);
+  const out = [];
+  const on = doc?.on ?? doc?.[true];
+  const triggers = triggersOf(doc);
+  const branches = on?.push?.branches;
+  if (
+    !triggers.includes("push") ||
+    !Array.isArray(branches) ||
+    branches.length !== 1 ||
+    branches[0] !== "main"
+  )
+    out.push("does not run on every push to main (push: branches: [main], exactly)");
+  if (!triggers.includes("pull_request")) out.push("does not run on every pull request");
+  for (const [t, keys] of [
+    ["push", ["paths", "paths-ignore", "branches-ignore", "tags", "tags-ignore"]],
+    ["pull_request", ["paths", "paths-ignore", "branches", "branches-ignore", "types"]],
+  ])
+    for (const k of keys)
+      if (on?.[t]?.[k] !== undefined)
+        out.push(`filters ${String(t)} by ${String(k)}, so a change can skip the gate`);
+  return out;
+}
+
 /** The only workflow-level env verify.yml may set: its two tool pins. */
 export const PUBLIC_GATE_ENV = new Set(["NODE_VERSION", "DENO_VERSION"]);
 
@@ -2335,24 +2412,7 @@ export function publicGateFindings(workflows) {
     add("is missing: `pnpm run verify` would run on no automated path");
     return out;
   }
-  const on = doc?.on ?? doc?.[true];
-  const triggers = triggersOf(doc);
-  const branches = on?.push?.branches;
-  if (
-    !triggers.includes("push") ||
-    !Array.isArray(branches) ||
-    branches.length !== 1 ||
-    branches[0] !== "main"
-  )
-    add("does not run on every push to main (push: branches: [main], exactly)");
-  if (!triggers.includes("pull_request")) add("does not run on every pull request");
-  for (const [t, keys] of [
-    ["push", ["paths", "paths-ignore", "branches-ignore", "tags", "tags-ignore"]],
-    ["pull_request", ["paths", "paths-ignore", "branches", "branches-ignore", "types"]],
-  ])
-    for (const k of keys)
-      if (on?.[t]?.[k] !== undefined)
-        add(`filters ${String(t)} by ${String(k)}, so a change can skip the gate`);
+  for (const why of gateTriggerProblems(VERIFY_WORKFLOW, doc)) add(why);
   for (const k of Object.keys(doc?.env ?? {}))
     if (!PUBLIC_GATE_ENV.has(k)) add(`sets env ${k}, which PUBLIC_GATE_ENV does not allow`);
   if (
@@ -2830,18 +2890,19 @@ export function allFindings({ settings, manifest, workflows, scriptOutputs }) {
     ...continueOnErrorFindings(workflows),
     ...exemptTokenFindings(workflows),
     ...daggerFnFindings(manifest),
+    ...sdkGateFindings({ settings, manifest, workflows }),
   ];
 }
 
 /**
  * Every daggerFn in dagger/sdk-manifest.json is one Dagger function name
- * (round 10): release-gate.yml and sdk-publish.yml's gate pass it to the
- * dagger action as `args: <daggerFn> --source=.`, so anything else (a space,
- * `;`, `$( )`) would reach the CLI's command line. The manifest spells them
- * the way the Dagger CLI takes them, kebab-case (`go-test`), so that is the
- * shape held, not the camelCase of the module's source.
+ * (round 10): release-gate.yml, sdk-gates.yml and sdk-publish.yml's gate pass
+ * it to the dagger action as `args: <daggerFn> --source=.`, so anything else
+ * (a space, `;`, `$( )`) would reach the CLI's command line. The manifest
+ * spells them the way the Dagger CLI takes them, kebab-case (`go-test`), so
+ * that is the shape held, not the camelCase of the module's source. The
+ * shape is DAGGER_FN, from select-sdks.mjs, which refuses the same at run time.
  */
-const DAGGER_FN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export function daggerFnFindings(manifest) {
   const out = [];
   for (const s of Array.isArray(manifest?.sdks) ? manifest.sdks : [])
@@ -2852,6 +2913,224 @@ export function daggerFnFindings(manifest) {
         job: String(s?.name ?? "?"),
         why: `daggerFn ${JSON.stringify(s.daggerFn)} is not one Dagger function name (${DAGGER_FN.source})`,
       });
+  return out;
+}
+
+/** The only runner labels sdk-gates.yml's jobs run on (FR-001): exact, never `*-latest` or self-hosted. */
+export const GATE_RUNNERS = ["ubuntu-24.04", "macos-15"];
+/** sdk-gates.yml's triggers, exactly. */
+const SDK_GATE_TRIGGERS = ["push", "pull_request", "schedule"];
+/** The two scripts sdk-gates.yml runs: the selection and the verdict. */
+export const SELECT_SCRIPT = "tools/repo-gates/select-sdks.mjs";
+export const CONCLUDE_SCRIPT = "tools/repo-gates/conclude-sdk-gates.mjs";
+/** A daily cron: a minute and an hour, every day. */
+const DAILY_CRON = /^\d{1,2} \d{1,2} \* \* \*$/;
+/** Dagger's cloud and cache switches, in any env (a cache a pull request writes, a trace sent away). */
+const DAGGER_CLOUD_OR_CACHE = /DAGGER_(?:CLOUD|CACHE)/i;
+const isMap = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const stepsOf = (job) => (Array.isArray(job?.steps) ? job.steps : []);
+/** The check-run name a job produces: its name:, or its id when it has none. */
+const checkName = (id, job) => (typeof job?.name === "string" ? job.name : id);
+/** A step that runs `node <script>` and nothing else. */
+const runsNode = (s, script) => typeof s?.run === "string" && s.run.trim() === `node ${script}`;
+
+/**
+ * Rule 19's half over release-settings.json: `requiredChecks` is
+ * `{ ruleset, integrationId, checks }`, and each check name is produced by
+ * exactly one job across every workflow (plan 867 S5: two jobs sharing a
+ * required name would let the green one mask the red one, and a name nothing
+ * produces leaves the check pending forever). Which names, and from which
+ * app, is the data's to say and the private applier's FLOORS' to hold.
+ */
+export function requiredCheckFindings(settings, workflows) {
+  const out = [];
+  const add = (why) => out.push({ file: SETTINGS, job: "-", why });
+  const rc = settings?.requiredChecks;
+  if (!isMap(rc)) {
+    add("declares no requiredChecks: nothing would be required on main");
+    return out;
+  }
+  for (const k of Object.keys(rc))
+    if (!["ruleset", "integrationId", "checks"].includes(k))
+      add(`requiredChecks.${k} is not one of ruleset, integrationId, checks`);
+  if (typeof rc.ruleset !== "string" || rc.ruleset.trim() === "")
+    add("requiredChecks.ruleset is not a ruleset name");
+  if (!Number.isInteger(rc.integrationId) || rc.integrationId <= 0)
+    add("requiredChecks.integrationId is not a GitHub App id");
+  const checks = rc.checks;
+  if (
+    !Array.isArray(checks) ||
+    checks.length === 0 ||
+    !checks.every((c) => typeof c === "string" && c.trim() !== "")
+  ) {
+    add("requiredChecks.checks is not a list of check names");
+    return out;
+  }
+  if (new Set(checks).size !== checks.length) add("requiredChecks.checks names a check twice");
+  const producers = new Map(checks.map((c) => [c, []]));
+  for (const [file, doc] of Object.entries(workflows))
+    for (const [id, job] of Object.entries(doc?.jobs ?? {}))
+      producers.get(checkName(id, job))?.push(`${file}#${id}`);
+  for (const [c, jobs] of producers)
+    if (jobs.length !== 1)
+      add(
+        `required check "${c}" is produced by ${jobs.length} jobs${jobs.length > 0 ? ` (${jobs.join(", ")})` : ""}, not exactly one`,
+      );
+  return out;
+}
+
+/**
+ * Rule 19 (#793, FR-001, FR-011): sdk-gates.yml's own shape, the required
+ * checks, and the manifest's CI routing. What rules 2, 3 (caches) and 18
+ * and continueOnErrorFindings hold is not restated here: they read this
+ * workflow already, or because it is listed. Which SDKs a change selects and
+ * when the aggregate is green are select-sdks.mjs's and
+ * conclude-sdk-gates.mjs's, never this rule's.
+ */
+export function sdkGateFindings({ settings, manifest, workflows }) {
+  const out = [];
+  const file = SDK_GATES_WORKFLOW;
+  const add = (job, why) => out.push({ file, job, why });
+  for (const p of manifestProblems(manifest)) out.push({ file: MANIFEST, job: p.sdk, why: p.why });
+  out.push(...requiredCheckFindings(settings, workflows));
+  const doc = workflows[file];
+  if (doc === undefined) {
+    add("-", "is missing: no SDK suite would run on any push");
+    return out;
+  }
+  for (const why of gateTriggerProblems(file, doc)) add("-", why);
+  const extra = triggersOf(doc).filter((t) => !SDK_GATE_TRIGGERS.includes(t));
+  if (extra.length > 0)
+    add("-", `triggers on ${extra.join(", ")}, beyond ${SDK_GATE_TRIGGERS.join(", ")}`);
+  const schedule = (doc?.on ?? doc?.[true])?.schedule;
+  if (
+    !Array.isArray(schedule) ||
+    schedule.length !== 1 ||
+    !DAILY_CRON.test(String(schedule[0]?.cron ?? ""))
+  )
+    add("-", 'has no single daily schedule (schedule: - cron: "<minute> <hour> * * *")');
+  if (canonical(doc?.permissions ?? null) !== canonical({ contents: "read" }))
+    add("-", "its top-level permissions: is not exactly contents: read");
+  const group = String(doc?.concurrency?.group ?? "");
+  if (!/(?<![\w.])github\.ref(?![\w-])/.test(group) || /head_ref/i.test(group))
+    add(
+      "-",
+      "its concurrency group is not keyed on github.ref (never head_ref, which a fork names)",
+    );
+  if (allExpressions(doc).some(readsCredentialContext))
+    add(
+      "-",
+      "an expression names a token or a secret (github.token, secrets, the bare github context)",
+    );
+  const jobs = isMap(doc?.jobs) ? doc.jobs : {};
+  const envMaps = [
+    ["-", doc?.env],
+    ...Object.entries(jobs).flatMap(([id, job]) => [
+      [id, job?.env],
+      ...stepsOf(job).map((st) => [id, st?.env]),
+    ]),
+  ];
+  for (const [where, map] of envMaps)
+    for (const k of Object.keys(map ?? {}))
+      if (DAGGER_CLOUD_OR_CACHE.test(k))
+        add(where, `sets ${k}: no Dagger cloud or cache configuration`);
+  for (const [id, job] of Object.entries(jobs)) {
+    if (job?.environment !== undefined) add(id, "binds an environment");
+    if (!GATE_RUNNERS.includes(job?.["runs-on"]))
+      add(
+        id,
+        `runs on ${canonical(job?.["runs-on"] ?? null)}, not one of ${GATE_RUNNERS.join(", ")}`,
+      );
+    const t = job?.["timeout-minutes"];
+    if (!Number.isInteger(t) || t <= 0)
+      add(id, "sets no timeout-minutes (a positive whole number)");
+    for (const st of stepsOf(job)) {
+      const uses = typeof st?.uses === "string" ? st.uses : "";
+      if (uses.startsWith("actions/checkout@") && st?.with?.["persist-credentials"] !== false)
+        add(id, "a checkout keeps its credential (persist-credentials: false)");
+      if (isMap(st?.with) && "cloud-token" in st.with)
+        add(id, "a step passes cloud-token: no Dagger cloud or cache configuration");
+    }
+    if (job?.strategy?.matrix !== undefined) {
+      if (job.strategy["fail-fast"] !== false)
+        add(id, "a matrix without fail-fast: false (one red leg would cancel the others)");
+      if (!KINDS.some((k) => k.job === id)) add(id, "a matrix no select output feeds");
+    }
+  }
+  // Each kind: its own select output, guarded so an empty one is a skip.
+  for (const kind of KINDS) {
+    const job = jobs[kind.job];
+    if (job === undefined) {
+      add(kind.job, `is missing: the ${kind.output} selection would run nowhere`);
+      continue;
+    }
+    const output = `needs.${SELECT_JOB}.outputs.${kind.output}`;
+    if (!asList(job.needs).includes(SELECT_JOB)) add(kind.job, `does not need ${SELECT_JOB}`);
+    if (String(job.if ?? "").trim() !== `${output} != '[]'`)
+      add(
+        kind.job,
+        `its if: is not exactly ${output} != '[]' (an empty matrix is an error, not a skip)`,
+      );
+    const m = job.strategy?.matrix;
+    if (
+      !isMap(m) ||
+      Object.keys(m).join(",") !== "sdk" ||
+      !EXPR(`fromJSON\\(${output.replace(/\./g, "\\.")}\\)`).test(String(m.sdk))
+    )
+      add(kind.job, `its matrix is not exactly sdk: \${{ fromJSON(${output}) }}`);
+  }
+  // The select job: it runs the selector, and hands on every output it writes.
+  const select = jobs[SELECT_JOB];
+  if (select === undefined) add(SELECT_JOB, "is missing: nothing would be selected");
+  else {
+    const st = stepsOf(select).find((x) => runsNode(x, SELECT_SCRIPT));
+    if (st === undefined || st.id !== SELECT_JOB)
+      add(SELECT_JOB, `has no step with id ${SELECT_JOB} that runs \`node ${SELECT_SCRIPT}\``);
+    else if (
+      st.if !== undefined ||
+      st["continue-on-error"] !== undefined ||
+      select.if !== undefined
+    )
+      add(SELECT_JOB, "the selection can be skipped (an if: on its job or step)");
+    const want = Object.fromEntries(
+      SELECT_OUTPUT_KEYS.map((k) => [k, `\${{ steps.${SELECT_JOB}.outputs.${k} }}`]),
+    );
+    if (canonical(select.outputs ?? null) !== canonical(want))
+      add(
+        SELECT_JOB,
+        `its outputs are not exactly ${SELECT_OUTPUT_KEYS.join(", ")} from step ${SELECT_JOB}`,
+      );
+  }
+  // The aggregate: one job, every other job its need, always(), the script.
+  const aggregates = Object.entries(jobs).filter(([, j]) =>
+    stepsOf(j).some((x) => runsNode(x, CONCLUDE_SCRIPT)),
+  );
+  if (aggregates.length !== 1) {
+    add("-", `${aggregates.length} jobs run \`node ${CONCLUDE_SCRIPT}\`, not exactly one`);
+    return out;
+  }
+  const [id, agg] = aggregates[0];
+  const others = Object.keys(jobs)
+    .filter((j) => j !== id)
+    .sort();
+  const needs = [...asList(agg.needs)].map(String).sort(byText);
+  if (canonical(needs) !== canonical(others))
+    add(id, `needs [${needs.join(", ")}], not every other job [${others.join(", ")}]`);
+  if (String(agg.if ?? "").trim() !== "always()")
+    add(
+      id,
+      "its if: is not exactly always() (a red need would skip the verdict, leaving it pending)",
+    );
+  const st = stepsOf(agg).find((x) => runsNode(x, CONCLUDE_SCRIPT));
+  if (st.if !== undefined || st["continue-on-error"] !== undefined)
+    add(id, "its conclude step can be skipped (if:) or fail green (continue-on-error:)");
+  if (!/^\$\{\{\s*toJSON\(needs\)\s*\}\}$/.test(String(st.env?.NEEDS_JSON)))
+    add(id, "its conclude step does not read NEEDS_JSON: ${{ toJSON(needs) }}");
+  const required = Array.isArray(settings?.requiredChecks?.checks)
+    ? settings.requiredChecks.checks
+    : [];
+  if (!required.includes(checkName(id, agg)))
+    add(id, `its check "${checkName(id, agg)}" is not one of ${SETTINGS}'s requiredChecks`);
   return out;
 }
 

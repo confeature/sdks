@@ -4,16 +4,24 @@
 // repository is clean, and every rule is seen to fire on a fixture that
 // breaks only that rule.
 
-import { dirname, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { rowSnapshots } from "./row-snapshots.mjs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   CREDENTIALED_COMMANDS,
+  GATE_WORKFLOWS,
+  MANIFEST,
+  SETTINGS,
+  WORKFLOWS,
+  allFindings,
   findings,
+  gateTriggerProblems,
   globMatches,
   publicGateFindings,
+  readScriptOutputs,
   releaseGateFindings,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
@@ -868,7 +876,7 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
     ["exec", "exec python3 x.py"],
     ["env", "env FOO=1 bash x.sh"],
     ["xargs", "ls | xargs sh"],
-    ["find -exec", "find . -exec sh {} \;"],
+    ["find -exec", "find . -exec sh {} ;"],
     ["sort --compress-program", "sort --compress-program=sh"],
     ["sed's e flag", "sed 's/x/id/e'"],
     ["sed -e", "sed -e '1e id'"],
@@ -1540,11 +1548,11 @@ describe("15 a run block reads only variables something defines (#794 review, ro
   it("accepts a variable the step, the job or the workflow defines", () => {
     const head = HEAD.replace("  UNIT_PATH: ${{ needs.setup.outputs.path }}\n", "");
     const step =
-      '      - env:\n          UNIT_PATH: \${{ needs.setup.outputs.path }}\n        run: echo "$UNIT_PATH"';
+      '      - env:\n          UNIT_PATH: ${{ needs.setup.outputs.path }}\n        run: echo "$UNIT_PATH"';
     expect(run(swap(PUBLISH_STEP, step), { head })).toEqual([]);
     const job = swap(
       "    environment: sdk-publish-npm\n",
-      "    environment: sdk-publish-npm\n    env:\n      UNIT_PATH: \${{ needs.setup.outputs.path }}\n",
+      "    environment: sdk-publish-npm\n    env:\n      UNIT_PATH: ${{ needs.setup.outputs.path }}\n",
     ).replace(PUBLISH_STEP, '      - run: echo "$UNIT_PATH"');
     expect(run(job, { head })).toEqual([]);
   });
@@ -1781,4 +1789,334 @@ describe("an input redirection reads only what the job wrote or downloaded (roun
       /reads input only from publish-tmp\/ or a path this job downloads to/,
     ),
   );
+});
+
+describe("19 the SDK gates' own shape (#793)", () => {
+  const G = "sdk-gates.yml";
+  const REAL = {
+    settings: JSON.parse(readFileSync(join(ROOT, SETTINGS), "utf8")),
+    manifest: JSON.parse(readFileSync(join(ROOT, MANIFEST), "utf8")),
+    workflows: Object.fromEntries(
+      readdirSync(join(ROOT, WORKFLOWS))
+        .filter((n) => /\.ya?ml$/.test(n))
+        .map((n) => [n, parseYaml(readFileSync(join(ROOT, WORKFLOWS, n), "utf8"))]),
+    ),
+  };
+  const SCRIPTS = readScriptOutputs(ROOT);
+  /** Every finding of the real tree after `mutate`, through the gate's one aggregate. */
+  const after = (mutate) => {
+    const t = structuredClone(REAL);
+    mutate({ ...t, doc: t.workflows[G], jobs: t.workflows[G].jobs });
+    return allFindings({ ...t, scriptOutputs: SCRIPTS }).map(
+      (f) => `${f.file}: ${f.job}: ${f.why}`,
+    );
+  };
+  const step = (job, name) => job.steps.find((x) => x.name === name);
+  const conclude = (jobs) =>
+    step(jobs["sdk-gates"], "Conclude (tools/repo-gates/conclude-sdk-gates.mjs)");
+
+  it("control: the real tree is clean", () => expect(after(() => {})).toEqual([]));
+
+  it.each([
+    ["no schedule", ({ doc }) => void delete doc.on.schedule, /no single daily schedule/],
+    [
+      "a weekly schedule",
+      ({ doc }) => void (doc.on.schedule = [{ cron: "23 4 * * 1" }]),
+      /no single daily schedule/,
+    ],
+    [
+      "two schedules",
+      ({ doc }) => void doc.on.schedule.push({ cron: "0 0 * * *" }),
+      /no single daily schedule/,
+    ],
+    ["no push trigger", ({ doc }) => void delete doc.on.push, /every push to main/],
+    [
+      "a push to another branch",
+      ({ doc }) => void (doc.on.push.branches = ["dev"]),
+      /every push to main/,
+    ],
+    [
+      "a push with no branch filter (tags too)",
+      ({ doc }) => void (doc.on.push = null),
+      /every push to main/,
+    ],
+    ["no pull_request trigger", ({ doc }) => void delete doc.on.pull_request, /every pull request/],
+    [
+      "paths: on pull_request",
+      ({ doc }) => void (doc.on.pull_request = { paths: ["apps/**"] }),
+      /sdk-gates\.yml: -: filters pull_request by paths/,
+    ],
+    [
+      "paths-ignore: on push",
+      ({ doc }) => void (doc.on.push["paths-ignore"] = ["docs/**"]),
+      /filters push by paths-ignore/,
+    ],
+    [
+      "a fourth trigger",
+      ({ doc }) => void (doc.on.workflow_dispatch = null),
+      /triggers on workflow_dispatch, beyond push, pull_request, schedule/,
+    ],
+    [
+      "top-level contents: write",
+      ({ doc }) => void (doc.permissions = { contents: "write" }),
+      /top-level permissions: is not exactly contents: read/,
+    ],
+    [
+      "a head_ref concurrency key",
+      ({ doc }) => void (doc.concurrency.group = "sdk-gates-${{ github.head_ref || github.ref }}"),
+      /concurrency group is not keyed on github\.ref/,
+    ],
+    [
+      "a concurrency key on github.ref_name",
+      ({ doc }) => void (doc.concurrency.group = "sdk-gates-${{ github.ref_name }}"),
+      /concurrency group is not keyed on github\.ref/,
+    ],
+    [
+      "no timeout-minutes on a job",
+      ({ jobs }) => void delete jobs.gate["timeout-minutes"],
+      /sdk-gates\.yml: gate: sets no timeout-minutes/,
+    ],
+    [
+      "a timeout from an expression",
+      ({ jobs }) => void (jobs.select["timeout-minutes"] = "${{ 600 }}"),
+      /select: sets no timeout-minutes/,
+    ],
+    [
+      "ubuntu-latest",
+      ({ jobs }) => void (jobs.gate["runs-on"] = "ubuntu-latest"),
+      /gate: runs on "ubuntu-latest", not one of ubuntu-24\.04, macos-15/,
+    ],
+    [
+      "a self-hosted runner",
+      ({ jobs }) => void (jobs.swift["runs-on"] = ["self-hosted", "macos"]),
+      /swift: runs on \["self-hosted","macos"\]/,
+    ],
+    [
+      "fail-fast: true",
+      ({ jobs }) => void (jobs.gate.strategy["fail-fast"] = true),
+      /gate: a matrix without fail-fast: false/,
+    ],
+    [
+      "no fail-fast",
+      ({ jobs }) => void delete jobs.smoke.strategy["fail-fast"],
+      /smoke: a matrix without fail-fast: false/,
+    ],
+    [
+      "no empty-matrix guard",
+      ({ jobs }) => void delete jobs.gate.if,
+      /gate: its if: is not exactly needs\.select\.outputs\.gate != '\[\]'/,
+    ],
+    [
+      "a guard on another kind's output",
+      ({ jobs }) => void (jobs["gate-known-red"].if = "needs.select.outputs.gate != '[]'"),
+      /gate-known-red: its if: is not exactly needs\.select\.outputs\.known_red/,
+    ],
+    [
+      "a matrix fed by another kind's output",
+      ({ jobs }) =>
+        void (jobs.gate.strategy.matrix.sdk = "${{ fromJSON(needs.select.outputs.known_red) }}"),
+      /gate: its matrix is not exactly sdk: \$\{\{ fromJSON\(needs\.select\.outputs\.gate\) \}\}/,
+    ],
+    [
+      "a literal SDK list",
+      ({ jobs }) => void (jobs.gate.strategy.matrix.sdk = [{ name: "node", daggerFn: "js-test" }]),
+      /gate: its matrix is not exactly sdk:/,
+    ],
+    [
+      "a kind's job removed",
+      ({ jobs, doc }) => {
+        delete jobs.swift;
+        doc.jobs["sdk-gates"].needs = ["select", "gate", "gate-known-red", "smoke"];
+      },
+      /swift: is missing: the swift selection would run nowhere/,
+    ],
+    [
+      "a matrix no select output feeds",
+      ({ jobs }) =>
+        void (jobs.extra = {
+          "runs-on": "ubuntu-24.04",
+          "timeout-minutes": 5,
+          strategy: { "fail-fast": false, matrix: { sdk: ["node"] } },
+          steps: [{ run: "true" }],
+        }),
+      /extra: a matrix no select output feeds/,
+    ],
+    [
+      "an aggregate that does not need every job",
+      ({ jobs }) => void (jobs["sdk-gates"].needs = ["select", "gate", "gate-known-red", "swift"]),
+      /sdk-gates: needs \[gate, gate-known-red, select, swift\], not every other job/,
+    ],
+    [
+      "an aggregate on success()",
+      ({ jobs }) => void (jobs["sdk-gates"].if = "success()"),
+      /sdk-gates: its if: is not exactly always\(\)/,
+    ],
+    [
+      "a conclude step that can be skipped",
+      ({ jobs }) => void (conclude(jobs).if = "github.event_name == 'push'"),
+      /its conclude step can be skipped/,
+    ],
+    [
+      "a conclude step without toJSON(needs)",
+      ({ jobs }) => void (conclude(jobs).env = { NEEDS_JSON: "{}" }),
+      /does not read NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/,
+    ],
+    [
+      "no aggregate",
+      ({ jobs }) => void (conclude(jobs).run = "echo green"),
+      /0 jobs run `node tools\/repo-gates\/conclude-sdk-gates\.mjs`, not exactly one/,
+    ],
+    [
+      "an aggregate that is not a required check",
+      ({ jobs }) => void (jobs["sdk-gates"].name = "sdk gates (all)"),
+      /its check "sdk gates \(all\)" is not one of/,
+    ],
+    [
+      "two jobs named sdk gates",
+      ({ jobs }) => void (jobs.select.name = "sdk gates"),
+      /required check "sdk gates" is produced by 2 jobs \(sdk-gates\.yml#select, sdk-gates\.yml#sdk-gates\), not exactly one/,
+    ],
+    [
+      "a required check no job produces",
+      ({ workflows }) => void (workflows["verify.yml"].jobs.verify.name = "verify"),
+      /required check "pnpm run verify" is produced by 0 jobs, not exactly one/,
+    ],
+    [
+      "a selector that is not the select step",
+      ({ jobs }) =>
+        void (step(jobs.select, "Select the SDKs (tools/repo-gates/select-sdks.mjs)").id = "pick"),
+      /select: has no step with id select that runs/,
+    ],
+    [
+      "a select output not handed on",
+      ({ jobs }) => void delete jobs.select.outputs.pending,
+      /select: its outputs are not exactly gate, known_red, pending, swift, smoke, gate_files, summary/,
+    ],
+    [
+      "an environment",
+      ({ jobs }) => void (jobs.gate.environment = "sdk-publish-npm"),
+      /sdk-gates\.yml: gate: binds an environment/,
+    ],
+    [
+      "github.token in an env",
+      ({ jobs }) => void (conclude(jobs).env.GH_TOKEN = "${{ github.token }}"),
+      /an expression names a token or a secret/,
+    ],
+    [
+      "a secret in an env",
+      ({ jobs }) => void (conclude(jobs).env.X = "${{ secrets.X }}"),
+      /an expression names a token or a secret/,
+    ],
+    [
+      "a checkout that keeps its credential",
+      ({ jobs }) => void delete step(jobs.gate, "Checkout").with["persist-credentials"],
+      /gate: a checkout keeps its credential/,
+    ],
+    [
+      "a Dagger cloud token",
+      ({ jobs }) =>
+        void (step(jobs.gate, "Run ${{ matrix.sdk.daggerFn }} (Dagger)").with["cloud-token"] = "x"),
+      /gate: a step passes cloud-token/,
+    ],
+    [
+      "a Dagger cache configuration",
+      ({ doc }) => void (doc.env._EXPERIMENTAL_DAGGER_CACHE_CONFIG = "type=gha"),
+      /sets _EXPERIMENTAL_DAGGER_CACHE_CONFIG: no Dagger cloud or cache configuration/,
+    ],
+    // Listed, not restated: rule 3's caches and continueOnErrorFindings.
+    [
+      "a cache action",
+      ({ jobs }) =>
+        void jobs.gate.steps.splice(1, 0, {
+          name: "cache",
+          uses: "actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809",
+          with: { path: "x", key: "k" },
+        }),
+      /gate step cache: a gate job restores a cache/,
+    ],
+    [
+      "setup-node's cache input",
+      ({ jobs }) => void (step(jobs.select, "Setup Node.js").with.cache = "pnpm"),
+      /select step Setup Node\.js: a gate job restores a cache/,
+    ],
+    [
+      "a step continue-on-error",
+      ({ jobs }) =>
+        void (step(jobs.gate, "Run ${{ matrix.sdk.daggerFn }} (Dagger)")["continue-on-error"] =
+          true),
+      /sdk-gates\.yml: gate: step Run .* sets continue-on-error:/,
+    ],
+    [
+      "a job continue-on-error",
+      ({ jobs }) => void (jobs.gate["continue-on-error"] = true),
+      /sdk-gates\.yml: gate: sets continue-on-error:/,
+    ],
+    // The required checks' shape.
+    [
+      "no requiredChecks",
+      ({ settings }) => void delete settings.requiredChecks,
+      /release-settings\.json: -: declares no requiredChecks/,
+    ],
+    [
+      "an integrationId that is a string",
+      ({ settings }) => void (settings.requiredChecks.integrationId = "15368"),
+      /requiredChecks\.integrationId is not a GitHub App id/,
+    ],
+    [
+      "no checks",
+      ({ settings }) => void (settings.requiredChecks.checks = []),
+      /requiredChecks\.checks is not a list of check names/,
+    ],
+    [
+      "a check named twice",
+      ({ settings }) => void settings.requiredChecks.checks.push("sdk gates"),
+      /requiredChecks\.checks names a check twice/,
+    ],
+    [
+      "an unknown requiredChecks key",
+      ({ settings }) => void (settings.requiredChecks.strict = true),
+      /requiredChecks\.strict is not one of ruleset, integrationId, checks/,
+    ],
+    [
+      "no ruleset name",
+      ({ settings }) => void (settings.requiredChecks.ruleset = ""),
+      /requiredChecks\.ruleset is not a ruleset name/,
+    ],
+    // The manifest: exactly one of daggerFn or ci.native.
+    [
+      "an SDK with neither daggerFn nor ci.native",
+      ({ manifest }) => void delete manifest.sdks.find((x) => x.name === "swift").ci.native,
+      /dagger\/sdk-manifest\.json: swift: has neither of daggerFn and ci\.native/,
+    ],
+    [
+      "an SDK with both",
+      ({ manifest }) =>
+        void (manifest.sdks.find((x) => x.name === "node").ci = { native: "macos" }),
+      /dagger\/sdk-manifest\.json: node: has both daggerFn and ci\.native/,
+    ],
+    [
+      "the workflow removed",
+      ({ workflows }) => void delete workflows[G],
+      /sdk-gates\.yml: -: is missing/,
+    ],
+  ])("refuses %s", (_name, mutate, re) => {
+    const got = after(mutate);
+    expect(
+      got.some((g) => re.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+
+  it("the trigger check is one helper over GATE_WORKFLOWS, and refuses any other file", () => {
+    expect(GATE_WORKFLOWS).toEqual(["verify.yml", G]);
+    for (const f of GATE_WORKFLOWS) {
+      const doc = structuredClone(REAL.workflows[f]);
+      expect(gateTriggerProblems(f, doc)).toEqual([]);
+      doc.on.pull_request = { types: ["labeled"] };
+      expect(gateTriggerProblems(f, doc)).toEqual([
+        "filters pull_request by types, so a change can skip the gate",
+      ]);
+    }
+    expect(() => gateTriggerProblems("contract-live.yml", {})).toThrow(/GATE_WORKFLOWS/);
+  });
 });

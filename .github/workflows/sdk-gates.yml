@@ -1,0 +1,321 @@
+# SPDX-License-Identifier: MIT
+
+# Every SDK judged by its own suite, on every push to main, once a day, and on
+# every pull request for the SDKs it touches (#793). Until this workflow, 19 of
+# the 21 SDKs ran their suite on no push at all: only a release tag or the
+# operator's local pre-push did, so a regression was found at publish time.
+#
+# The jobs, each fed by its own output of the select job:
+#   select          tools/repo-gates/select-sdks.mjs decides which SDKs this
+#                   change is judged by, and through which kind of job. A push
+#                   and the schedule select every SDK; a pull request, the SDKs
+#                   it touches plus their dependents, or every SDK when it
+#                   touches anything outside one SDK's directory.
+#   gate            one leg per selected SDK with a daggerFn: that SDK's own
+#                   Dagger function, the one definition of its suite, shared
+#                   with the publish gate, release-gate.yml and the pre-push.
+#   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
+#                   the BASE manifest (ci.knownRed): shown red, never counted.
+#   swift, smoke    the native runners (ci.native); no SDK reaches them before
+#                   #917 and #916, while ci.pending holds them.
+#   sdk gates       the aggregate, and the one required check on main:
+#                   tools/repo-gates/conclude-sdk-gates.mjs decides it, from
+#                   toJSON(needs).
+#
+# It holds nothing: `contents: read`, no environment, no secret, no token in
+# any expression, a checkout that keeps no credential, no cache of any kind
+# (a pull request's cache could reach main) and no continue-on-error. A
+# fork's pull request runs it with the same read-only token, after a
+# maintainer approves the run (CONTRIBUTING.md, "Approving a fork's run").
+#
+# tools/repo-gates/verify-workflows.mjs rule 19 holds this file's shape: the
+# three unfiltered triggers, the runner labels, a timeout on every job, the
+# concurrency key, fail-fast: false, the empty-matrix guards, and an
+# aggregate that needs every job, runs always() and runs the conclude script.
+
+name: sdk-gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Daily, on main: a commit that skipped CI, toolchain drift, a fetch that
+  # changed under a pinned suite.
+  schedule:
+    - cron: "23 4 * * *"
+
+permissions:
+  contents: read
+
+# A newer run of the same event on the same ref supersedes the older one. The
+# event is in the key so the schedule and a push to main never cancel each
+# other; the ref is github.ref, never head_ref, which a fork names.
+concurrency:
+  group: sdk-gates-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22.23.3"
+
+jobs:
+  select:
+    name: select
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      gate: ${{ steps.select.outputs.gate }}
+      known_red: ${{ steps.select.outputs.known_red }}
+      pending: ${{ steps.select.outputs.pending }}
+      swift: ${{ steps.select.outputs.swift }}
+      smoke: ${{ steps.select.outputs.smoke }}
+      gate_files: ${{ steps.select.outputs.gate_files }}
+      summary: ${{ steps.select.outputs.summary }}
+    steps:
+      # Full history: a pull request's diff is <base>...<head>, and the
+      # known-red waiver is read from the base commit's manifest.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Dependency-free: no install. The SHAs are data, through env: (rule 5).
+      - name: Select the SDKs (tools/repo-gates/select-sdks.mjs)
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node tools/repo-gates/select-sdks.mjs
+
+  gate:
+    name: gate (${{ matrix.sdk.name }})
+    needs: select
+    # An empty matrix is an error, not a skip: no leg when nothing is selected.
+    if: needs.select.outputs.gate != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(needs.select.outputs.gate) }}
+    steps:
+      # The leg runs the pull request's code inside Dagger and never pushes, so
+      # the checkout keeps no GITHUB_TOKEN in .git/config.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The pin, the verified CLI and the action exactly as release-gate.yml's
+      # test job runs them: tools/dagger-call/engine-pin.test.mjs decides how
+      # Dagger is installed, and every workflow asks it.
+      - name: Read the Dagger engine version (dagger/dagger.json)
+        id: pin
+        run: |
+          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
+          if [ -z "${version}" ]; then
+            echo "::error::dagger/dagger.json has no engineVersion"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
+      # this repository, never from a checksum served by the download host. With
+      # this CLI first on PATH at the pinned version, the action below finds it
+      # and skips its own install.sh.
+      - name: Install the checksum-verified Dagger CLI
+        env:
+          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
+          dir="${RUNNER_TEMP}/dagger-cli"
+          mkdir -p "${dir}/bin"
+          cd "${dir}"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
+            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
+          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
+          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
+            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
+            exit 1
+          fi
+          sha256sum -c --strict expected.sha256
+          tar -xzf "${tarball}" -C bin dagger
+          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
+          if [ "${got}" != "${DAGGER_VERSION}" ]; then
+            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
+            exit 1
+          fi
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+
+      # The action is pinned by commit SHA (v8.4.1, the contract that supports
+      # verb/module/args/enable-github-summary) and the engine by `version:`,
+      # taken from the pin step. The action tag and the engine version are
+      # decoupled by design: never @v8 / @latest, never the action's `latest`
+      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
+      - name: Run ${{ matrix.sdk.daggerFn }} (Dagger)
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: ${{ matrix.sdk.daggerFn }} --source=.
+          enable-github-summary: true
+
+      # A matrix job reports one combined result, so each leg names itself.
+      - name: Name the leg in its summary
+        if: always()
+        env:
+          SDK: ${{ matrix.sdk.name }}
+          STATUS: ${{ job.status }}
+        run: |
+          echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+
+  gate-known-red:
+    name: gate (${{ matrix.sdk.name }}, known red ${{ matrix.sdk.ticket }})
+    needs: select
+    if: needs.select.outputs.known_red != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(needs.select.outputs.known_red) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read the Dagger engine version (dagger/dagger.json)
+        id: pin
+        run: |
+          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
+          if [ -z "${version}" ]; then
+            echo "::error::dagger/dagger.json has no engineVersion"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
+      # this repository, never from a checksum served by the download host. With
+      # this CLI first on PATH at the pinned version, the action below finds it
+      # and skips its own install.sh.
+      - name: Install the checksum-verified Dagger CLI
+        env:
+          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
+          dir="${RUNNER_TEMP}/dagger-cli"
+          mkdir -p "${dir}/bin"
+          cd "${dir}"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
+            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
+          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
+          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
+            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
+            exit 1
+          fi
+          sha256sum -c --strict expected.sha256
+          tar -xzf "${tarball}" -C bin dagger
+          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
+          if [ "${got}" != "${DAGGER_VERSION}" ]; then
+            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
+            exit 1
+          fi
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+
+      # The action is pinned by commit SHA (v8.4.1, the contract that supports
+      # verb/module/args/enable-github-summary) and the engine by `version:`,
+      # taken from the pin step. The action tag and the engine version are
+      # decoupled by design: never @v8 / @latest, never the action's `latest`
+      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
+      - name: Run ${{ matrix.sdk.daggerFn }} (Dagger)
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: ${{ matrix.sdk.daggerFn }} --source=.
+          enable-github-summary: true
+
+      - name: Name the leg in its summary
+        if: always()
+        env:
+          SDK: ${{ matrix.sdk.name }}
+          TICKET: ${{ matrix.sdk.ticket }}
+          STATUS: ${{ job.status }}
+        run: |
+          echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+
+  # Swift natively on macOS (ci.native: macos). No SDK reaches it while
+  # ci.pending holds swift; #917 replaces this step with the suite.
+  swift:
+    name: swift (${{ matrix.sdk }})
+    needs: select
+    if: needs.select.outputs.swift != '[]'
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(needs.select.outputs.swift) }}
+    steps:
+      - name: No runner yet
+        env:
+          SDK: ${{ matrix.sdk }}
+        run: |
+          echo "::error::${SDK}: no runner yet — lands in #917"
+          exit 1
+
+  # The labelled source-quality smoke (ci.native: smoke). No SDK reaches it
+  # while ci.pending holds unreal; #916 replaces this step with the smoke.
+  smoke:
+    name: ${{ matrix.sdk }} (source-quality smoke — not a build)
+    needs: select
+    if: needs.select.outputs.smoke != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(needs.select.outputs.smoke) }}
+    steps:
+      - name: No runner yet
+        env:
+          SDK: ${{ matrix.sdk }}
+        run: |
+          echo "::error::${SDK}: no runner yet — lands in #916"
+          exit 1
+
+  # The one required check. It runs whatever happened above, and is green only
+  # when every kind's result matches its selection (conclude-sdk-gates.mjs).
+  sdk-gates:
+    name: sdk gates
+    needs: [select, gate, gate-known-red, swift, smoke]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Conclude (tools/repo-gates/conclude-sdk-gates.mjs)
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node tools/repo-gates/conclude-sdk-gates.mjs
