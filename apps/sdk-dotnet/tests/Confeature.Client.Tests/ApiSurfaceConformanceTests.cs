@@ -345,4 +345,11 @@ public class ApiSurfaceConformanceTests
                     + "drop-in compatibility with ConfigCat's hooks surface).");
         }
     }
+
+    // PROOF (#915, FR-013): a deliberate break. This pull request is closed unmerged.
+    [Fact]
+    public void Proof915TurnsTheDotnetGateRed()
+    {
+        "proof".Should().Be("red");
+    }
 }
