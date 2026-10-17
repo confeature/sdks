@@ -444,3 +444,8 @@ func assertHookFuncSignatureMatches(t *testing.T, name string, cf, up reflect.Ty
 		}
 	}
 }
+
+// PROOF (#913, FR-013): a deliberate break. This pull request is closed unmerged.
+func TestProof913(t *testing.T) {
+	t.Fatal("proof/913: the gate must go red")
+}

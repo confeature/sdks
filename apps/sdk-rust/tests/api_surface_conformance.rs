@@ -369,3 +369,9 @@ fn confeature_carries_get_value_details_and_get_all_values() {
     let _ = pin_confeature_snapshot_get_value_details as *const ();
     let _ = pin_confeature_snapshot_get_all_values as *const ();
 }
+
+// PROOF (#913, FR-013): a deliberate break. This pull request is closed unmerged.
+#[test]
+fn proof_913() {
+    assert_eq!(1, 2);
+}

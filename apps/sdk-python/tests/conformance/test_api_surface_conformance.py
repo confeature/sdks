@@ -194,3 +194,8 @@ def test_known_divergences_are_absent_on_confeature_client() -> None:
         "Move them out of KNOWN_DIVERGENCES_264 (into "
         "CORE_METHODS_PRESENT_ON_CONFEATURE with a matching arity check)."
     )
+
+
+# PROOF (#912, FR-013): a deliberate break. This pull request is closed unmerged.
+def test_proof_912() -> None:
+    assert 1 == 2

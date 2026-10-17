@@ -195,4 +195,10 @@ final class ApiSurfaceConformanceTest extends TestCase
             . 'matching arity check).',
         );
     }
+
+    // PROOF (#912, FR-013): a deliberate break. This pull request is closed unmerged.
+    public function testProof912(): void
+    {
+        self::assertSame(1, 2);
+    }
 }
