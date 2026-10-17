@@ -263,6 +263,16 @@ const KNOWN_DIVERGENCES_264: &[(&str, &str)] = &[
     ),
 ];
 
+// The list itself is the drift-guard contract — at least one entry MUST
+// remain until the #264 follow-on actually lands. Checked at compile time:
+// the table is a constant, so a runtime assert on it is one clippy rejects
+// (const_is_empty) and one that could only ever pass.
+const _: () = assert!(
+    !KNOWN_DIVERGENCES_264.is_empty(),
+    "KNOWN_DIVERGENCES_264 is empty — if the #264 follow-on landed, \
+     the present-method probes MUST also probe `confeature::Client`."
+);
+
 #[test]
 fn known_divergences_264_are_pinned_against_configcat_reference() {
     // Compile-time sanity: every ConfigCat method named in the
@@ -290,13 +300,6 @@ fn known_divergences_264_are_pinned_against_configcat_reference() {
         "the divergence table and the compile-time pin block must stay in lock-step"
     );
 
-    // The list itself is the drift-guard contract — at least one
-    // entry MUST remain until the #264 follow-on actually lands.
-    assert!(
-        !KNOWN_DIVERGENCES_264.is_empty(),
-        "KNOWN_DIVERGENCES_264 is empty — if the #264 follow-on landed, \
-         the present-method probes above MUST also probe `confeature::Client`."
-    );
     for (name, issue) in KNOWN_DIVERGENCES_264 {
         assert!(
             !name.is_empty(),
