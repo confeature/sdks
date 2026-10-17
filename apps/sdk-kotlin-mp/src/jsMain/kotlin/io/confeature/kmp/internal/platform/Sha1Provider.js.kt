@@ -27,19 +27,8 @@ package io.confeature.kmp.internal.platform
  */
 public actual object Sha1Provider {
     public actual fun digest(input: ByteArray): ByteArray {
-        // Pad message: append 0x80, then zeros, then 8-byte big-endian length.
-        val bitLen = input.size.toLong() * 8L
-        val withOne = input.size + 1
-        var paddedLen = withOne
-        while ((paddedLen % 64) != 56) paddedLen++
-        paddedLen += 8
-
-        val padded = ByteArray(paddedLen)
-        input.copyInto(padded)
-        padded[input.size] = 0x80.toByte()
-        for (i in 0 until 8) {
-            padded[paddedLen - 1 - i] = ((bitLen shr (i * 8)) and 0xFFL).toByte()
-        }
+        val padded = pad(input)
+        val paddedLen = padded.size
 
         var h0 = 0x67452301
         var h1 = -0x10325477 // 0xEFCDAB89
@@ -104,8 +93,29 @@ public actual object Sha1Provider {
             off += 64
         }
 
+        return bigEndianBytes(intArrayOf(h0, h1, h2, h3, h4))
+    }
+
+    /** Pad the message: append 0x80, then zeros, then the 8-byte big-endian bit length. */
+    private fun pad(input: ByteArray): ByteArray {
+        val bitLen = input.size.toLong() * 8L
+        val withOne = input.size + 1
+        var paddedLen = withOne
+        while ((paddedLen % 64) != 56) paddedLen++
+        paddedLen += 8
+
+        val padded = ByteArray(paddedLen)
+        input.copyInto(padded)
+        padded[input.size] = 0x80.toByte()
+        for (i in 0 until 8) {
+            padded[paddedLen - 1 - i] = ((bitLen shr (i * 8)) and 0xFFL).toByte()
+        }
+        return padded
+    }
+
+    /** Serialize the five hash words H0..H4 as the 20-byte big-endian digest. */
+    private fun bigEndianBytes(hs: IntArray): ByteArray {
         val out = ByteArray(20)
-        val hs = intArrayOf(h0, h1, h2, h3, h4)
         for (i in 0 until 5) {
             val v = hs[i]
             out[i * 4] = ((v ushr 24) and 0xFF).toByte()

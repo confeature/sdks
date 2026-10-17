@@ -42,22 +42,26 @@ internal class Semver private constructor(
     private fun comparePre(other: Semver): Int {
         val thisHas = this.prerelease.isNotEmpty()
         val otherHas = other.prerelease.isNotEmpty()
-        if (thisHas && !otherHas) return -1
-        if (!thisHas && otherHas) return 1
-        if (!thisHas && !otherHas) return 0
+        return when {
+            thisHas && !otherHas -> -1
+            !thisHas && otherHas -> 1
+            !thisHas -> 0
+            else -> comparePrereleaseIdentifiers(this.prerelease, other.prerelease)
+        }
+    }
 
-        var i = 0
-        while (true) {
-            val a: Any? = if (i < this.prerelease.size) this.prerelease[i] else null
-            val b: Any? = if (i < other.prerelease.size) other.prerelease[i] else null
-            if (a == null && b == null) return 0
-            if (b == null) return 1
-            if (a == null) return -1
-            if (a == b) {
-                i++
-                continue
-            }
-            return compareIdentifiers(a, b)
+    /**
+     * Compare two non-empty pre-release lists identifier by identifier; when one is a prefix of the
+     * other, the longer one ranks higher.
+     */
+    private fun comparePrereleaseIdentifiers(a: List<Any>, b: List<Any>): Int {
+        for (i in 0 until minOf(a.size, b.size)) {
+            if (a[i] != b[i]) return compareIdentifiers(a[i], b[i])
+        }
+        return when {
+            a.size == b.size -> 0
+            a.size > b.size -> 1
+            else -> -1
         }
     }
 
@@ -89,30 +93,32 @@ internal class Semver private constructor(
             val major = m.groupValues[1].toLong()
             val minor = m.groupValues[2].toLong()
             val patch = m.groupValues[3].toLong()
-            if (major > MAX_SAFE_INTEGER || major < 0 ||
-                minor > MAX_SAFE_INTEGER || minor < 0 ||
-                patch > MAX_SAFE_INTEGER || patch < 0
-            ) {
+            if (!isSafeComponent(major) || !isSafeComponent(minor) || !isSafeComponent(patch)) {
                 return null
             }
 
-            val prerelease = ArrayList<Any>()
-            val preGroup = m.groups[4]?.value
-            if (!preGroup.isNullOrEmpty()) {
-                for (id in preGroup.split(".")) {
-                    if (NUMERIC_RE.matches(id)) {
-                        // Guard against overflow / leading-zero numeric ids the way the TS
-                        // numberifier does (range-checked); otherwise keep as a string.
-                        val num = id.toLongOrNull()
-                        if (num != null && num >= 0 && num < MAX_SAFE_INTEGER) {
-                            prerelease.add(num)
-                            continue
-                        }
-                    }
-                    prerelease.add(id)
-                }
-            }
+            val prerelease = parsePrerelease(m.groups[4]?.value)
+            return Semver(canonicalString(major, minor, patch, prerelease), major, minor, patch, prerelease)
+        }
 
+        /** A core component must be a non-negative JS safe integer. */
+        private fun isSafeComponent(value: Long): Boolean = value in 0L..MAX_SAFE_INTEGER
+
+        private fun parsePrerelease(preGroup: String?): List<Any> {
+            if (preGroup.isNullOrEmpty()) return emptyList()
+            return preGroup.split(".").map { prereleaseIdentifier(it) }
+        }
+
+        /**
+         * A numeric identifier becomes a [Long] when in range, guarding against overflow /
+         * leading-zero ids the way the TS numberifier does; otherwise it stays a string.
+         */
+        private fun prereleaseIdentifier(id: String): Any {
+            val num = if (NUMERIC_RE.matches(id)) id.toLongOrNull() else null
+            return if (num != null && num >= 0 && num < MAX_SAFE_INTEGER) num else id
+        }
+
+        private fun canonicalString(major: Long, minor: Long, patch: Long, prerelease: List<Any>): String {
             val canonical = StringBuilder()
             canonical.append(major).append('.').append(minor).append('.').append(patch)
             if (prerelease.isNotEmpty()) {
@@ -122,7 +128,7 @@ internal class Semver private constructor(
                     canonical.append(prerelease[i])
                 }
             }
-            return Semver(canonical.toString(), major, minor, patch, prerelease)
+            return canonical.toString()
         }
 
         /**

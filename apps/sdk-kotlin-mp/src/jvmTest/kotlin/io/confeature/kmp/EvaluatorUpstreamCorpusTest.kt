@@ -236,13 +236,10 @@ class EvaluatorUpstreamCorpusTest {
 
         @Suppress("UNCHECKED_CAST")
         fun loadMatrix(matrix: String): List<MatrixTuple> {
-            val entry = matrixEntry(matrix)
-                ?: throw IllegalStateException("Unknown testmatrix file: $matrix")
+            val entry = matrixEntry(matrix) ?: error("Unknown testmatrix file: $matrix")
             val configAny = contentByKey()[entry.sdkKey]
-            if (configAny !is Map<*, *>) {
-                throw IllegalStateException(
-                    "No config for matrix $matrix (sdkKey ${entry.sdkKey})",
-                )
+            check(configAny is Map<*, *>) {
+                "No config for matrix $matrix (sdkKey ${entry.sdkKey})"
             }
             val config = configAny as Map<String, Any?>
 
@@ -299,12 +296,10 @@ class EvaluatorUpstreamCorpusTest {
             if (sdkKey is String) {
                 var config = contentByKey()[sdkKey]
                 if (config == null) config = evalLogConfigs()[sdkKey]
-                if (config !is Map<*, *>) {
-                    throw IllegalStateException("No config for eval-log sdkKey $sdkKey")
-                }
+                check(config is Map<*, *>) { "No config for eval-log sdkKey $sdkKey" }
                 return config as Map<String, Any?>
             }
-            throw IllegalStateException("Eval-log suite has neither jsonOverride nor sdkKey")
+            error("Eval-log suite has neither jsonOverride nor sdkKey")
         }
 
         @Suppress("UNCHECKED_CAST")
@@ -363,12 +358,10 @@ class EvaluatorUpstreamCorpusTest {
         /** Cast a JSON-decoded eval-log default to the type implied by `t`. */
         fun coerceDefault(def: Any?, settingType: Int?): Any? {
             if (def is Boolean) return def
-            if (settingType != null && settingType == Evaluator.SETTING_TYPE_DOUBLE && def is Number) {
+            if (settingType == Evaluator.SETTING_TYPE_DOUBLE && def is Number) {
                 return def.toDouble()
             }
-            if (settingType != null && settingType == Evaluator.SETTING_TYPE_INT &&
-                def is Number && def !is Boolean
-            ) {
+            if (settingType == Evaluator.SETTING_TYPE_INT && def is Number && def !is Boolean) {
                 return def.toInt()
             }
             return def
@@ -400,7 +393,7 @@ class EvaluatorUpstreamCorpusTest {
 
         fun firstWhere(cases: List<EvalLogTuple>, p: (EvalLogTuple) -> Boolean): EvalLogTuple =
             cases.firstOrNull(p)
-                ?: throw IllegalStateException("No matching case in corpus scenario")
+                ?: error("No matching case in corpus scenario")
 
         // -------------------------------------------------------------------
         // Tiny config-builder helpers for the reconstructed-chain / cycle /
@@ -895,8 +888,7 @@ class EvaluatorUpstreamCorpusTest {
         for (t in tuples) {
             val expectedObj = t["expectedTrace"]
             val scenarioObj = t["scenario"]
-            if (expectedObj !is String || scenarioObj !is String) continue
-            if (!TRACE_SCENARIOS.contains(scenarioObj)) continue
+            if (expectedObj !is String || scenarioObj !is String || !TRACE_SCENARIOS.contains(scenarioObj)) continue
 
             val key = t["key"] as String
 

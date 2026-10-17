@@ -664,12 +664,12 @@ export class Confeature {
     return `${lastLine} (Tier 3 androidTest)`;
   }
 
-  /** Run apps/sdk-kotlin-mp's `jvmTest` (KMP; the Android plugin needs the SDK to configure). */
+  /** Run apps/sdk-kotlin-mp's `check`, minus jsBrowserTest: the image has no browser. */
   @func()
   async kotlinMpTest(source: Directory): Promise<string> {
     const result = await androidSdkContainer(source)
       .withWorkdir("/work/apps/sdk-kotlin-mp")
-      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon jvmTest"])
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check -x jsBrowserTest"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 kotlinMpTest)`;

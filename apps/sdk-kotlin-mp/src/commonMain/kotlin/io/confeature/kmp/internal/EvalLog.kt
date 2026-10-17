@@ -46,7 +46,7 @@ internal object EvalLog {
         when (value) {
             is Boolean -> boolToLogString(value)
             is String -> value
-            is Double, is Float -> Comparators.numberToCanonicalString((value as Number).toDouble())
+            is Double, is Float -> AttributeStrings.numberToCanonicalString((value as Number).toDouble())
             is Number -> value.toString()
             else -> ""
         }
@@ -340,7 +340,7 @@ internal object EvalLog {
         ): EvaluateLogBuilder {
             if (value == null) return appendUserConditionCore(attr, comparator, "")
             val comparatorText = ComparatorMeta.formatUserComparator(comparator)
-            val valueText = Comparators.numberToCanonicalString(value)
+            val valueText = AttributeStrings.numberToCanonicalString(value)
             val iso = if (isDateTime) unixSecondsToIso(value) else null
             return if (iso != null) {
                 append("User." + attr + " " + comparatorText + " '" + valueText + "' (" + iso + " UTC)")
@@ -361,7 +361,7 @@ internal object EvalLog {
                 return appendUserConditionCore(
                     attr,
                     comparator,
-                    Comparators.numberToCanonicalString(numberValue),
+                    AttributeStrings.numberToCanonicalString(numberValue),
                 )
             }
             if (listValue != null && listValue.isNotEmpty()) {

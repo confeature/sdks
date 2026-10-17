@@ -248,29 +248,7 @@ class ParityRulesTest {
      */
     private fun decodeCustomAttribute(v: JsonElement): Any? = when (v) {
         is JsonNull -> null
-        is JsonObject -> {
-            val num = v["\$num"]
-            if (num != null) {
-                require(num is JsonPrimitive && num.isString) {
-                    "non-finite-number wrapper \$num must be a JSON string; got $num"
-                }
-                when (num.content) {
-                    "NaN" -> Double.NaN
-                    "Infinity" -> Double.POSITIVE_INFINITY
-                    "-Infinity" -> Double.NEGATIVE_INFINITY
-                    else -> throw AssertionError(
-                        "unsupported \$num token: ${num.content} (expected NaN/Infinity/-Infinity)",
-                    )
-                }
-            } else {
-                val date = v["\$date"]
-                require(date is JsonPrimitive && !date.isString) {
-                    "unsupported typed custom-attribute object encoding: $v"
-                }
-                date.doubleOrNull
-                    ?: throw AssertionError("Date wrapper \$date must be a JSON number; got $date")
-            }
-        }
+        is JsonObject -> decodeTypedWrapper(v)
         is JsonArray -> v.map { el ->
             (el as? JsonPrimitive)?.takeIf { it.isString }?.content
                 ?: throw AssertionError("typed string-array custom attribute has a non-string element: $el")
@@ -282,6 +260,30 @@ class ParityRulesTest {
                 else -> v.doubleOrNull
                     ?: throw AssertionError("unsupported typed custom-attribute primitive: $v")
             }
+    }
+
+    /** Unwraps a `{"$num": "NaN"|"Infinity"|"-Infinity"}` or `{"$date": n}` typed custom value. */
+    private fun decodeTypedWrapper(v: JsonObject): Double {
+        val num = v["\$num"]
+        if (num != null) {
+            require(num is JsonPrimitive && num.isString) {
+                "non-finite-number wrapper \$num must be a JSON string; got $num"
+            }
+            return when (num.content) {
+                "NaN" -> Double.NaN
+                "Infinity" -> Double.POSITIVE_INFINITY
+                "-Infinity" -> Double.NEGATIVE_INFINITY
+                else -> throw AssertionError(
+                    "unsupported \$num token: ${num.content} (expected NaN/Infinity/-Infinity)",
+                )
+            }
+        }
+        val date = v["\$date"]
+        require(date is JsonPrimitive && !date.isString) {
+            "unsupported typed custom-attribute object encoding: $v"
+        }
+        return date.doubleOrNull
+            ?: throw AssertionError("Date wrapper \$date must be a JSON number; got $date")
     }
 
     /** Recursively decodes a kotlinx JsonElement into Kotlin primitives / List / Map. */

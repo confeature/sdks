@@ -120,7 +120,7 @@ object WorkspaceRoot {
         val el = Json.parseToJsonElement(upstreamText(relativePath))
         val decoded = decodeJsonElement(el)
         return decoded as? Map<String, Any?>
-            ?: throw IllegalStateException("Upstream fixture $relativePath is not a JSON object")
+            ?: error("Upstream fixture $relativePath is not a JSON object")
     }
 
     private fun decodeJsonElement(el: JsonElement?): Any? = when (el) {
