@@ -94,6 +94,17 @@ Its source is in [`apps/cli`](apps/cli).
 - `tools/test-harness-live-contract/`: a local reference server the SDKs' live suites run against.
 - `dagger/`: the containerised test pipeline for every SDK.
 
+## Continuous integration
+
+Every push to `main` and every pull request runs two required checks:
+
+- `pnpm run verify` (`.github/workflows/verify.yml`) runs the repository's own gates and the CLI's suite.
+- `sdk gates` (`.github/workflows/sdk-gates.yml`) runs each SDK's own suite, which includes its API-surface conformance test against the official ConfigCat SDK, the parity corpus and the wire-case corpus. It also runs the SDK's live suite against the local reference origin.
+  - **Linux SDKs** run through their Dagger function.
+  - **Swift** runs natively on macOS.
+  - **Unreal** has no engine on hosted runners, so it gets a labelled source-quality smoke instead of a build.
+  - **Which SDKs run:** a pull request runs only the SDKs it touches, plus the SDKs that depend on them. A push to `main`, and a daily run, judge all 21.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md),

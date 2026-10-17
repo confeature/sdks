@@ -9,8 +9,8 @@
 # It holds nothing: `contents: read`, no environment, no secret, and a
 # checkout that keeps no token. A fork's pull request runs it with the same
 # read-only token, which is why the trigger is `pull_request`, never
-# `pull_request_target` (rule 4). The containerised SDK suites (`pnpm run
-# ready`) stay local and on the release tags (Principle VII).
+# `pull_request_target` (rule 4). Every SDK's own suite, its live suite and
+# the corpora run in sdk-gates.yml on every push and pull request (#793).
 #
 # tools/repo-gates/verify-workflows.mjs rule 13 refuses a tree where this
 # workflow no longer runs `pnpm run verify` and the CLI's deno suite on both
