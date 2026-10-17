@@ -51,8 +51,7 @@
       "name": "dotnet",
       "daggerFn": "dotnet-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#915" }
+      "localGate": false
     },
     {
       "name": "php",
@@ -76,8 +75,7 @@
       "name": "dart",
       "daggerFn": "dart-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#915" }
+      "localGate": false
     },
 
     {
@@ -96,8 +94,7 @@
       "name": "elixir",
       "daggerFn": "elixir-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#915" }
+      "localGate": false
     },
     {
       "name": "cpp",

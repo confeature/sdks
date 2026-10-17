@@ -81,7 +81,8 @@ defmodule Confeature.MixProject do
       source_url: @source_url,
       # The SDK lives in a subdirectory of a monorepo and is tagged
       # sdk-elixir-v<version> by the release workflow (sdk-publish.yml).
-      source_url_pattern: "#{@source_url}/blob/sdk-elixir-v#{@version}/apps/sdk-elixir/%{path}#L%{line}",
+      source_url_pattern:
+        "#{@source_url}/blob/sdk-elixir-v#{@version}/apps/sdk-elixir/%{path}#L%{line}",
       extras: ["README.md"]
     ]
   end

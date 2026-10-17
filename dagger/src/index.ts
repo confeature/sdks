@@ -316,6 +316,48 @@ function javaToolchain(source: Directory): Container {
     .withWorkdir("/work/apps/sdk-java");
 }
 
+function dotnetToolchain(source: Directory): Container {
+  // The suite targets net8.0 and net10.0: the 8.0 runtime is copied in.
+  const net8Runtime = dag
+    .container()
+    .from("mcr.microsoft.com/dotnet/runtime:8.0.32")
+    .directory("/usr/share/dotnet/shared/Microsoft.NETCore.App");
+  return dag
+    .container()
+    .from("mcr.microsoft.com/dotnet/sdk:10.0.400")
+    .withDirectory("/usr/share/dotnet/shared/Microsoft.NETCore.App", net8Runtime)
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+    .withEnvVariable("DOTNET_NOLOGO", "1")
+    .withEnvVariable("NUGET_PACKAGES", "/cache/nuget")
+    .withMountedCache("/cache/nuget", dag.cacheVolume("nuget-cache"))
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-dotnet");
+}
+
+function dartToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("dart:3.11.6")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("PUB_CACHE", "/cache/pub")
+    .withMountedCache("/cache/pub", dag.cacheVolume("pub-cache"))
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-dart");
+}
+
+function elixirToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("elixir:1.17.3-otp-27")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("MIX_ENV", "test")
+    .withMountedCache("/work/apps/sdk-elixir/deps", dag.cacheVolume("mix-deps"))
+    .withMountedCache("/work/apps/sdk-elixir/_build", dag.cacheVolume("mix-build"))
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-elixir");
+}
+
 @object()
 export class Confeature {
   /**
@@ -495,22 +537,16 @@ export class Confeature {
    */
   @func()
   async dotnetTest(source: Directory): Promise<string> {
-    const net8Runtime = dag
-      .container()
-      .from("mcr.microsoft.com/dotnet/runtime:8.0")
-      .directory("/usr/share/dotnet/shared/Microsoft.NETCore.App");
-    const result = await dag
-      .container()
-      .from("mcr.microsoft.com/dotnet/sdk:10.0")
-      .withDirectory("/usr/share/dotnet/shared/Microsoft.NETCore.App", net8Runtime)
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
-      .withEnvVariable("DOTNET_NOLOGO", "1")
-      .withEnvVariable("NUGET_PACKAGES", "/cache/nuget")
-      .withMountedCache("/cache/nuget", dag.cacheVolume("nuget-cache"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-dotnet")
-      .withExec(["bash", "-eu", "-c", "dotnet test --configuration Release"])
+    // TreatWarningsAsErrors (Directory.Build.props) makes the build the
+    // analyzer bar; `dotnet format --verify-no-changes` holds the formatting
+    // (#793 FR-007, #915: no drift is hidden by an unchecked format step).
+    const result = await dotnetToolchain(source)
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "dotnet format --verify-no-changes && dotnet test --configuration Release",
+      ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 2 dotnetTest)`;
@@ -579,15 +615,15 @@ export class Confeature {
   /** Run apps/sdk-dart's `dart analyze && dart test` on the stable Dart SDK. */
   @func()
   async dartTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("dart:stable")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("PUB_CACHE", "/cache/pub")
-      .withMountedCache("/cache/pub", dag.cacheVolume("pub-cache"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-dart")
-      .withExec(["bash", "-eu", "-c", "dart pub get && dart analyze && dart test"])
+    // `dart analyze --fatal-infos` is the SDK's declared bar
+    // (.claude/agents/sdk-dart.md rule 8); `dart format` holds the formatting.
+    const result = await dartToolchain(source)
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "dart pub get && dart format --output=none --set-exit-if-changed . && dart analyze --fatal-infos && dart test",
+      ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 2 dartTest)`;
@@ -609,23 +645,17 @@ export class Confeature {
   /** Run apps/sdk-elixir's `mix test` on Elixir 1.17 / OTP 27. */
   @func()
   async elixirTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("elixir:1.17")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("MIX_ENV", "test")
-      .withMountedCache("/work/apps/sdk-elixir/deps", dag.cacheVolume("mix-deps"))
-      .withMountedCache("/work/apps/sdk-elixir/_build", dag.cacheVolume("mix-build"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-elixir")
+    const result = await elixirToolchain(source)
       .withExec([
         "bash",
         "-eu",
         "-c",
-        // The prod compile is what a customer's `mix deps.compile` does: the
-        // suite alone ran under MIX_ENV=test, where a test-only transitive
-        // dependency (TypedStruct) hid a missing one (#805).
-        "mix local.hex --force && mix local.rebar --force && mix deps.get && mix test && MIX_ENV=prod mix compile --warnings-as-errors",
+        // `mix credo --strict` is the SDK's declared bar
+        // (.claude/agents/sdk-elixir.md rule 9); `mix format` holds the
+        // formatting. The prod compile is what a customer's `mix deps.compile`
+        // does: the suite alone ran under MIX_ENV=test, where a test-only
+        // transitive dependency (TypedStruct) hid a missing one (#805).
+        "mix local.hex --force && mix local.rebar --force && mix deps.get && mix format --check-formatted && mix credo --strict && mix test && MIX_ENV=prod mix compile --warnings-as-errors",
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
