@@ -358,6 +358,26 @@ function elixirToolchain(source: Directory): Container {
     .withWorkdir("/work/apps/sdk-elixir");
 }
 
+function cppToolchain(source: Directory): Container {
+  return (
+    dag
+      .container()
+      .from("debian:12.13")
+      .withEnvVariable("CI", "true")
+      // FetchContent pulls nlohmann/json + Catch2 over the network at configure
+      // time; cmake-built artefacts are cached under /cache/cpp-build.
+      .withMountedCache("/cache/cpp-build", dag.cacheVolume("cpp-build"))
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*",
+      ])
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-cpp")
+  );
+}
+
 @object()
 export class Confeature {
   /**
@@ -665,21 +685,8 @@ export class Confeature {
   /** Build + run apps/sdk-cpp's Catch2 suite (C++17, libcurl + OpenSSL 3, FetchContent). */
   @func()
   async cppTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("debian:bookworm")
-      .withEnvVariable("CI", "true")
-      // FetchContent pulls nlohmann/json + Catch2 over the network at configure
-      // time; cmake-built artefacts are cached under /cache/cpp-build.
-      .withMountedCache("/cache/cpp-build", dag.cacheVolume("cpp-build"))
-      .withExec([
-        "bash",
-        "-eu",
-        "-c",
-        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*",
-      ])
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-cpp")
+    // clang-tidy and clang-format, the SDK's declared bar, are #839.
+    const result = await cppToolchain(source)
       .withExec([
         "bash",
         "-eu",

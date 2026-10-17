@@ -100,8 +100,7 @@
       "name": "cpp",
       "daggerFn": "cpp-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#916" }
+      "localGate": false
     },
 
     {
@@ -116,7 +115,7 @@
       "daggerFn": null,
       "status": "exempt",
       "reason": "UE CI impractical in a standard Dagger container (size/license/GPU)",
-      "ci": { "native": "smoke", "pending": "#916" }
+      "ci": { "native": "smoke" }
     }
   ],
   "tagFormat": "sdk-{name}-v{version}",

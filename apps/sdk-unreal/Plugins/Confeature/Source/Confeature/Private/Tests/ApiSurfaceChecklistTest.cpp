@@ -31,6 +31,10 @@
 // loudly the day the gap closes.
 //
 // Spec 074 / Issue #261 / FR-006 / FR-007 / FR-020.
+//
+// Anchored 2026-05-23: the cross-SDK ConfigCat surface as the federation's
+// SDKs exposed it that day, when this checklist was derived (constitution,
+// Principle II: a documented checklist cites its derivation and its date).
 
 #include "Misc/AutomationTest.h"
 #include "UObject/Class.h"

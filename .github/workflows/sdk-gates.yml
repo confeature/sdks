@@ -275,8 +275,10 @@ jobs:
           echo "::error::${SDK}: no runner yet — lands in #917"
           exit 1
 
-  # The labelled source-quality smoke (ci.native: smoke). No SDK reaches it
-  # while ci.pending holds unreal; #916 replaces this step with the smoke.
+  # The labelled source-quality smoke (ci.native: smoke): NOT A BUILD. No
+  # hosted runner has an Unreal Engine, so apps/sdk-<name>/scripts/
+  # source-smoke.mjs checks what the source alone can show, and its summary's
+  # first line says what it is. Its own tests run first.
   smoke:
     name: ${{ matrix.sdk }} (source-quality smoke — not a build)
     needs: select
@@ -288,12 +290,26 @@ jobs:
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.smoke) }}
     steps:
-      - name: No runner yet
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Test the smoke itself
         env:
           SDK: ${{ matrix.sdk }}
-        run: |
-          echo "::error::${SDK}: no runner yet — lands in #916"
-          exit 1
+        run: node --test "apps/sdk-${SDK}/scripts/source-smoke.test.mjs"
+
+      - name: Run the source-quality smoke
+        env:
+          SDK: ${{ matrix.sdk }}
+        run: node "apps/sdk-${SDK}/scripts/source-smoke.mjs"
 
   # The one required check. It runs whatever happened above, and is green only
   # when every kind's result matches its selection (conclude-sdk-gates.mjs).
