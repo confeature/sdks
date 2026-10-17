@@ -2,7 +2,7 @@
  * Confeature Dagger module — Phase 3 (4 platform-majors + wire-cases).
  *
  * Phase 2 (#201, merged 2026-05-27) introduced `jsTest()` running sdk-node's
- * vitest suite inside `node:22-bookworm-slim`. Phase 3 (#202) widens this to:
+ * vitest suite inside `node:22.23.3-bookworm-slim`. Phase 3 (#202) widens this to:
  *
  *   - `jsTest`        sdk-node           (Phase 2, preserved verbatim)
  *   - `browserTest`   sdk-browser-js     (NEW — shares the node container)
@@ -34,7 +34,7 @@ import { dag, Container, Directory, Platform, object, func } from "@dagger.io/da
 const BUDGET_MS = 300_000;
 
 /**
- * Build the shared JS-family container (node:22-bookworm-slim + pnpm caches +
+ * Build the shared JS-family container (node:22.23.3-bookworm-slim + pnpm caches +
  * frozen-lockfile install). Used by `jsTest`, `browserTest`, and `wireCases`.
  *
  * The Container is a Dagger lazy graph node — adding more `.withExec(...)` to
@@ -50,7 +50,7 @@ function nodeContainer(source: Directory): Container {
   return (
     dag
       .container()
-      .from("node:22-bookworm-slim")
+      .from("node:22.23.3-bookworm-slim")
       .withEnvVariable("CI", "true")
       .withExec([
         "bash",
@@ -188,7 +188,7 @@ async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> 
 @object()
 export class Confeature {
   /**
-   * Run apps/sdk-node's vitest suite inside node:22-bookworm-slim.
+   * Run apps/sdk-node's vitest suite inside node:22.23.3-bookworm-slim.
    *
    * Behaviour preserved verbatim from Phase 2 — the suffix string still reads
    * "(Phase 2 jsTest)" to make the contract diff obvious during review.

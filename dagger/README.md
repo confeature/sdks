@@ -53,27 +53,28 @@ break `pnpm -r` runs.
 
 ## Container image policy
 
-Images are pinned to `<lang>:<major>-<os-family>` tags only — e.g.
-`node:22-bookworm-slim`, `python:3.13-slim-bookworm`, `golang:1.23-bookworm`.
-**NOT** `node:latest`, **NOT** bare `node:22` (which tracks the latest 22.x
-re-tag). The `<major>-<os-family>` form gives reproducible-enough builds
-for a local-first pipeline while still pulling security fixes inside the
-major. Pin bumps require an explicit PR + manual smoke verify on the
-operator's machine — do not auto-bump via Dependabot. See research R18
-for the rationale.
+Images are pinned to an **exact version** tag, never a floating one (#793 FR-008):
+`node:22.23.3-bookworm-slim`, not `node:22-bookworm-slim`, `node:22` or `node:latest`.
+Since #793 every push to `main` runs these functions on GitHub-hosted runners
+(`.github/workflows/sdk-gates.yml`), so a re-tag under a floating name would
+change a suite's toolchain between two runs of the same commit. A pin bump is
+an explicit commit, judged by that run. Pinning by digest is #868.
+
+Each family child of #793 moves its images to exact tags. Until it lands, the
+images it owns keep their `<major>-<os-family>` tag, as listed below.
 
 The bookworm-slim base (glibc) is required because `@cloudflare/workerd`
 (transitive dep of the live-contract harness's `wrangler` / `miniflare`)
 has no musl-compatible binary on arm64. See research R2 for the alpine →
 bookworm-slim swap.
 
-| Function      | Image                       |
-| ------------- | --------------------------- |
-| `jsTest`      | `node:22-bookworm-slim`     |
-| `browserTest` | `node:22-bookworm-slim`     |
-| `wireCases`   | `node:22-bookworm-slim`     |
-| `pythonTest`  | `python:3.13-slim-bookworm` |
-| `goTest`      | `golang:1.23-bookworm`      |
+| Function      | Image                        |
+| ------------- | ---------------------------- |
+| `jsTest`      | `node:22.23.3-bookworm-slim` |
+| `browserTest` | `node:22.23.3-bookworm-slim` |
+| `wireCases`   | `node:22.23.3-bookworm-slim` |
+| `pythonTest`  | `python:3.13-slim-bookworm`  |
+| `goTest`      | `golang:1.23-bookworm`       |
 
 ## Cache volumes (Phase 3 inventory)
 

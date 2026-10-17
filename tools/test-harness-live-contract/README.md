@@ -110,7 +110,7 @@ pnpm dagger:live-contract   # this gate in isolation (via tools/dagger-call/dagg
 pnpm dagger:all             # full pre-push gate, including liveContract
 ```
 
-`liveContract` reuses the shared `node:22-bookworm-slim` install layer and, in
+`liveContract` reuses the shared `node:22.23.3-bookworm-slim` install layer and, in
 order: (1) builds this harness (so its `dist/` resolves for runtime importers),
 (2) runs the harness self-test
 `pnpm --filter @confeature/test-harness-live-contract test:live`

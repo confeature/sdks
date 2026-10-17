@@ -13,8 +13,7 @@
     {
       "name": "browser-js",
       "daggerFn": "browser-test",
-      "status": "covered",
-      "ci": { "pending": "#911" }
+      "status": "covered"
     },
     {
       "name": "python",
@@ -29,20 +28,18 @@
     },
     { "name": "go", "daggerFn": "go-test", "status": "covered", "ci": { "pending": "#913" } },
 
-    { "name": "deno", "daggerFn": "deno-test", "status": "covered", "ci": { "pending": "#911" } },
-    { "name": "bun", "daggerFn": "bun-test", "status": "covered", "ci": { "pending": "#911" } },
+    { "name": "deno", "daggerFn": "deno-test", "status": "covered" },
+    { "name": "bun", "daggerFn": "bun-test", "status": "covered" },
     {
       "name": "angular",
       "daggerFn": "angular-test",
-      "status": "covered",
-      "ci": { "pending": "#911" }
+      "status": "covered"
     },
-    { "name": "react", "daggerFn": "react-test", "status": "covered", "ci": { "pending": "#911" } },
+    { "name": "react", "daggerFn": "react-test", "status": "covered" },
     {
       "name": "cloudflare-worker",
       "daggerFn": "cloudflare-worker-test",
-      "status": "covered",
-      "ci": { "pending": "#911" }
+      "status": "covered"
     },
 
     {
