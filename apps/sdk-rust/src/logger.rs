@@ -55,22 +55,22 @@ impl Default for LogFacadeLogger {
 impl Logger for LogFacadeLogger {
     fn error(&self, message: &str) {
         if self.level.allows(LogLevel::Error) {
-            log::error!(target: "confeature", "{}", message);
+            log::error!(target: "confeature", "{message}");
         }
     }
     fn warning(&self, message: &str) {
         if self.level.allows(LogLevel::Warning) {
-            log::warn!(target: "confeature", "{}", message);
+            log::warn!(target: "confeature", "{message}");
         }
     }
     fn info(&self, message: &str) {
         if self.level.allows(LogLevel::Info) {
-            log::info!(target: "confeature", "{}", message);
+            log::info!(target: "confeature", "{message}");
         }
     }
     fn debug(&self, message: &str) {
         if self.level.allows(LogLevel::Debug) {
-            log::debug!(target: "confeature", "{}", message);
+            log::debug!(target: "confeature", "{message}");
         }
     }
 }
