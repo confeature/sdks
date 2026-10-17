@@ -198,4 +198,4 @@ describe("API-surface conformance vs configcat-node (#264)", () => {
 });
 
 // PROOF (#910, FR-013): a deliberate break. This pull request is closed unmerged.
-it("proof/910: the gate must go red", () => expect(1).toBe(2));
+test("proof/910: the gate must go red", () => expect(1).toBe(2));
