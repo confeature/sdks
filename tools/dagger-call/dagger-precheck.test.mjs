@@ -13,19 +13,18 @@
 import { spawnSync } from "node:child_process";
 import {
   accessSync,
-  chmodSync,
   constants,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeProgram, writeWrapper } from "../lib/sandbox-bin.mjs";
 
 const SCRIPT = resolve(fileURLToPath(import.meta.url), "../../../scripts/dagger-precheck.sh");
 
@@ -70,12 +69,14 @@ beforeEach(() => {
   mkdirSync(join(root, "dagger"));
   mkdirSync(join(root, "bin"));
   copyFileSync(SCRIPT, join(root, "scripts", "dagger-precheck.sh"));
-  symlinkSync(process.execPath, join(root, "bin", "node"));
-  for (const tool of TOOLS) symlinkSync(host(tool), join(root, "bin", tool));
-  writeFileSync(join(root, "bin", "dagger"), DAGGER);
-  writeFileSync(join(root, "bin", "docker"), DOCKER);
-  chmodSync(join(root, "bin", "dagger"), 0o755);
-  chmodSync(join(root, "bin", "docker"), 0o755);
+  // Exec wrappers, never links, and O_EXCL writes under the tmpdir only: a
+  // stub written over a link to a host program replaced the machine's npm on
+  // 2026-10-16 (#932). A host path is only ever a wrapper's exec target.
+  const bin = join(root, "bin");
+  writeWrapper(bin, "node", process.execPath, BASH);
+  for (const tool of TOOLS) writeWrapper(bin, tool, host(tool), BASH);
+  writeProgram(bin, "dagger", DAGGER.replace(/^#!.*\n/, ""), "/usr/bin/env bash");
+  writeProgram(bin, "docker", DOCKER.replace(/^#!.*\n/, ""), "/usr/bin/env bash");
 });
 
 afterEach(() => {

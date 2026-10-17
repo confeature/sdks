@@ -23,9 +23,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -35,9 +35,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { writeProgram, writeWrapper } from "../lib/sandbox-bin.mjs";
 import { ENVIRONMENT_COMMANDS, declaredSecrets, referenceProblem } from "./verify-workflows.mjs";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -126,12 +127,13 @@ function resolveEnv({ env, doc, jobId }, table) {
   return out;
 }
 
-/** Write `tools` (name → bash body) into a fresh bin directory (`dir`, or a test's scratch). */
+/**
+ * Write `tools` (name → bash body) into a bin directory (`dir`, or a fresh
+ * scratch). Through sandbox-bin only (#932): an existing entry is an error,
+ * never overwritten, and a target outside the tmpdir is refused.
+ */
 function bin(tools, dir = scratch()) {
-  for (const [name, body] of Object.entries(tools)) {
-    writeFileSync(join(dir, name), `#!${BASH}\n${String(body)}\n`);
-    chmodSync(join(dir, name), 0o755);
-  }
+  for (const [name, body] of Object.entries(tools)) writeProgram(dir, name, body, BASH);
   return dir;
 }
 /** The sha256 of a string, hex. */
@@ -174,28 +176,30 @@ const which = (tool) =>
   spawnSync("/bin/sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
 
 /**
- * PATH for one block: a scratch bin holding exactly `tools` (the job's
- * ENVIRONMENT_COMMANDS plus the extras a test names for an exception script)
- * as links to the real programs, every NETWORK program as a stub, and nothing
- * of the process PATH. The runner is Ubuntu, whose sha256sum is GNU's; on
- * macOS only, `shasum -a 256` (same --check, --strict, --quiet) stands in.
+ * PATH for one block: `stubs:hosts`, two scratch dirs and nothing of the
+ * process PATH. `hosts` holds exactly `tools` (the job's ENVIRONMENT_COMMANDS
+ * plus the extras a test names for an exception script) as `exec <absolute
+ * path>` wrappers, never links: on 2026-10-16 a stub written over a link to
+ * the real npm replaced the machine's npm (#932). `stubs` holds every NETWORK
+ * program as a fail-closed stub, plus the test's own. The runner is Ubuntu,
+ * whose sha256sum is GNU's; on macOS only, `shasum -a 256` (same --check,
+ * --strict, --quiet) stands in. A `which` path is only ever an exec target.
  */
 function toolPath(tools, stubs = {}) {
-  const dir = scratch();
+  const hosts = scratch();
   for (const t of new Set(tools)) {
     if (BUILTINS.has(t) || NETWORK.includes(t) || Object.hasOwn(stubs, t)) continue;
     if (t === "sha256sum" && process.platform === "darwin") {
-      writeFileSync(join(dir, t), `#!${BASH}\nexec ${which("shasum")} -a 256 "$@"\n`);
-      chmodSync(join(dir, t), 0o755);
+      const shasum = which("shasum");
+      writeProgram(hosts, t, `exec '${shasum}' -a 256 "$@"`, BASH);
       continue;
     }
     const real = which(t);
     if (real === "") throw new Error(`no ${String(t)} on this machine`);
-    symlinkSync(real, join(dir, t));
+    writeWrapper(hosts, t, real, BASH);
   }
   const all = Object.fromEntries(NETWORK.map((n) => [n, n === "curl" ? CURL : FAIL_CLOSED(n)]));
-  bin({ ...all, ...stubs }, dir);
-  return dir;
+  return `${bin({ ...all, ...stubs })}${delimiter}${hosts}`;
 }
 
 /**
@@ -1114,4 +1118,43 @@ describe("the fixture git ignores a parent repository's location variables (roun
       }
     },
   );
+});
+
+// #932: on 2026-10-16 bin() wrote the npm stub through toolPath()'s link to
+// the real npm and replaced the machine's npm-cli.js. Every probe below runs
+// on a decoy in a scratch dir, never on a host file.
+describe("the sandbox bin never writes through to a host file (#932)", () => {
+  it("bin() over a link of the same name throws, and the decoy behind it is intact", () => {
+    const decoy = join(scratch(), "npm-cli.js");
+    writeFileSync(decoy, "the real npm\n");
+    const dir = scratch();
+    symlinkSync(decoy, join(dir, "npm"));
+    // MUTATION: write with writeFileSync (no "wx") and the decoy becomes the stub.
+    expect(() => bin({ npm: FAIL_CLOSED("npm") }, dir)).toThrow();
+    expect(readFileSync(decoy, "utf8")).toBe("the real npm\n");
+  });
+
+  it("bin() refuses a target that resolves outside the tmpdir", () => {
+    const dir = scratch();
+    symlinkSync(join(ROOT, "package.json"), join(dir, "x"));
+    const before = readFileSync(join(ROOT, "package.json"), "utf8");
+    expect(() => bin({ x: "exit 0" }, dir)).toThrow(/outside/);
+    expect(readFileSync(join(ROOT, "package.json"), "utf8")).toBe(before);
+  });
+
+  it("toolPath() puts no link in the sandbox: host programs are exec wrappers, stubs a separate dir", () => {
+    const PATH = toolPath(["git", "grep", "sed"], { gh: "exit 0" });
+    const [stubs, hosts] = PATH.split(delimiter);
+    expect(stubs).not.toBe(hosts);
+    for (const d of [stubs, hosts])
+      for (const f of readdirSync(d)) expect(lstatSync(join(d, f)).isSymbolicLink(), f).toBe(false);
+    expect(readdirSync(stubs)).toContain("npm");
+    expect(readdirSync(hosts)).not.toContain("npm");
+    expect(readFileSync(join(hosts, "git"), "utf8")).toMatch(/^#!.*\nexec '\/.*git' "\$@"\n$/);
+  });
+
+  it("a wrapper names an absolute host program, never a bare word", () => {
+    expect(() => writeWrapper(scratch(), "git", "git", BASH)).toThrow(/no host program/);
+    expect(() => writeProgram(scratch(), "../escape", "exit 0", BASH)).toThrow(/not a file name/);
+  });
 });
