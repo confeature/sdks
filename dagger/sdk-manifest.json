@@ -23,8 +23,7 @@
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
         "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py",
         "toolchain": "uv"
-      },
-      "ci": { "pending": "#912" }
+      }
     },
     { "name": "go", "daggerFn": "go-test", "status": "covered", "ci": { "pending": "#913" } },
 
@@ -60,15 +59,13 @@
       "name": "php",
       "daggerFn": "php-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#912" }
+      "localGate": false
     },
     {
       "name": "ruby",
       "daggerFn": "ruby-test",
       "status": "covered",
-      "localGate": false,
-      "ci": { "pending": "#912" }
+      "localGate": false
     },
     {
       "name": "rust",

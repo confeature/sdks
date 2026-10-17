@@ -185,6 +185,87 @@ async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> 
   return runner;
 }
 
+/**
+ * Each native SDK's toolchain, with the SDK's directory as working directory:
+ * the one definition of it, shared by that SDK's test function and its live
+ * suite (#793 FR-007, FR-015). Every image is an exact version tag (FR-008).
+ */
+function pythonToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("python:3.13.16-slim-bookworm")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("UV_INSTALL_VERSION", "0.4.30")
+    .withExec([
+      "bash",
+      "-c",
+      "apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null && rm -rf /var/lib/apt/lists/*",
+    ])
+    .withMountedCache("/root/.cache/uv", dag.cacheVolume("uv-cache"))
+    .withMountedCache("/root/.local/share/uv/python", dag.cacheVolume("uv-python"))
+    .withExec([
+      "bash",
+      "-euo",
+      "pipefail",
+      "-c",
+      // uv 0.4.x installs to $CARGO_HOME/bin (defaults to $HOME/.cargo/bin).
+      // We pin install location via CARGO_HOME so the subsequent PATH update
+      // resolves the binary deterministically across uv releases.
+      //
+      // `-euo pipefail` is load-bearing: without `pipefail`, a curl failure
+      // (DNS / 502 / network outage) before any bytes hit stdout leaves
+      // `sh` receiving empty input and exiting 0 — uv would be silently
+      // absent and the subsequent `uv sync` would fail with the opaque
+      // "uv: command not found" rather than surfacing the actual download
+      // failure here.
+      "CARGO_HOME=/root/.cargo curl -LsSf https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh | sh",
+    ])
+    .withEnvVariable(
+      "PATH",
+      "/root/.cargo/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    )
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-python");
+}
+
+function rubyToolchain(source: Directory): Container {
+  return dag
+    .container()
+    .from("ruby:3.3.12-bookworm")
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("BUNDLE_PATH", "/cache/bundle")
+    .withMountedCache("/cache/bundle", dag.cacheVolume("bundle-cache"))
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work/apps/sdk-ruby");
+}
+
+function phpToolchain(source: Directory): Container {
+  // composer binary copied from the official image (no curl-install needed).
+  const composerBin = dag.container().from("composer:2.9.8").file("/usr/bin/composer");
+  return (
+    dag
+      .container()
+      .from("php:8.3.35-cli-bookworm")
+      .withEnvVariable("CI", "true")
+      .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
+      .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
+      // git + unzip for composer; libonig/libxml/libzip for the
+      // mbstring/dom/xml/zip extensions phpunit 10 requires; pcov (built via
+      // $PHPIZE_DEPS) is the code-coverage driver — without it phpunit emits a
+      // "No code coverage driver available" warning and exits 1 even though the
+      // suite passes.
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        'apt-get update >/dev/null && apt-get install -y --no-install-recommends git unzip libonig-dev libxml2-dev libzip-dev $PHPIZE_DEPS >/dev/null && docker-php-ext-install -j"$(nproc)" mbstring dom xml zip >/dev/null && pecl install pcov >/dev/null && docker-php-ext-enable pcov && rm -rf /var/lib/apt/lists/*',
+      ])
+      .withFile("/usr/local/bin/composer", composerBin)
+      .withMountedDirectory("/work", source)
+      .withWorkdir("/work/apps/sdk-php")
+  );
+}
+
 @object()
 export class Confeature {
   /**
@@ -394,33 +475,14 @@ export class Confeature {
   /** Run apps/sdk-php's composer `test` (phpunit) on PHP 8.3 + composer. */
   @func()
   async phpTest(source: Directory): Promise<string> {
-    // composer binary copied from the official image (no curl-install needed).
-    const composerBin = dag.container().from("composer:2").file("/usr/bin/composer");
-    const result = await dag
-      .container()
-      .from("php:8.3-cli")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
-      .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
-      // git + unzip for composer; libonig/libxml/libzip for the
-      // mbstring/dom/xml/zip extensions phpunit 10 requires; pcov (built via
-      // $PHPIZE_DEPS) is the code-coverage driver — without it phpunit emits a
-      // "No code coverage driver available" warning and exits 1 even though the
-      // suite passes.
+    // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar
+    // (.claude/agents/sdk-php.md rule 9): zero offenses (#793 FR-007).
+    const result = await phpToolchain(source)
       .withExec([
         "bash",
         "-eu",
         "-c",
-        'apt-get update >/dev/null && apt-get install -y --no-install-recommends git unzip libonig-dev libxml2-dev libzip-dev $PHPIZE_DEPS >/dev/null && docker-php-ext-install -j"$(nproc)" mbstring dom xml zip >/dev/null && pecl install pcov >/dev/null && docker-php-ext-enable pcov && rm -rf /var/lib/apt/lists/*',
-      ])
-      .withFile("/usr/local/bin/composer", composerBin)
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-php")
-      .withExec([
-        "bash",
-        "-eu",
-        "-c",
-        "composer install --no-interaction --no-progress && composer test",
+        "composer install --no-interaction --no-progress && composer test && composer lint",
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -430,14 +492,8 @@ export class Confeature {
   /** Run apps/sdk-ruby's `rake` default (rubocop + rspec) on Ruby 3.3. */
   @func()
   async rubyTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("ruby:3.3")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("BUNDLE_PATH", "/cache/bundle")
-      .withMountedCache("/cache/bundle", dag.cacheVolume("bundle-cache"))
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-ruby")
+    // The Rakefile's default task is rubocop + spec: the SDK's merge bar.
+    const result = await rubyToolchain(source)
       .withExec(["bash", "-eu", "-c", "bundle install && bundle exec rake"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -607,41 +663,7 @@ export class Confeature {
    */
   @func()
   async pythonTest(source: Directory): Promise<string> {
-    const result = await dag
-      .container()
-      .from("python:3.13-slim-bookworm")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("UV_INSTALL_VERSION", "0.4.30")
-      .withExec([
-        "bash",
-        "-c",
-        "apt-get update >/dev/null && apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null && rm -rf /var/lib/apt/lists/*",
-      ])
-      .withMountedCache("/root/.cache/uv", dag.cacheVolume("uv-cache"))
-      .withMountedCache("/root/.local/share/uv/python", dag.cacheVolume("uv-python"))
-      .withExec([
-        "bash",
-        "-euo",
-        "pipefail",
-        "-c",
-        // uv 0.4.x installs to $CARGO_HOME/bin (defaults to $HOME/.cargo/bin).
-        // We pin install location via CARGO_HOME so the subsequent PATH update
-        // resolves the binary deterministically across uv releases.
-        //
-        // `-euo pipefail` is load-bearing: without `pipefail`, a curl failure
-        // (DNS / 502 / network outage) before any bytes hit stdout leaves
-        // `sh` receiving empty input and exiting 0 — uv would be silently
-        // absent and the subsequent `uv sync` would fail with the opaque
-        // "uv: command not found" rather than surfacing the actual download
-        // failure here.
-        "CARGO_HOME=/root/.cargo curl -LsSf https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh | sh",
-      ])
-      .withEnvVariable(
-        "PATH",
-        "/root/.cargo/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-      )
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-python")
+    const result = await pythonToolchain(source)
       .withExec([
         "bash",
         "-eu",
