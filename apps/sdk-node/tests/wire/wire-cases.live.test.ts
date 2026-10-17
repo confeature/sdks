@@ -144,3 +144,8 @@ describe.skipIf(!LIVE)("sdk-node live wire-cases against the harness (#783)", ()
     }
   });
 });
+
+// PROOF (#918, FR-013): a deliberately wrong live expectation. This pull request is closed unmerged.
+test.skipIf(!LIVE)("proof/918 turns the node live step red", () => {
+  expect(HARNESS_URL).toBe("proof/918");
+});

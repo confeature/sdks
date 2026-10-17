@@ -141,3 +141,8 @@ def test_unseeded_key_reaches_the_worker_and_reports_invalid_sdk_key() -> None:
         fetcher.close()
     assert result.status == "failed"
     assert python_error_to_class(result.error) == "invalidSdkKey", result.error
+
+
+# PROOF (#918, FR-013): a deliberately wrong live expectation. This pull request is closed unmerged.
+def test_proof_918() -> None:
+    assert os.environ.get("LIVE_HARNESS_URL", "") == "proof/918"
