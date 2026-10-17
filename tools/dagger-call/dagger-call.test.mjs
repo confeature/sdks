@@ -252,8 +252,24 @@ describe("arguments", () => {
     [["--timeout", "0", "js-test"]],
     [["--timeout", "x", "js-test"]],
     [["--bogus", "js-test"]],
+    // Function arguments (#918) are `--<flag> <value>` pairs of plain names.
+    [["live-suite", "--sdk"]],
+    [["live-suite", "--sdk", "Bad_Name"]],
+    [["live-suite", "--sdk", "$(id)"]],
+    [["live-suite", "--Sdk", "node"]],
+    [["live-suite", "--sdk=node"]],
+    // The snapshot is the wrapper's to hand over, never the caller's.
+    [["live-suite", "--source", "node"]],
   ])("refuses %j with 2, without calling dagger", async (args) => {
     expect((await run(args, "exit:0")).code).toBe(2);
     expect(existsSync(join(stubDir, "args"))).toBe(false);
+  });
+
+  it("hands a function's arguments to dagger after the function, before --source", async () => {
+    const { code } = await run(["--timeout", "60", "live-suite", "--sdk", "node"], "exit:0");
+    expect(code).toBe(0);
+    expect(readFileSync(join(stubDir, "args"), "utf-8")).toMatch(
+      /^call\n-m\n\.\/dagger\nlive-suite\n--sdk\nnode\n--source=/,
+    );
   });
 });

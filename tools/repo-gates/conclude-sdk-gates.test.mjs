@@ -41,8 +41,8 @@ const needs = (sel = {}, results = {}, selectResult = "success") => ({
     KINDS.map((k) => [k.job, { result: results[k.job] ?? "skipped", outputs: {} }]),
   ),
 });
-const NODE = { name: "node", daggerFn: "js-test" };
-const RUST_RED = { name: "rust", daggerFn: "rust-test", ticket: "#806" };
+const NODE = { name: "node", daggerFn: "js-test", live: true };
+const RUST_RED = { name: "rust", daggerFn: "rust-test", live: false, ticket: "#806" };
 /** One selected SDK for each kind, the shape its output carries. */
 const ONE = { gate: [NODE], known_red: [RUST_RED], swift: ["swift"], smoke: ["unreal"] };
 
@@ -136,7 +136,28 @@ describe("the aggregate", () => {
     ["a leg with no name", (n) => void (n.select.outputs.gate = '[{"daggerFn":"x"}]')],
     [
       "a known-red leg with no ticket",
-      (n) => void (n.select.outputs.known_red = '[{"name":"rust","daggerFn":"rust-test"}]'),
+      (n) =>
+        void (n.select.outputs.known_red = '[{"name":"rust","daggerFn":"rust-test","live":false}]'),
+    ],
+    // #918: a leg's live step runs only when `live` is true, so a leg that does
+    // not say it as a boolean could skip its live suite and pass.
+    [
+      "a leg with no live",
+      (n) =>
+        void ((n.select.outputs.gate = '[{"name":"node","daggerFn":"js-test"}]'),
+        (n.gate.result = "success")),
+    ],
+    [
+      "a leg whose live is a string",
+      (n) =>
+        void ((n.select.outputs.gate = '[{"name":"node","daggerFn":"js-test","live":"true"}]'),
+        (n.gate.result = "success")),
+    ],
+    [
+      "a leg whose daggerFn is not one function name",
+      (n) =>
+        void ((n.select.outputs.gate = '[{"name":"node","daggerFn":"js-test; id","live":false}]'),
+        (n.gate.result = "success")),
     ],
     [
       "gate files that are not plain",
@@ -146,6 +167,13 @@ describe("the aggregate", () => {
     const n = needs();
     mutate(n);
     expect(conclude(n).ok).toBe(false);
+  });
+
+  it("is green on the same leg, well formed, that passed (the control of the rows above)", () => {
+    const n = needs();
+    n.select.outputs.gate = '[{"name":"node","daggerFn":"js-test","live":false}]';
+    n.gate.result = "success";
+    expect(conclude(n).ok).toBe(true);
   });
 
   it.each([

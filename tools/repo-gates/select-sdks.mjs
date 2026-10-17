@@ -28,7 +28,9 @@
  * with a daggerFn goes to `gate`, or to `known_red` when its `ci.knownRed` is the BASE
  * commit's on a pull request (the judged commit's own on a push), so a pull
  * request cannot waive its own red; one with `ci.native` goes to `swift`
- * (`macos`) or `smoke`.
+ * (`macos`) or `smoke`. A Dagger leg is `{ name, daggerFn, live }`: `live` is
+ * true exactly when the SDK has a `liveSuite.runner` (#918), and the leg then
+ * runs `live-suite --sdk <name>` as a second step, after its suite.
  *
  * Output: one `key=value` line per OUTPUT_KEYS entry, appended to
  * $GITHUB_OUTPUT when it is set, else printed. Every selection value is
@@ -112,8 +114,9 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * Why each manifest entry cannot be routed, as `{ sdk, why }`. An SDK runs
  * through exactly one of a Dagger function (`daggerFn`) or a native runner
  * (`ci.native`); a known-red waiver needs a Dagger leg to run red in; every
- * ticket is `#<issue>`. The daggerFn's own shape is DAGGER_FN, checked where
- * it is used. verify-workflows.mjs rule 19 reports these on every verify.
+ * ticket is `#<issue>`. A `liveSuite` has a runner and needs a Dagger leg to
+ * run in (#918); an SDK has a liveSuite or a `liveExempt` reason, never both.
+ * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
 export function manifestProblems(manifest) {
   const sdks = manifest?.sdks;
@@ -144,6 +147,20 @@ export function manifestProblems(manifest) {
       );
     if (native && !NATIVE.includes(ci.native))
       add(`ci.native ${JSON.stringify(ci.native)} is not one of ${NATIVE.join(", ")}`);
+    const live = s?.liveSuite;
+    if (live !== undefined) {
+      if (typeof live?.runner !== "string" || live.runner.trim() === "")
+        add("liveSuite.runner is not a command (a liveSuite with no runner runs nothing)");
+      if (!dagger)
+        add("liveSuite on an SDK with no Dagger leg: no leg runs it, so it would never run");
+      if (s?.liveExempt !== undefined)
+        add("has both a liveSuite and a liveExempt: an SDK has a live suite or a reason, not both");
+    }
+    if (
+      s?.liveExempt !== undefined &&
+      (typeof s.liveExempt !== "string" || s.liveExempt.trim() === "")
+    )
+      add("liveExempt is not a reason (a non-empty string)");
     if (ci?.knownRed !== undefined) {
       if (!TICKET.test(String(ci.knownRed)) || typeof ci.knownRed !== "string")
         add(`ci.knownRed ${JSON.stringify(ci.knownRed)} is not a ticket (#<issue>)`);
@@ -266,8 +283,9 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
         `${name}: daggerFn ${JSON.stringify(s?.daggerFn)} is not one Dagger function name (${DAGGER_FN.source})`,
       );
     const ticket = waiver(name);
-    if (ticket === null) out.gate.push({ name, daggerFn: s.daggerFn });
-    else out.known_red.push({ name, daggerFn: s.daggerFn, ticket });
+    const leg = { name, daggerFn: s.daggerFn, live: typeof s.liveSuite?.runner === "string" };
+    if (ticket === null) out.gate.push(leg);
+    else out.known_red.push({ ...leg, ticket });
   }
   return out;
 }

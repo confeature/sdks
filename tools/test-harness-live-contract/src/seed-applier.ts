@@ -58,8 +58,14 @@ export async function applySeed(
   // AFTER this seed — judged on the resulting fault state, so `fault: "none"`
   // (a clear) on a null payload removes it, and a merge that omits `fault`
   // keeps a fault attached earlier.
+  //
+  // A replacing seed (boot, reset) is the exception, for a null payload with
+  // no fault (#918): it declares the whole case set over an empty store, so
+  // naming a key there can only mean "absent from KV, answered by the
+  // upstream's own miss" — the unknown-key 403 that wire-case http-403 pins.
+  // Only a merge can remove a key, and there the same shape still does.
   for (const key of keys) {
-    if (key.payload === null && !target.state.faults.has(key.sdkKey)) {
+    if (mode === "merge" && key.payload === null && !target.state.faults.has(key.sdkKey)) {
       target.state.keys.delete(key.sdkKey);
     } else {
       target.state.keys.add(key.sdkKey);

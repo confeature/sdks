@@ -49,8 +49,7 @@
     "dagger:cli": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh cli-test",
     "dagger:shared": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh shared-test",
     "dagger:wire": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh wire-cases",
-    "dagger:live-contract": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh live-contract",
-    "dagger:live-python": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh live-python-contract",
+    "dagger:harness-live": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh harness-live-test",
     "dagger:all": "bash scripts/dagger-precheck.sh && bash tools/dagger-call/dagger-call.sh --timeout 360 prepush-all",
     "swift:check": "bash scripts/swift-precheck.sh"
   },

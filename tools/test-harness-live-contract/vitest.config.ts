@@ -15,8 +15,8 @@ import { defineConfig } from "vitest/config";
  *
  * `maxWorkers: 2` (#783 review): unbounded, every file that boots Miniflare
  * boots it at once. In the Dagger container that queued workerd instances past
- * the 30 s timeouts — 7 of 138 red on main too — so `liveContract` never
- * reached its SDK stage. Same cause as #772's Workers pool, but unconditional:
+ * the 30 s timeouts — 7 of 138 red on main too — so `liveContract` (now
+ * `harness-live-test`) never reached its SDK stage. Same cause as #772's Workers pool, but unconditional:
  * Dagger sets CI=true, and the container is exactly where it hurts.
  */
 export default defineConfig({

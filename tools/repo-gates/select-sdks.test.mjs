@@ -165,6 +165,7 @@ const fixture = () => ({
   sdks: [
     { name: "a", daggerFn: "a-test" },
     { name: "b", daggerFn: "b-test" },
+    { name: "live", daggerFn: "live-test", liveSuite: { runner: "node run" } },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
   ],
@@ -176,8 +177,8 @@ describe("the routing into job kinds", () => {
   it("each SDK lands in exactly one kind", () => {
     expect(route(["a", "b", "mac", "ue"])).toEqual({
       gate: [
-        { name: "a", daggerFn: "a-test" },
-        { name: "b", daggerFn: "b-test" },
+        { name: "a", daggerFn: "a-test", live: false },
+        { name: "b", daggerFn: "b-test", live: false },
       ],
       known_red: [],
       swift: ["mac"],
@@ -185,19 +186,33 @@ describe("the routing into job kinds", () => {
     });
   });
 
+  // #918: an SDK with a liveSuite.runner runs `live-suite --sdk <name>` as a
+  // second Dagger step of its leg; the leg says so, always as a boolean.
+  it("a leg carries live: true exactly when its SDK has a liveSuite.runner", () => {
+    expect(route(["a", "live"]).gate).toEqual([
+      { name: "a", daggerFn: "a-test", live: false },
+      { name: "live", daggerFn: "live-test", live: true },
+    ]);
+    const base = fixture();
+    base.sdks[2].ci = { knownRed: "#1" };
+    expect(route(["live"], { event: "pull_request", base }).known_red).toEqual([
+      { name: "live", daggerFn: "live-test", live: true, ticket: "#1" },
+    ]);
+  });
+
   it("a base knownRed moves the SDK to known_red, with its ticket", () => {
     const base = fixture();
     base.sdks[1].ci = { knownRed: "#806" };
     const got = route(["a", "b"], { event: "pull_request", base });
-    expect(got.gate).toEqual([{ name: "a", daggerFn: "a-test" }]);
-    expect(got.known_red).toEqual([{ name: "b", daggerFn: "b-test", ticket: "#806" }]);
+    expect(got.gate).toEqual([{ name: "a", daggerFn: "a-test", live: false }]);
+    expect(got.known_red).toEqual([{ name: "b", daggerFn: "b-test", live: false, ticket: "#806" }]);
   });
 
   it("a knownRed the pull request adds itself is ignored", () => {
     const head = fixture();
     head.sdks[1].ci = { knownRed: "#806" };
     const got = route(["b"], { event: "pull_request", manifest: head, base: fixture() });
-    expect(got.gate).toEqual([{ name: "b", daggerFn: "b-test" }]);
+    expect(got.gate).toEqual([{ name: "b", daggerFn: "b-test", live: false }]);
     expect(got.known_red).toEqual([]);
   });
 
@@ -205,7 +220,7 @@ describe("the routing into job kinds", () => {
     const head = fixture();
     head.sdks[1].ci = { knownRed: "#806" };
     expect(route(["b"], { manifest: head, base: fixture() }).known_red).toEqual([
-      { name: "b", daggerFn: "b-test", ticket: "#806" },
+      { name: "b", daggerFn: "b-test", live: false, ticket: "#806" },
     ]);
   });
 
@@ -266,6 +281,32 @@ describe("the manifest's CI shape", () => {
       "a ci that is not an object",
       { name: "x", daggerFn: "x-test", ci: "macos" },
       /ci is not an object/,
+    ],
+    [
+      "a liveSuite with no runner",
+      { name: "x", daggerFn: "x-test", liveSuite: { path: "t.py" } },
+      /liveSuite\.runner/,
+    ],
+    [
+      "a liveSuite whose runner is empty",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: " " } },
+      /liveSuite\.runner/,
+    ],
+    [
+      // No leg of a native SDK runs live-suite yet: its suite would be skipped.
+      "a liveSuite on a native SDK",
+      { name: "x", daggerFn: null, ci: { native: "macos" }, liveSuite: { runner: "r" } },
+      /no leg runs it/,
+    ],
+    [
+      "both a liveSuite and a liveExempt",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: "r" }, liveExempt: "why" },
+      /both a liveSuite and a liveExempt/,
+    ],
+    [
+      "a liveExempt that is not a reason",
+      { name: "x", daggerFn: "x-test", liveExempt: "" },
+      /liveExempt/,
     ],
     ["a name with a capital", { name: "X", daggerFn: "x-test" }, /name/],
     ["a name with a space", { name: "a b", daggerFn: "x-test" }, /name/],
@@ -435,7 +476,7 @@ describe("the CLI", SPAWNS, () => {
       env: cleanEnv({ EVENT_NAME: "schedule" }),
     });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/^gate=\[\{"name":"a","daggerFn":"a-test"\}/m);
+    expect(r.stdout).toMatch(/^gate=\[\{"name":"a","daggerFn":"a-test","live":false\}/m);
   });
 
   it("a pull request touching a selects a and its dependent b", () => {
@@ -545,7 +586,7 @@ describe("the CLI", SPAWNS, () => {
     expect(later.status, later.stderr).toBe(0);
     expect(JSON.parse(later.outputs.gate)).toEqual([]);
     expect(JSON.parse(later.outputs.known_red)).toEqual([
-      { name: "rust", daggerFn: "rust-test", ticket: "#806" },
+      { name: "rust", daggerFn: "rust-test", live: false, ticket: "#806" },
     ]);
   });
 

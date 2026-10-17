@@ -1805,9 +1805,9 @@ describe("the write token, the build and every job's surface (round 9)", () => {
         /verify\.yml: verify: grants write on \[contents\], WRITE_PERMISSIONS records \[\]/,
       ],
       [
-        "18 contract-live.yml granted write-all",
+        "18 cli-windows-install-verify.yml granted write-all",
         (w) => {
-          w["contract-live.yml"].permissions = "write-all";
+          w["cli-windows-install-verify.yml"].permissions = "write-all";
         },
         /at the workflow level/,
       ],
@@ -2111,9 +2111,9 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
         /verify\.yml: -: sets no workflow-level permissions:/,
       ],
       [
-        "R3 contract-live.yml: every permissions: removed",
-        (w) => strip(w, "contract-live.yml"),
-        /contract-live\.yml: -: sets no workflow-level permissions:/,
+        "R3 cli-windows-install-verify.yml: every permissions: removed",
+        (w) => strip(w, "cli-windows-install-verify.yml"),
+        /cli-windows-install-verify\.yml: -: sets no workflow-level permissions:/,
       ],
       [
         "R7 release-gate.yml: the workflow's permissions: removed",
@@ -2446,13 +2446,13 @@ describe("continue-on-error in any workflow holding a credentialed job (round 11
         /new\.yml: x: step push sets continue-on-error:/,
       ],
       [
-        "COE contract-live: a secret makes a job credentialed, its continue-on-error refused",
+        "COE cli-windows-install-verify: a secret makes a job credentialed, its continue-on-error refused",
         (w) => {
-          const job = Object.values(w["contract-live.yml"].jobs)[0];
+          const job = Object.values(w["cli-windows-install-verify.yml"].jobs)[0];
           job.env = { ...(job.env ?? {}), T: "${{ secrets.X }}" };
           job["continue-on-error"] = true;
         },
-        /contract-live\.yml: \w+: sets continue-on-error: \(its failure would be reported green\)/,
+        /cli-windows-install-verify\.yml: \S+: sets continue-on-error: \(its failure would be reported green\)/,
       ],
     ]),
   )("refuses %s", (label, mutate, why) => {

@@ -32,14 +32,16 @@
     "prepack": "node tools/emit-seed-schema.mjs",
     "check:seed-schema": "node tools/check-seed-schema-drift.mjs"
   },
+  "dependencies": {
+    "wrangler": "^4",
+    "zod": "^3"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "miniflare": "^4",
     "typescript": "catalog:",
     "vite-plus": "latest",
     "vitest": "catalog:",
-    "wrangler": "^4",
-    "zod": "^3",
     "zod-to-json-schema": "^3"
   },
   "engines": {

@@ -67,6 +67,33 @@ describe("applySeed", () => {
     expect(calls).toEqual(["seed:3"]);
   });
 
+  // #918: wire-case http-403 is the origin's own unknown-key miss, so its seed
+  // names a key with no payload and no fault. A replacing seed declares the
+  // whole case set and starts from an empty store, so a key named there with
+  // neither is a case the upstream answers with its miss: reported, logged.
+  it.each(["boot", "replace"] as const)(
+    "%s: a key with no payload and no fault is a case served by the upstream's miss",
+    async (mode) => {
+      const { host } = stubHost();
+      const state = new AdminState();
+      await applySeed({ host, state }, [key("a"), { sdkKey: "miss", payload: null }], mode);
+      expect([...state.keys].sort()).toEqual(["a", "miss"]);
+      state.recordRequest("miss", {
+        url: "/configuration-files/miss/config_v6.json",
+        ifNoneMatch: null,
+      });
+      expect(state.requests.get("miss")).toHaveLength(1);
+    },
+  );
+
+  it("merge: a null payload with no fault left removes the key from the case set", async () => {
+    const { host } = stubHost();
+    const state = new AdminState();
+    await applySeed({ host, state }, [key("a"), key("gone")], "boot");
+    await applySeed({ host, state }, [{ sdkKey: "gone", payload: null }], "merge");
+    expect([...state.keys]).toEqual(["a"]);
+  });
+
   it("a failed KV write leaves the fault map and the count untouched", async () => {
     const { host } = stubHost({ failSeed: true });
     const state = new AdminState();

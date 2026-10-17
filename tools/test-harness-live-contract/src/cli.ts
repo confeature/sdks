@@ -9,7 +9,7 @@
  * the harness is ready. All other output goes to stderr.
  *
  * `--exec -- <cmd…>` (#783): the one way a live SDK suite is booted and handed
- * the harness — by Dagger, by contract-live, and by the manifest runner alike.
+ * the harness — the manifest runner Dagger's `live-suite --sdk <name>` runs (#918).
  * The harness boots in THIS process, then <cmd> runs with
  * `CONFEATURE_LIVE=1` and `LIVE_HARNESS_URL` exported; its exit code becomes
  * ours (a command killed by a signal exits 1 — never a silent pass), and the

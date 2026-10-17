@@ -1,5 +1,5 @@
 {
-  "$comment": "publish[] (#794) is the publish table: one unit per releasable package (the 21 SDKs of .sdks[] plus sdk-shared), each naming its gate, registry (or none, with a reason), coordinates, versionSource and the units it must follow (after). tagFormat is the one release-tag shape; tools/sdk-pack/resolve-publish.mjs is the only reader that decides whether a tag may publish. liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. contract-live.yml runs it; dagger livePythonContract reads python's from here. Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate. ci (#793) is how .github/workflows/sdk-gates.yml runs an SDK on every push and pull request: an SDK with a daggerFn runs it as a Dagger leg (`gate (<name>)`); an SDK whose daggerFn is null carries ci.native instead, `macos` (built and tested natively on a macos-15 runner) or `smoke` (a labelled source-quality smoke, not a build). Every SDK has exactly one of the two (tools/repo-gates/verify-workflows.mjs rule 19). ci.knownRed: `#<issue>` marks an SDK whose first run is red with a defect too large for its child: its leg runs in gate-known-red, shown red with the ticket and not counted, and a pull request honours the waiver only as the BASE commit carries it (tools/repo-gates/select-sdks.mjs), so a pull request cannot waive its own red. liveExempt: `<reason>` (#918) is why an SDK has no liveSuite, carried instead of a liveSuite with no runner.",
+  "$comment": "publish[] (#794) is the publish table: one unit per releasable package (the 21 SDKs of .sdks[] plus sdk-shared), each naming its gate, registry (or none, with a reason), coordinates, versionSource and the units it must follow (after). tagFormat is the one release-tag shape; tools/sdk-pack/resolve-publish.mjs is the only reader that decides whether a tag may publish. liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. Its one runner is the Dagger function `live-suite --sdk <name>` (#918), which runs it on that SDK's own toolchain as the second step of the SDK's sdk-gates.yml leg, after its suite, so a red live suite reddens the leg; an SDK with a liveSuite needs a daggerFn until its native job runs one (tools/repo-gates/select-sdks.mjs). Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate. ci (#793) is how .github/workflows/sdk-gates.yml runs an SDK on every push and pull request: an SDK with a daggerFn runs it as a Dagger leg (`gate (<name>)`); an SDK whose daggerFn is null carries ci.native instead, `macos` (built and tested natively on a macos-15 runner) or `smoke` (a labelled source-quality smoke, not a build). Every SDK has exactly one of the two (tools/repo-gates/verify-workflows.mjs rule 19). ci.knownRed: `#<issue>` marks an SDK whose first run is red with a defect too large for its child: its leg runs in gate-known-red, shown red with the ticket and not counted, and a pull request honours the waiver only as the BASE commit carries it (tools/repo-gates/select-sdks.mjs), so a pull request cannot waive its own red. liveExempt: `<reason>` (#918) is why an SDK has no liveSuite, carried instead of a liveSuite with no runner, never beside one. An SDK with neither has no live suite yet: tools/test-harness-live-contract/scripts/live-coverage-report.mjs lists it as such, never as covered.",
   "sdks": [
     {
       "name": "node",
@@ -20,9 +20,8 @@
       "daggerFn": "python-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
-        "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py",
-        "toolchain": "uv"
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run --frozen --extra dev pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
+        "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py"
       }
     },
     { "name": "go", "daggerFn": "go-test", "status": "covered" },
@@ -32,13 +31,20 @@
     {
       "name": "angular",
       "daggerFn": "angular-test",
-      "status": "covered"
+      "status": "covered",
+      "liveExempt": "no wire layer of its own: it has no wire tests and makes every config request through the SDK it wraps, browser-js, whose wire behaviour is that SDK's to prove"
     },
-    { "name": "react", "daggerFn": "react-test", "status": "covered" },
+    {
+      "name": "react",
+      "daggerFn": "react-test",
+      "status": "covered",
+      "liveExempt": "no wire layer of its own: it has no wire tests and makes every config request through the SDK it wraps, browser-js, whose wire behaviour is that SDK's to prove"
+    },
     {
       "name": "cloudflare-worker",
       "daggerFn": "cloudflare-worker-test",
-      "status": "covered"
+      "status": "covered",
+      "liveExempt": "no wire layer of its own: it has no wire tests and makes every config request through the SDK it wraps, browser-js, whose wire behaviour is that SDK's to prove"
     },
 
     {
@@ -115,7 +121,8 @@
       "daggerFn": null,
       "status": "exempt",
       "reason": "UE CI impractical in a standard Dagger container (size/license/GPU)",
-      "ci": { "native": "smoke" }
+      "ci": { "native": "smoke" },
+      "liveExempt": "no Unreal Engine on hosted runners: the SDK cannot be built or run there, so nothing can meet the reference origin over HTTP (its smoke checks the source only)"
     }
   ],
   "tagFormat": "sdk-{name}-v{version}",

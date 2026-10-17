@@ -140,6 +140,12 @@ pnpm dagger:browser   # sdk-browser-js vitest
 pnpm dagger:python    # sdk-python uv + ruff + mypy + pytest + build
 pnpm dagger:go        # sdk-go gofmt + vet + staticcheck + test + build
 pnpm dagger:wire      # wire-cases corpus subset across sdk-node + sdk-browser-js
+pnpm dagger:harness-live   # the live-contract harness's own test:live (harness-live-test)
+
+# One SDK's live wire-cases against the harness (#918): its manifest
+# liveSuite.runner, on its own toolchain, the step its sdk-gates.yml leg runs
+bash tools/dagger-call/dagger-call.sh live-suite --sdk node
+bash tools/dagger-call/dagger-call.sh live-suite --sdk python
 
 # Direct invocation (skipping the precondition check)
 bash tools/dagger-call/dagger-call.sh prepush-all

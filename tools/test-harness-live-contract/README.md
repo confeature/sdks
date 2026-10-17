@@ -87,7 +87,7 @@ Reference seeds for every `wire-cases.json` case live under `seeds/`:
 | `wrong-shape-200`             | `seeds/wrong-shape-200.json`             |
 | `timeout`                     | `seeds/timeout.json`                     |
 | `http-401`                    | `seeds/http-401.json`                    |
-| `http-403`                    | `seeds/http-403.json`                    |
+| `http-403`                    | `seeds/http-403.json` (an unseeded key)  |
 | `http-429`                    | `seeds/http-429.json`                    |
 | `http-304-with-last-modified` | `seeds/http-304-with-last-modified.json` |
 | `network-reset`               | `seeds/network-reset.json`               |
@@ -95,35 +95,31 @@ Reference seeds for every `wire-cases.json` case live under `seeds/`:
 `custom-base-url` has no seed by design: in live mode the harness _is_ the custom base URL.
 
 Each seed is self-contained (no `bodyRef` indirection — seeds inline the canonical payload).
+A key with `payload: null` and no fault is an unseeded key the upstream answers with its own miss:
+`http-403` is that case, the reference origin's real unknown-key `403 AccessDenied` XML (#918).
 `tests/corpus-mapping.test.ts` enforces that the mapping **exists** (and that no seed is an orphan);
 `tests/seed-fidelity.test.ts` enforces what each seed **serves** — status, declared headers, no
 undeclared validators, body, and behaviour — against its case's `server` block, over real HTTP.
 
-## Pre-push gate (Dagger)
+## Dagger: the harness's own test, and each SDK's live suite
 
-The harness suite runs as part of the local-first pre-push gate (Principle VII)
-via the Dagger `liveContract` function (#343), composed into `prepushAll`
-alongside the JS-family gates:
+Two Dagger functions run this harness inside a container:
 
 ```bash
-pnpm dagger:live-contract   # this gate in isolation (via tools/dagger-call/dagger-call.sh)
-pnpm dagger:all             # full pre-push gate, including liveContract
+pnpm dagger:harness-live                                   # harness-live-test: this package's own test:live
+bash tools/dagger-call/dagger-call.sh live-suite --sdk node  # one SDK's live wire-cases (#918)
 ```
 
-`liveContract` reuses the shared `node:22.23.3-bookworm-slim` install layer and, in
-order: (1) builds this harness (so its `dist/` resolves for runtime importers),
-(2) runs the harness self-test
-`pnpm --filter @confeature/test-harness-live-contract test:live`
-(`CONFEATURE_LIVE=1 vp test run`), then (3) runs sdk-node's live wire-cases
-through the manifest's node `liveSuite.runner` — the `--corpus-seed --exec`
-wrapper, the same command contract-live runs (#783). The suite replays every
-seeded wire-case against the running harness and never boots one of its own;
-it is skipped in the normal hermetic run, and fails if `CONFEATURE_LIVE=1`
-comes without a `LIVE_HARNESS_URL`. `livePythonContract` does the same for
-sdk-python. Because the harness boots its upstream via **in-process Miniflare**
-(#341 — no `wrangler dev` subprocess, no network egress, no service bindings)
-it is safe inside the Dagger sandbox. The staging/prod canary
-`CONFEATURE_BASE_URL` mode stays CI-only.
+`live-suite --sdk <name>` runs that SDK's manifest `liveSuite.runner` (the `--corpus-seed --exec`
+wrapper, #783) on the SDK's own toolchain container, the one its suite runs on. A non-Node
+toolchain gets the pinned Node runtime copied in, and this package as a `pnpm deploy --prod`: a
+self-contained directory whose `node_modules` holds its runtime dependencies (wrangler, zod), so
+nothing links into the pnpm store's cache volume. `wrangler kv` runs through `npx --no-install`,
+so a missing wrangler fails instead of being fetched. The suite replays every case the harness
+reports and never boots a harness of its own; it is skipped in the normal hermetic run, and fails
+if `CONFEATURE_LIVE=1` comes without a `LIVE_HARNESS_URL`. Because the harness boots its upstream
+via **in-process Miniflare** (#341: no `wrangler dev` subprocess, no network egress, no service
+bindings, loopback only) it is safe inside the Dagger sandbox.
 
 ## Architecture notes
 
@@ -132,16 +128,17 @@ it is safe inside the Dagger sandbox. The staging/prod canary
 - **Fault injection**: proxy layer in front of the Worker (`node:http` server). The upstream's source is UNCHANGED.
 - **Concurrency**: one harness per test process. Multiple processes get distinct ephemeral ports — no shared state.
 
-## Cross-SDK live matrix (release gate)
+## Live suites on every push
 
-The `contract-live.yml` workflow (spec 115 / #150) runs each live-capable SDK's wire-cases against
-the live harness (reference origin upstream) at **release time** (never per-PR — Principle VII) and publishes a
-`N/21 live-covered` conformance report. **To add an SDK to the matrix**, add a `liveSuite` entry to
-that SDK in `dagger/sdk-manifest.json` (`runner` + `path`, plus `toolchain` when the SDK needs one
-the workflow must install, e.g. `uv`) — no workflow edit. Every `runner` goes through the harness
-wrapper (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1`
-and a live suite never passes by skipping (#783). See
-spec 115's `quickstart.md` (not published).
+Each SDK's live suite runs inside that SDK's leg of `.github/workflows/sdk-gates.yml`, as a step
+after its suite (`live-suite --sdk <name>`), so a red live suite reddens the leg (#918; the
+release-time `contract-live.yml` matrix it replaces is retired). **To add an SDK**, give it a
+`liveSuite` in `dagger/sdk-manifest.json` (`runner` + `path`) and its builder in `LIVE_TOOLCHAINS`
+in `dagger/src/index.ts`: no workflow edit. Every `runner` goes through the harness wrapper
+(`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
+live suite never passes by skipping (#783). An SDK that cannot have one carries `liveExempt:
+"<reason>"` instead. `scripts/live-coverage-report.mjs` lists the roster: live, exempt with its
+reason, or "no live suite yet".
 
 ## License
 

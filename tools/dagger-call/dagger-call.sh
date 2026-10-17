@@ -4,7 +4,12 @@
 # dagger-call.sh — the one way a local `pnpm dagger:*` script hands the
 # repository to Dagger (#789).
 #
-#   bash tools/dagger-call/dagger-call.sh [--timeout <seconds>] <dagger-function>
+#   bash tools/dagger-call/dagger-call.sh [--timeout <seconds>] <dagger-function> [--<flag> <value>]...
+#
+# A function's own arguments follow it as `--<flag> <value>` pairs of plain
+# names (`live-suite --sdk node`, #918): anything else could reach dagger's
+# command line, and `--source` is refused because the snapshot is this
+# script's to hand over.
 #
 # WHAT DAGGER SEES. A fresh snapshot of the working tree minus everything git
 # ignores: `git ls-files --cached --others --exclude-standard`. `--source=.`
@@ -33,7 +38,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: dagger-call.sh [--timeout <seconds>] <dagger-function>" >&2
+  echo "usage: dagger-call.sh [--timeout <seconds>] <dagger-function> [--<flag> <value>]..." >&2
   exit 2
 }
 
@@ -49,9 +54,19 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
-[ $# -eq 1 ] || usage
+[ $# -ge 1 ] || usage
 fn="$1"
+shift
 [[ "$fn" =~ ^[a-z][a-z0-9-]*$ ]] || usage
+fn_args=()
+while [ $# -gt 0 ]; do
+  [ $# -ge 2 ] || usage
+  [[ "$1" =~ ^--[a-z][a-z0-9-]*$ ]] || usage
+  [ "$1" != "--source" ] || usage
+  [[ "$2" =~ ^[a-z0-9][a-z0-9-]*$ ]] || usage
+  fn_args+=("$1" "$2")
+  shift 2
+done
 if [ -n "$timeout_s" ]; then
   [[ "$timeout_s" =~ ^[1-9][0-9]*$ ]] || usage
 fi
@@ -154,7 +169,7 @@ if [ "$untracked" -gt 0 ] || [ "$changed" -gt 0 ]; then
 fi
 
 # ---- The run -----------------------------------------------------------------
-dagger call -m ./dagger "$fn" --source="$snap" &
+dagger call -m ./dagger "$fn" ${fn_args[@]+"${fn_args[@]}"} --source="$snap" &
 child=$!
 
 timed_out=0

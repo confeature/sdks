@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, it } from "vitest";
-import { resolveNpx } from "../src/wrangler-host.js";
+import { resolveNpx, wranglerKvArgv } from "../src/wrangler-host.js";
 
 /**
  * #340 — supply-chain hardening. The harness must resolve `npx` to an
@@ -22,5 +22,27 @@ describe("resolveNpx (#340)", () => {
 
   it("throws when PATH is absent entirely", () => {
     expect(() => resolveNpx({} as NodeJS.ProcessEnv)).toThrow(/could not resolve `npx`/);
+  });
+});
+
+/**
+ * #918 (plan 867 security note): the harness runs inside SDK containers from a
+ * `pnpm deploy` of this package, so `npx` must never fetch a wrangler of its
+ * own from the registry when the deployed one is missing — it must fail.
+ */
+describe("wranglerKvArgv (#918)", () => {
+  it("never lets npx install: --no-install comes before the package name", () => {
+    const argv = wranglerKvArgv(["bulk", "put", "/p/f.json"], ["--namespace-id=CONFIG_KV"], "/p");
+    expect(argv).toEqual([
+      "--no-install",
+      "wrangler",
+      "kv",
+      "bulk",
+      "put",
+      "/p/f.json",
+      "--namespace-id=CONFIG_KV",
+      "--local",
+      "--persist-to=/p",
+    ]);
   });
 });

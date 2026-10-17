@@ -95,6 +95,26 @@ export function kvNamespaceArgs(configPath: string): string[] {
   );
 }
 
+/**
+ * The `npx` argv of one `wrangler kv <args>` call against the local persist
+ * directory. `--no-install` comes first (#918, plan 867 security note): in an
+ * SDK container the harness is a `pnpm deploy` of this package, and its
+ * wrangler is the deployed `node_modules/.bin/wrangler`. Should that be
+ * missing, the call must fail, never fetch whatever the registry serves under
+ * the name `wrangler` and run it.
+ */
+export function wranglerKvArgv(args: string[], kvArgs: string[], persistDir: string): string[] {
+  return [
+    "--no-install",
+    "wrangler",
+    "kv",
+    ...args,
+    ...kvArgs,
+    "--local",
+    `--persist-to=${persistDir}`,
+  ];
+}
+
 /** One KV record as `wrangler kv bulk put` takes it. */
 export type KvRecord = { key: string; value: string; metadata?: Record<string, string> };
 
@@ -259,14 +279,7 @@ export class WranglerHost {
     opts?: { captureStdout?: boolean },
   ): Promise<string | null> {
     const cwd = dirname(this.config.configPath);
-    const fullArgs = [
-      "wrangler",
-      "kv",
-      ...args,
-      ...this.kvArgs,
-      "--local",
-      `--persist-to=${this.persistDir}`,
-    ];
+    const fullArgs = wranglerKvArgv(args, this.kvArgs, this.persistDir);
     // wrangler kv key list already emits JSON by default; no extra flag needed.
     if (!this.npxPath) throw new Error("WranglerHost not started (npx unresolved)");
     return await new Promise<string | null>((resolve, reject) => {

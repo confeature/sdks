@@ -1770,7 +1770,7 @@ function credentialExposureRules(file, jobId, job, doc, add) {
  * Rule 18 (round 9): the only write permissions any workflow grants, per
  * job, exact. A write permission anywhere else (another job, another
  * workflow, the workflow level, `write-all`) is a finding; verify.yml,
- * contract-live.yml and cli-windows-install-verify.yml stay read-only.
+ * sdk-gates.yml and cli-windows-install-verify.yml stay read-only.
  */
 export const WRITE_PERMISSIONS = {
   "cli-release.yml#release": ["contents"],
@@ -2979,6 +2979,46 @@ export function requiredCheckFindings(settings, workflows) {
   return out;
 }
 
+/** What a Dagger leg's suite step and live-suite step pass the action, exactly. */
+const SUITE_ARGS = "${{ matrix.sdk.daggerFn }} --source=.";
+const LIVE_ARGS = "live-suite --sdk ${{ matrix.sdk.name }} --source=.";
+const LIVE_IF = "matrix.sdk.live";
+const isDaggerAction = (st) =>
+  typeof st?.uses === "string" && /^dagger\/dagger-for-github@/i.test(st.uses.trim());
+
+/**
+ * Rule 19's half over a Dagger leg's steps (gate, gate-known-red; #918): it
+ * runs exactly two Dagger steps, the SDK's suite (`<daggerFn> --source=.`,
+ * unconditional) and then its live suite (`live-suite --sdk <name>`, only when
+ * select-sdks.mjs marks the leg `live`), through the same action. How Dagger
+ * is installed and pinned is engine-pin.test.mjs's, not restated here; which
+ * SDK has a live suite is the manifest's, read by the selector.
+ */
+function daggerLegProblems(job) {
+  const out = [];
+  const steps = stepsOf(job);
+  const dagger = steps.filter(isDaggerAction);
+  const args = (st) => String(st?.with?.args ?? "").trim();
+  const suite = dagger.find((st) => args(st) === SUITE_ARGS && st.if === undefined);
+  const live = dagger.find((st) => args(st) === LIVE_ARGS);
+  if (dagger.length !== 2)
+    out.push(`runs ${dagger.length} Dagger steps, not exactly its suite and its live suite`);
+  if (suite === undefined) out.push(`has no unconditional step running ${SUITE_ARGS}`);
+  if (live === undefined) {
+    out.push(`has no step running ${LIVE_ARGS}`);
+    return out;
+  }
+  if (String(live.if ?? "").trim() !== LIVE_IF)
+    out.push(`its live-suite step's if: is not exactly ${LIVE_IF}`);
+  if (suite !== undefined) {
+    if (steps.indexOf(live) < steps.indexOf(suite))
+      out.push("its live-suite step does not come after its suite");
+    if (live.uses.trim() !== suite.uses.trim())
+      out.push("its live-suite step does not use the suite step's action");
+  }
+  return out;
+}
+
 /**
  * Rule 19 (#793, FR-001, FR-011): sdk-gates.yml's own shape, the required
  * checks, and the manifest's CI routing. What rules 2, 3 (caches) and 18
@@ -3078,6 +3118,7 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
       !EXPR(`fromJSON\\(${output.replace(/\./g, "\\.")}\\)`).test(String(m.sdk))
     )
       add(kind.job, `its matrix is not exactly sdk: \${{ fromJSON(${output}) }}`);
+    if (kind.native === undefined) for (const why of daggerLegProblems(job)) add(kind.job, why);
   }
   // The select job: it runs the selector, and hands on every output it writes.
   const select = jobs[SELECT_JOB];

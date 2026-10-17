@@ -1,17 +1,10 @@
 {
   "schemaVersion": "1.0",
-  "description": "wire-cases.json#http-403 — a forced 403 with no body. The case exists to prove 403 is classed invalidSdkKey ALONGSIDE 404, so it must be a real 403 on the wire — seed-fidelity.test.ts asserts the observed status, which is the only thing that tells it from a 404.",
+  "description": "wire-cases.json#http-403 — an UNSEEDED key (#918): payload null (absent from KV) and no fault, so the upstream answers its own unknown-key miss, the reference origin's 403 AccessDenied XML (application/xml), which the read-path transcript binds to the CDN Worker. Nothing here restates that response: seed-fidelity.test.ts holds what the origin serves equal to the case's server block, so a drift in either is red. The case proves 403 is classed invalidSdkKey ALONGSIDE 404, on the response a customer's SDK really meets.",
   "keys": [
     {
       "sdkKey": "test-sdk-key",
-      "payload": null,
-      "fault": {
-        "kind": "status",
-        "status": 403,
-        "headers": {
-          "Content-Type": "text/plain"
-        }
-      }
+      "payload": null
     }
   ]
 }

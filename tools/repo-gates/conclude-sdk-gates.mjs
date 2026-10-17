@@ -36,15 +36,25 @@
 import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
-import { KINDS, NAME, OUTPUT_KEYS, PLAIN_PATH, SELECT_JOB, TICKET } from "./select-sdks.mjs";
+import {
+  DAGGER_FN,
+  KINDS,
+  NAME,
+  OUTPUT_KEYS,
+  PLAIN_PATH,
+  SELECT_JOB,
+  TICKET,
+} from "./select-sdks.mjs";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const quoted = (names) => names.map((n) => `\`${n}\``).join(", ");
 
 /**
  * select's outputs, read back and checked: every selection array holds
- * manifest names only (gate and known-red legs as `{ name, daggerFn }`, a
- * known-red one with its ticket), and gate_files plain paths. Returns the
+ * manifest names only (gate and known-red legs as `{ name, daggerFn, live }`,
+ * a known-red one with its ticket), and gate_files plain paths. `live` must be
+ * a boolean: the leg's live-suite step runs on it (#918), so a leg that could
+ * not say whether it has one could skip its live suite and pass. Returns the
  * parsed outputs, or the reasons they cannot be trusted.
  */
 function readSelection(outputs) {
@@ -77,6 +87,9 @@ function readSelection(outputs) {
         ? !isObject(x) ||
           typeof x.name !== "string" ||
           !NAME.test(x.name) ||
+          typeof x.daggerFn !== "string" ||
+          !DAGGER_FN.test(x.daggerFn) ||
+          typeof x.live !== "boolean" ||
           (k === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
         : typeof x !== "string" || !NAME.test(x),
     );

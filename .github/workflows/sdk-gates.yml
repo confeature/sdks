@@ -13,7 +13,9 @@
 #                   touches anything outside one SDK's directory.
 #   gate            one leg per selected SDK with a daggerFn: that SDK's own
 #                   Dagger function, the one definition of its suite, shared
-#                   with the publish gate, release-gate.yml and the pre-push.
+#                   with the publish gate, release-gate.yml and the pre-push,
+#                   then, when the manifest gives it a liveSuite.runner, its
+#                   live wire-cases (`live-suite --sdk <name>`, #918).
 #   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
 #                   the BASE manifest (ci.knownRed): shown red, never counted.
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
@@ -169,6 +171,20 @@ jobs:
           args: ${{ matrix.sdk.daggerFn }} --source=.
           enable-github-summary: true
 
+      # The SDK's live wire-cases against the reference origin (#918): its
+      # manifest liveSuite.runner, on its own toolchain, through the same
+      # verified CLI and pinned engine. After the suite, and only on a leg that
+      # has one (select-sdks.mjs sets live); a red live suite reddens the leg.
+      - name: Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)
+        if: matrix.sdk.live
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
+          enable-github-summary: true
+
       # A matrix job reports one combined result, so each leg names itself.
       - name: Name the leg in its summary
         if: always()
@@ -245,6 +261,20 @@ jobs:
           verb: call
           module: ./dagger
           args: ${{ matrix.sdk.daggerFn }} --source=.
+          enable-github-summary: true
+
+      # The SDK's live wire-cases against the reference origin (#918): its
+      # manifest liveSuite.runner, on its own toolchain, through the same
+      # verified CLI and pinned engine. After the suite, and only on a leg that
+      # has one (select-sdks.mjs sets live); a red live suite reddens the leg.
+      - name: Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)
+        if: matrix.sdk.live
+        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
+        with:
+          version: ${{ steps.pin.outputs.version }}
+          verb: call
+          module: ./dagger
+          args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
           enable-github-summary: true
 
       - name: Name the leg in its summary

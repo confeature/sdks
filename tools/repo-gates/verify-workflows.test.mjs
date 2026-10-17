@@ -1814,6 +1814,10 @@ describe("19 the SDK gates' own shape (#793)", () => {
   const step = (job, name) => job.steps.find((x) => x.name === name);
   const conclude = (jobs) =>
     step(jobs["sdk-gates"], "Conclude (tools/repo-gates/conclude-sdk-gates.mjs)");
+  const suite = (job) =>
+    job.steps.find((x) => x.name === "Run ${{ matrix.sdk.daggerFn }} (Dagger)");
+  const live = (job) =>
+    job.steps.find((x) => x.name === "Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)");
 
   it("control: the real tree is clean", () => expect(after(() => {})).toEqual([]));
 
@@ -2094,6 +2098,52 @@ describe("19 the SDK gates' own shape (#793)", () => {
         void (manifest.sdks.find((x) => x.name === "node").ci = { native: "macos" }),
       /dagger\/sdk-manifest\.json: node: has both daggerFn and ci\.native/,
     ],
+    // The Dagger legs' steps (#918): the suite, then the live suite.
+    ...["gate", "gate-known-red"].flatMap((job) => [
+      [
+        `${job}: no live-suite step`,
+        ({ jobs }) =>
+          void (jobs[job].steps = jobs[job].steps.filter((x) => !/live-suite/.test(x.name ?? ""))),
+        new RegExp(`${job}: has no step running live-suite --sdk`),
+      ],
+      [
+        `${job}: a live-suite step that runs whatever the leg says`,
+        ({ jobs }) => void (live(jobs[job]).if = "always()"),
+        new RegExp(`${job}: its live-suite step's if: is not exactly matrix\\.sdk\\.live`),
+      ],
+      [
+        `${job}: a live-suite step for another SDK`,
+        ({ jobs }) => void (live(jobs[job]).with.args = "live-suite --sdk node --source=."),
+        new RegExp(`${job}: has no step running live-suite --sdk`),
+      ],
+      [
+        `${job}: the live suite before the suite`,
+        ({ jobs }) => {
+          const st = jobs[job].steps;
+          const i = st.indexOf(live(jobs[job]));
+          const [l] = st.splice(i, 1);
+          st.splice(st.indexOf(suite(jobs[job])), 0, l);
+        },
+        new RegExp(`${job}: its live-suite step does not come after its suite`),
+      ],
+      [
+        `${job}: the suite step behind an if:`,
+        ({ jobs }) => void (suite(jobs[job]).if = "matrix.sdk.live"),
+        new RegExp(
+          `${job}: has no unconditional step running \\$\\{\\{ matrix\\.sdk\\.daggerFn \\}\\}`,
+        ),
+      ],
+      [
+        `${job}: a third Dagger step`,
+        ({ jobs }) => void jobs[job].steps.push(structuredClone(suite(jobs[job]))),
+        new RegExp(`${job}: runs 3 Dagger steps, not exactly its suite and its live suite`),
+      ],
+      [
+        `${job}: a live-suite step through another action`,
+        ({ jobs }) => void (live(jobs[job]).uses = "dagger/dagger-for-github@v8"),
+        new RegExp(`${job}: its live-suite step does not use the suite step's action`),
+      ],
+    ]),
     [
       "the workflow removed",
       ({ workflows }) => void delete workflows[G],

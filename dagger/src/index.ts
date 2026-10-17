@@ -34,6 +34,12 @@ import { dag, Container, Directory, Platform, object, func } from "@dagger.io/da
 const BUDGET_MS = 300_000;
 
 /**
+ * The JS family's Node image, exact (FR-008): `nodeContainer`'s base, and the
+ * Node runtime copied into every other toolchain that runs a live suite.
+ */
+const NODE_IMAGE = "node:22.23.3-bookworm-slim";
+
+/**
  * Build the shared JS-family container (node:22.23.3-bookworm-slim + pnpm caches +
  * frozen-lockfile install). Used by `jsTest`, `browserTest`, and `wireCases`.
  *
@@ -50,7 +56,7 @@ function nodeContainer(source: Directory): Container {
   return (
     dag
       .container()
-      .from("node:22.23.3-bookworm-slim")
+      .from(NODE_IMAGE)
       .withEnvVariable("CI", "true")
       .withExec([
         "bash",
@@ -172,9 +178,8 @@ function androidSdkContainer(source: Directory): Container {
 
 /**
  * An SDK's `liveSuite.runner` from `dagger/sdk-manifest.json` — the one command
- * that runs its live wire-cases, shared with contract-live.yml (#783). Throws
- * when the SDK has none: a Dagger live gate with nothing to run must fail, not
- * pass.
+ * that runs its live wire-cases (#783, #918). Throws when the SDK has none: a
+ * Dagger live gate with nothing to run must fail, not pass.
  */
 async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> {
   const manifest = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
@@ -376,6 +381,66 @@ function cppToolchain(source: Directory): Container {
       .withMountedDirectory("/work", source)
       .withWorkdir("/work/apps/sdk-cpp")
   );
+}
+
+/** Where `liveSuite` mounts the deployed harness: the path every `liveSuite.runner` names. */
+const HARNESS_DIR = "/work/tools/test-harness-live-contract";
+
+/**
+ * The harness as a self-contained directory (#918, plan 867 A4): built in
+ * `jsWorkspace`, then `pnpm deploy --prod`, which copies its runtime
+ * dependencies (wrangler, zod) out of the store into its own `node_modules`.
+ * Copying `jsWorkspace`'s `node_modules` instead would carry links into the
+ * pnpm store, a cache volume that is not part of any container snapshot.
+ * `inject-workspace-packages` is set for this one command only: pnpm 10+
+ * deploys nothing else, and the harness has no workspace dependency to inject.
+ */
+function deployedHarness(source: Directory): Directory {
+  return jsWorkspace(source)
+    .withExec([
+      "pnpm",
+      "--config.inject-workspace-packages=true",
+      "deploy",
+      "--filter",
+      JS_TESTED.harness,
+      "--prod",
+      "/harness-deploy",
+    ])
+    .directory("/harness-deploy");
+}
+
+/**
+ * Which toolchain container runs each SDK's live suite (#918, FR-015): the
+ * SDK's own builder, the one its `*Test` function uses, so the live suite runs
+ * on exactly the toolchain the suite does. The single home of the map; an SDK
+ * with a `liveSuite.runner` and no entry here is refused, never defaulted.
+ * `node: true` marks a builder that already has the pinned Node runtime and a
+ * built harness (the JS family's `jsWorkspace`).
+ */
+const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container; node?: true }> = {
+  node: { build: jsWorkspace, node: true },
+  python: { build: pythonToolchain },
+};
+
+/**
+ * The container an SDK's live suite runs in, at the repository root: its
+ * toolchain, plus (outside the JS family) the pinned Node runtime copied from
+ * `NODE_IMAGE`'s `/usr/local` — every toolchain image is glibc Debian or
+ * Ubuntu — and the deployed harness mounted where the runner names it.
+ */
+function liveContainer(source: Directory, sdk: string): Container {
+  const toolchain = LIVE_TOOLCHAINS[sdk];
+  if (toolchain === undefined)
+    throw new Error(
+      `dagger/src/index.ts LIVE_TOOLCHAINS has no toolchain for ${sdk}: add its builder there`,
+    );
+  const base = toolchain.build(source);
+  const ready = toolchain.node
+    ? base
+    : base
+        .withDirectory("/usr/local", dag.container().from(NODE_IMAGE).directory("/usr/local"))
+        .withMountedDirectory(HARNESS_DIR, deployedHarness(source));
+  return ready.withWorkdir("/work");
 }
 
 @object()
@@ -828,100 +893,46 @@ export class Confeature {
   }
 
   /**
-   * Boot the live-contract harness and run the live wire canary(ies) (#343).
+   * Run one SDK's live wire-cases against the harness (#918, FR-015): the CLI's
+   * `live-suite --sdk <name>`, a step of that SDK's leg in sdk-gates.yml.
    *
-   * `@confeature/test-harness-live-contract` boots the reference origin via **in-process
-   * Miniflare** (workerd in-process — no `wrangler dev` subprocess, no port
-   * races, no network egress; see the harness's `src/wrangler-host.ts`) and
-   * serves seeded wire-contract responses over a real localhost HTTP socket.
-   * That hermetic, sandbox-safe boot (#341) is what lets the suite run inside
-   * the Dagger sandbox at pre-push — no service bindings, no host networking.
-   *
-   * On the shared `jsWorkspace(source)` — the same install layer and the same
-   * single workspace build as `jsTest` / `browserTest` / `wireCases`, which
-   * builds the harness itself (its `dist/cli.js` is gitignored output the live
-   * runner boots). Dagger dedupes both across callers under one `prepushAll`
-   * session. Then two stages:
-   *
-   *   1. The harness package's own live self-test (`test:live`).
-   *   2. The sdk-node live wire-cases, run by the manifest's node
-   *      `liveSuite.runner` (#783): the harness wrapper boots the harness,
-   *      hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes
-   *      its exit code through — the same command contract-live runs. The
-   *      suite never boots a harness of its own.
+   * The command is the SDK's `liveSuite.runner` from the manifest, its one
+   * home: the harness wrapper (`--corpus-seed --exec`) boots the reference
+   * origin through wrangler `unstable_dev` (in-process workerd, loopback only,
+   * so the loopback-guarded admin routes stay unreachable from the network),
+   * hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes its
+   * exit code through. One container, not a service binding: the harness
+   * binds 127.0.0.1 by design. The runner runs from the repository root under
+   * `bash -euo pipefail`.
    *
    * @param source The workspace root.
+   * @param sdk A manifest SDK name with a `liveSuite.runner`.
    */
   @func()
-  async liveContract(source: Directory): Promise<string> {
-    const runner = await liveSuiteRunner(source, "node");
-    const result = await jsWorkspace(source)
-      .withExec(["pnpm", "--filter", JS_TESTED.harness, "test:live"])
+  async liveSuite(source: Directory, sdk: string): Promise<string> {
+    if (!/^[a-z][a-z0-9-]*$/.test(sdk))
+      throw new Error(`${JSON.stringify(sdk)} is not an SDK name`);
+    const runner = await liveSuiteRunner(source, sdk);
+    const result = await liveContainer(source, sdk)
       .withExec(["bash", "-euo", "pipefail", "-c", runner])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (liveContract #343)`;
+    return `${lastLine} (liveSuite ${sdk} #918)`;
   }
 
   /**
-   * Run the sdk-python live wire-cases against the harness (#380, #783).
-   *
-   * WHY A DEDICATED FUNC (not folded into `liveContract`): it needs BOTH
-   * toolchains in one container — Node to build and boot the harness CLI,
-   * uv/CPython to run pytest.
-   *
-   * WHY ONE CONTAINER + LOOPBACK (not a Dagger service binding): the harness
-   * binds **127.0.0.1 only** by deliberate security design — its `/admin/*`
-   * seed and fault routes are loopback-guarded (`proxy-server.ts`,
-   * `admin-routes.ts`). A cross-container service binding would force it onto
-   * `0.0.0.0` and expose those routes on the sandbox network.
-   *
-   * The command is the manifest's python `liveSuite.runner`: the harness
-   * wrapper (`--corpus-seed --exec`) boots the harness, hands pytest
-   * `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes its exit code
-   * through — one spelling of the boot, shared with contract-live and with
-   * `liveContract`. The wrapper logs to stderr, so stdout's last line stays
-   * the pytest summary. Built on `jsWorkspace(source)` (which builds the
-   * harness CLI) plus the same pinned
-   * uv install and `uv-cache` / `uv-python` volumes as `pythonTest`.
+   * The harness package's own live self-test (`test:live`, #343), its home
+   * since `liveContract` was folded into `liveSuite` (#918, plan 867 A8).
    *
    * @param source The workspace root.
    */
   @func()
-  async livePythonContract(source: Directory): Promise<string> {
-    const runner = await liveSuiteRunner(source, "python");
+  async harnessLiveTest(source: Directory): Promise<string> {
     const result = await jsWorkspace(source)
-      .withEnvVariable("UV_INSTALL_VERSION", "0.4.30")
-      .withExec([
-        "bash",
-        "-c",
-        "apt-get update >/dev/null && apt-get install -y --no-install-recommends curl >/dev/null && rm -rf /var/lib/apt/lists/*",
-      ])
-      .withMountedCache("/root/.cache/uv", dag.cacheVolume("uv-cache"))
-      .withMountedCache("/root/.local/share/uv/python", dag.cacheVolume("uv-python"))
-      .withExec([
-        "bash",
-        "-euo",
-        "pipefail",
-        "-c",
-        // Same pinned uv install as pythonTest (Principle VII — toolchains
-        // are pinned, not floating). `-euo pipefail` surfaces a curl failure
-        // instead of leaving uv silently absent.
-        "CARGO_HOME=/root/.cargo curl -LsSf https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh | sh",
-      ])
-      .withEnvVariable(
-        "PATH",
-        "/root/.cargo/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-      )
-      // Sync the python project (uv downloads a managed CPython + httpx + the
-      // [dev] extra) so `uv run pytest` can drive the canary.
-      .withWorkdir("/work/apps/sdk-python")
-      .withExec(["uv", "sync", "--frozen", "--extra", "dev"])
-      .withWorkdir("/work")
-      .withExec(["bash", "-euo", "pipefail", "-c", runner])
+      .withExec(["pnpm", "--filter", JS_TESTED.harness, "test:live"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (livePythonContract #380)`;
+    return `${lastLine} (harnessLiveTest #918)`;
   }
 
   /**
@@ -1022,8 +1033,6 @@ export class Confeature {
       angularLine,
       reactLine,
       cloudflareWorkerLine,
-      liveContractLine,
-      livePythonContractLine,
       sharedLine,
       cliLine,
     ] = await Promise.all([
@@ -1038,12 +1047,6 @@ export class Confeature {
       wrapWithName("angularTest", this.angularTest(source)),
       wrapWithName("reactTest", this.reactTest(source)),
       wrapWithName("cloudflareWorkerTest", this.cloudflareWorkerTest(source)),
-      // Live-contract harness (#343): in-process Miniflare boot of the reference origin,
-      // shares the same nodeContainer install layer as the JS-family gates.
-      wrapWithName("liveContract", this.liveContract(source)),
-      // sdk-python live canary (#380): boots the harness over loopback in a
-      // combined node+uv container and runs the python wire canary against it.
-      wrapWithName("livePythonContract", this.livePythonContract(source)),
       // Eval-engine conformance corpus (#382): sdk-shared replays the vendored
       // ConfigCat matrix; shares the JS-family install layer.
       wrapWithName("sharedTest", this.sharedTest(source)),
@@ -1068,8 +1071,6 @@ export class Confeature {
       angularLine,
       reactLine,
       cloudflareWorkerLine,
-      liveContractLine,
-      livePythonContractLine,
       sharedLine,
       cliLine,
       `[prepushAll] finished at: ${timingReport()}`,

@@ -6,7 +6,7 @@
     "fetchFailed": "Non-2xx HTTP (except 304/403/404), or network error, or unreadable body.",
     "timeout": "Request aborted by SDK timeout (not dispose).",
     "parseFailed": "Body was 200 but JSON.parse threw OR shape did not match {p, f, s}.",
-    "invalidSdkKey": "CDN responded 404 — the SDK key was rejected upstream."
+    "invalidSdkKey": "CDN responded 403 or 404 — the SDK key was rejected upstream."
   },
   "cases": [
     {
@@ -147,12 +147,12 @@
     },
     {
       "id": "http-403",
-      "description": "Server returns 403 Forbidden with no body. ConfigCat parity: 403 — like 404 — means 'your SDK Key seems to be wrong' (a non-retryable invalid-key signal, NOT a transient fetch failure). configcat-js classes 403 and 404 together; the SDK reports invalidSdkKey for both.",
+      "description": "The edge's real answer to an unknown SDK key (#918): 403 with ConfigCat's AccessDenied XML, byte for byte what tools/test-harness-live-contract/reference-origin/src/index.ts serves on a KV miss (and what packages/contract/read-path-transcript.json records from the CDN Worker). The live harness serves it for an unseeded key, so every live suite meets the origin's own miss, not a fault. ConfigCat parity: 403 — like 404 — means 'your SDK Key seems to be wrong' (a non-retryable invalid-key signal, NOT a transient fetch failure), whatever the body says. configcat-js classes 403 and 404 together; the SDK reports invalidSdkKey for both.",
       "given": { "previousEtag": null },
       "server": {
         "status": 403,
-        "headers": { "Content-Type": "text/plain" },
-        "bodyRef": null
+        "headers": { "Content-Type": "application/xml" },
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
       },
       "expected": {
         "requestHeaderIfNoneMatch": null,
