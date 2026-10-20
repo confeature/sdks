@@ -899,13 +899,11 @@
     "compatibilityDate": "2026-05-14",
     "onError": {
       "status": 500,
-      "bodyKeys": [
-        "error",
-        "message",
-        "requestId"
-      ],
-      "error": "internal_error",
-      "message": "An unexpected error occurred.",
+      "body": {
+        "error": "internal_error",
+        "message": "An unexpected error occurred.",
+        "requestId": "the request's correlation id"
+      },
       "correlationHeader": "cf-ray"
     }
   }
