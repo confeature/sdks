@@ -894,5 +894,19 @@
         "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
       }
     }
-  ]
+  ],
+  "runtime": {
+    "compatibilityDate": "2026-05-14",
+    "onError": {
+      "status": 500,
+      "bodyKeys": [
+        "error",
+        "message",
+        "requestId"
+      ],
+      "error": "internal_error",
+      "message": "An unexpected error occurred.",
+      "correlationHeader": "cf-ray"
+    }
+  }
 }
