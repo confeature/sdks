@@ -13,9 +13,10 @@ import { coerceValue } from "../value.ts";
  * `flag ls --config-id <id>` — list the feature flags (settings) of a config
  * (spec 181 / #655, US2). Mirrors ConfigCat's CLI `flag ls`.
  *
- * Calls `GET /v1/configs/{configId}/settings` (which returns a `{ settings }`
- * envelope) and renders `(key, name, type)`, or the raw typed `settings` array
- * under `--json` (R7). A missing `--config-id` is a clear USAGE error naming the
+ * Calls `GET /v1/configs/{configId}/settings` and renders `(key, name, type)`,
+ * or the list itself under `--json` (R7). The api answers ConfigCat's bare
+ * `SettingModel[]` since #880, and a `{ settings }` envelope before it; this
+ * command reads both, so it works on either side of the api release. A missing `--config-id` is a clear USAGE error naming the
  * option (R9); an empty result prints "no flags" and exits 0 (R10); logged-out
  * short-circuits with NO network call (R8).
  *
@@ -23,8 +24,38 @@ import { coerceValue } from "../value.ts";
  * flag's per-environment value through the same read seam.
  */
 
-type SettingList = operations["listSettings"]["responses"][200]["content"]["application/json"];
-type Setting = SettingList["settings"][number];
+/** A row of `flag ls`: the fields both list shapes carry (#880 D-14). */
+interface FlagRow {
+  key: string;
+  name: string;
+  type: string;
+}
+
+/**
+ * A config's settings list in either shape (#880 D-14): ConfigCat's
+ * `SettingModel[]`, or the pre-#880 `{ settings }` envelope. `items` is the list
+ * as the api sent it (what `--json` prints); `rows` is what the table shows.
+ */
+export function readSettingList(body: unknown): { items: unknown[]; rows: FlagRow[] } {
+  const items: unknown[] | null = Array.isArray(body)
+    ? body
+    : Array.isArray((body as { settings?: unknown } | null)?.settings)
+    ? (body as { settings: unknown[] }).settings
+    : null;
+  // A body that is neither shape is an error, never an empty list.
+  if (items === null) {
+    throw new CliError(
+      "flag ls: the api answered a settings list this CLI cannot read.",
+      ExitCode.RUNTIME,
+    );
+  }
+  const rows = items.map((raw) => {
+    const s = raw as Record<string, unknown>;
+    // `settingType` is ConfigCat's name; `type` is the pre-#880 one.
+    return { key: String(s.key), name: String(s.name), type: String(s.settingType ?? s.type) };
+  });
+  return { items, rows };
+}
 
 // The create / metadata-update bodies, threaded from the generated `operations`
 // types so the write shapes are build-verified against the contract.
@@ -81,7 +112,7 @@ type SettingValuePutBody =
   & { reason?: string };
 type PublishResponse = operations["publishConfig"]["responses"][200]["content"]["application/json"];
 
-const FLAG_COLUMNS: Column<Setting>[] = [
+const FLAG_COLUMNS: Column<FlagRow>[] = [
   { header: "KEY", value: (s) => s.key },
   { header: "NAME", value: (s) => s.name },
   { header: "TYPE", value: (s) => s.type },
@@ -92,23 +123,23 @@ export async function runFlagLs(ctx: RunContext, deps: ReadDeps = {}): Promise<E
   const configId = requireOption(flags["config-id"], "--config-id", "flag ls");
 
   const session = await openReadSession(ctx, deps);
-  const list = await withSession(
+  const body = await withSession(
     session,
-    (client) => client.get<SettingList>(`/v1/configs/${encodeURIComponent(configId)}/settings`),
+    (client) => client.get<unknown>(`/v1/configs/${encodeURIComponent(configId)}/settings`),
   );
-  const settings = list.settings;
+  const { items, rows } = readSettingList(body);
 
   if (session.outputJson) {
-    ctx.io.out(JSON.stringify(settings));
+    ctx.io.out(JSON.stringify(items));
     return ExitCode.OK;
   }
 
-  if (settings.length === 0) {
+  if (rows.length === 0) {
     ctx.io.out("No flags found.");
     return ExitCode.OK;
   }
 
-  ctx.io.out(renderTable(FLAG_COLUMNS, settings));
+  ctx.io.out(renderTable(FLAG_COLUMNS, rows));
   return ExitCode.OK;
 }
 

@@ -17,7 +17,8 @@ info:
       1. Settings are addressed by (configId, key) instead of a synthetic
          numeric settingId — our keys are immutable so the URL is stable.
          This carries over to per-environment value endpoints, which use
-         (configId, key) rather than ConfigCat's numeric settingId.
+         (configId, key) rather than ConfigCat's numeric settingId. The v2
+         value routes (#880) use ConfigCat's numeric settingId, as ConfigCat.
       2. An explicit POST /v1/configs/{configId}/publish endpoint exists
          until value writes auto-materialise to KV. Setting-value writes do
          NOT auto-publish in this version.
@@ -1550,6 +1551,14 @@ paths:
     put:
       operationId: setSettingValue
       summary: Set a per-environment value override for a setting
+      description: >
+        Sets the setting's value in one environment and makes it live there:
+        no publish call is needed, and no other unpublished change ships with
+        it. The response is 200 only once the value is in the environment's
+        edge storage, where it is visible at once; other locations see it
+        within 60 seconds (Workers KV propagation). A 503 means the value is
+        saved but not live yet: retry the same request after Retry-After. A
+        management token also needs config:publish.
       tags: [Setting Values]
       security:
         - bearerAuth: []
@@ -1614,6 +1623,216 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "503":
+          description: >
+            The value is saved but not live yet. Retry the same request after
+            Retry-After.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueNotLive"
+  /v2/environments/{environmentId}/settings/{settingId}/value:
+    # ConfigCat's "Feature Flag & Setting values V2" routes, by numeric
+    # settingId (#880). Only for configs whose evaluationVersion is v2.
+    parameters:
+      - in: path
+        name: environmentId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Environment id (UUID).
+      - in: path
+        name: settingId
+        required: true
+        schema:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 2147483647
+        description: The setting's numeric id (`settingId` on SettingModel).
+    get:
+      operationId: getSettingValueV2
+      summary: Get a setting's value in one environment (v2)
+      description: >
+        Returns the setting's evaluation formula in this environment: its
+        value (`defaultValue`) and its targeting rules, which are always
+        empty until targeting lands (#883). Aligned with ConfigCat's
+        get-setting-value-v2.
+      tags: [Setting Values V2]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The setting's value data.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingFormulaModel"
+        "400":
+          description: >
+            Environment and setting do not share a product, or the config's
+            evaluationVersion is not v2.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks the required scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Setting or environment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: replaceSettingValueV2
+      summary: Replace a setting's value in one environment (v2)
+      description: >
+        Replaces the whole evaluation formula: a field that is not listed is
+        reset. The value goes live in this environment with no publish call;
+        the response is 200 only once it is in the environment's edge storage.
+        A 503 means the value is saved but not live yet: retry the same request
+        after Retry-After. `targetingRules` must be empty until #883, and
+        `percentageEvaluationAttribute` null until #885. A management token
+        also needs config:publish. Aligned with ConfigCat's
+        replace-setting-value-v2.
+      tags: [Setting Values V2]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ValueWriteReason"
+        - $ref: "#/components/parameters/ValueWriteBypassApproval"
+        - $ref: "#/components/parameters/ValueWriteLatestVersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEvaluationFormulaModel"
+      responses:
+        "200":
+          description: The value was replaced and is live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingFormulaModel"
+        "400":
+          $ref: "#/components/responses/ValueWriteBadRequest"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: >
+            The token lacks setting-value:write, or it is a management token
+            without config:publish.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Setting or environment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/ValueWriteConflict"
+        "413":
+          description: The request body is larger than 1 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/ValueNotLive"
+    patch:
+      operationId: updateSettingValueV2
+      summary: Update a setting's value in one environment with JSON Patch (v2)
+      description: >
+        Applies an RFC 6902 JSON Patch to the setting's evaluation formula (the
+        model a PUT takes), then validates and writes the result as a PUT
+        would. Allowed paths: `/defaultValue`, `/defaultValue/boolValue`,
+        `/defaultValue/stringValue`, `/defaultValue/intValue`,
+        `/defaultValue/doubleValue`, `/targetingRules`,
+        `/percentageEvaluationAttribute`. At most 100 operations. A patch that
+        changes nothing answers 204. Aligned with ConfigCat's
+        update-setting-value-v2.
+      tags: [Setting Values V2]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ValueWriteReason"
+        - $ref: "#/components/parameters/ValueWriteBypassApproval"
+        - $ref: "#/components/parameters/ValueWriteLatestVersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 100
+              items:
+                $ref: "#/components/schemas/JsonPatchOperation"
+      responses:
+        "200":
+          description: The patch was applied and the value is live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingFormulaModel"
+        "204":
+          description: The patch changed nothing.
+        "400":
+          $ref: "#/components/responses/ValueWriteBadRequest"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: >
+            The token lacks setting-value:write, or it is a management token
+            without config:publish.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Setting or environment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/ValueWriteConflict"
+        "413":
+          description: The request body is larger than 1 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/ValueNotLive"
   /v1/products/{productId}/configs:
     post:
       operationId: createConfig
@@ -1907,11 +2126,15 @@ paths:
           description: Config id (UUID).
       responses:
         "200":
-          description: List of settings in this config.
+          description: >
+            The settings of this config, in ConfigCat's `SettingModel[]`
+            shape, ordered by `order`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SettingList"
+                type: array
+                items:
+                  $ref: "#/components/schemas/SettingModel"
         "401":
           description: Missing or invalid bearer token.
           content:
@@ -3407,6 +3630,36 @@ components:
         The SDK's name and version, as every ConfigCat-compatible SDK
         sends it. Informational: it feeds the server-side deprecation
         signal and never changes the response.
+    ValueWriteReason:
+      in: query
+      name: reason
+      required: false
+      schema:
+        type: string
+        maxLength: 1000
+      description: >
+        The change note for the audit log. Required (400 reason_required)
+        when the environment or its product requires a reason for changes.
+    ValueWriteBypassApproval:
+      in: query
+      name: bypassApproval
+      required: false
+      schema:
+        type: string
+        enum: ["true", "false"]
+      description: >
+        Accepted for ConfigCat compatibility. Confeature has no approval
+        flow, so it has no effect, and it never bypasses a required reason.
+    ValueWriteLatestVersionId:
+      in: query
+      name: latestVersionId
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >
+        The `lastVersionId` the client last read. When it no longer matches
+        the stored value, the write is refused with 409 and nothing changes.
   responses:
     ConfigV6:
       description: Raw config_v6 JSON payload.
@@ -3449,6 +3702,38 @@ components:
           example: |-
             <?xml version="1.0" encoding="UTF-8"?>
             <Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>
+    ValueWriteBadRequest:
+      description: >
+        Invalid request: a value that does not respect the setting's type or
+        bounds, more than one value field, a predefined variation, targeting
+        rules (#883) or a percentage evaluation attribute (#885), an invalid
+        JSON Patch, a missing required reason, environment and setting in
+        different products, or a config whose evaluationVersion is not v2.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValueWriteConflict:
+      description: >
+        The stored value changed since `latestVersionId` (or since this
+        request read it). Nothing was written; read the value again and retry.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValueNotLive:
+      description: >
+        The value is saved but not live yet. Retry the same request after
+        Retry-After.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValueNotLive"
   headers:
     ConfigCacheControl:
       required: true
@@ -4115,6 +4400,7 @@ components:
         - description
         - order
         - reasonRequired
+        - approveRequired
       properties:
         organization:
           $ref: "#/components/schemas/OrganizationModel"
@@ -4143,6 +4429,11 @@ components:
             Feature Flags or Settings within a Product are saved. Always false
             in Confeature v1 — carried for wire parity; populated when the
             product-preferences surface ships.
+        approveRequired:
+          type: boolean
+          description: >
+            Whether changes need an approval. Always false: Confeature has no
+            approval flow. Carried for wire parity with ConfigCat.
     CreateProductRequest:
       type: object
       required:
@@ -4398,15 +4689,365 @@ components:
           maxLength: 1000
           nullable: true
           description: Optional operator-facing hint (ConfigCat SettingModel.hint).
-    SettingList:
+    SettingModel:
       type: object
+      description: >
+        A Feature Flag or Setting in a config list. Aligned 1:1 with
+        ConfigCat's `SettingModel` (get-settings). It carries no value: a
+        value is per-environment (`SettingFormulaModel`). `tags` and
+        `predefinedVariations` are always empty in Confeature.
       required:
-        - settings
+        - settingId
+        - key
+        - name
+        - hint
+        - order
+        - settingType
+        - isJson
+        - configId
+        - configName
+        - createdAt
+        - tags
+        - predefinedVariations
       properties:
-        settings:
+        settingId:
+          type: integer
+          format: int32
+          description: Identifier of the Feature Flag or Setting.
+        key:
+          $ref: "#/components/schemas/SettingKey"
+        name:
+          type: string
+          description: Name of the Feature Flag or Setting.
+        hint:
+          type: string
+          nullable: true
+          description: Description of the Feature Flag or Setting.
+        order:
+          type: integer
+          format: int32
+          description: >
+            The order of the setting in its config, from 0, by creation.
+        settingType:
+          $ref: "#/components/schemas/SettingType"
+        isJson:
+          type: boolean
+          description: Always false in Confeature.
+        configId:
+          type: string
+          format: uuid
+        configName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        tags:
           type: array
+          maxItems: 0
+          description: Tags are not supported yet; always empty.
           items:
-            $ref: "#/components/schemas/Setting"
+            type: object
+        predefinedVariations:
+          type: array
+          maxItems: 0
+          description: Predefined variations are not supported yet; always empty.
+          items:
+            type: object
+    SettingDataV2Model:
+      type: object
+      description: >
+        The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's
+        `SettingDataV2Model`. The creator fields are always null: Confeature
+        does not return member identities through this model.
+      required:
+        - settingId
+        - key
+        - name
+        - hint
+        - settingType
+        - isJson
+        - order
+        - createdAt
+        - creatorEmail
+        - creatorFullName
+        - predefinedVariations
+        - isWatching
+      properties:
+        settingId:
+          type: integer
+          format: int32
+        key:
+          $ref: "#/components/schemas/SettingKey"
+        name:
+          type: string
+        hint:
+          type: string
+          nullable: true
+        settingType:
+          $ref: "#/components/schemas/SettingType"
+        isJson:
+          type: boolean
+        order:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+        creatorEmail:
+          type: string
+          nullable: true
+        creatorFullName:
+          type: string
+          nullable: true
+        predefinedVariations:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        isWatching:
+          type: boolean
+    ValueModel:
+      type: object
+      description: >
+        A typed value, as ConfigCat's `ValueModel`: exactly the field that
+        matches the setting's type is non-null.
+      required:
+        - boolValue
+        - stringValue
+        - intValue
+        - doubleValue
+        - predefinedVariationId
+      properties:
+        boolValue:
+          type: boolean
+          nullable: true
+        stringValue:
+          type: string
+          nullable: true
+        intValue:
+          type: integer
+          format: int32
+          nullable: true
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+        predefinedVariationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Always null in Confeature.
+    UpdateValueModel:
+      type: object
+      additionalProperties: false
+      description: >
+        The value to set, as ConfigCat's `UpdateValueModel`: exactly one
+        field, the one matching the setting's type, is non-null.
+        `predefinedVariationId` is refused (400).
+      properties:
+        boolValue:
+          type: boolean
+          nullable: true
+        stringValue:
+          type: string
+          maxLength: 100000
+          nullable: true
+        intValue:
+          type: integer
+          format: int32
+          minimum: -2147483648
+          maximum: 2147483647
+          nullable: true
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+        predefinedVariationId:
+          type: string
+          format: uuid
+          nullable: true
+    UpdateEvaluationFormulaModel:
+      type: object
+      additionalProperties: false
+      description: >
+        The body of a v2 value PUT, as ConfigCat's
+        `UpdateEvaluationFormulaModel`. A full replace: an omitted field is
+        reset.
+      required:
+        - defaultValue
+      properties:
+        defaultValue:
+          $ref: "#/components/schemas/UpdateValueModel"
+        targetingRules:
+          type: array
+          nullable: true
+          maxItems: 0
+          description: Must be empty or null until targeting lands (#883).
+          items:
+            type: object
+        percentageEvaluationAttribute:
+          type: string
+          nullable: true
+          maxLength: 1000
+          description: Must be null until percentage options land (#885).
+    FeatureFlagLimitations:
+      type: object
+      description: >
+        The limits this setting's values are held to, as ConfigCat's
+        `FeatureFlagLimitations`. Every targeting limit is 0 until targeting
+        lands (#883).
+      required:
+        - maxPercentageOptionCount
+        - maxTargetingRuleCount
+        - maxComparisonValueLength
+        - maxComparisonValueListLength
+        - maxComparisonValueListItemLength
+        - maxStringFlagValueLength
+        - maxConditionPerTargetingRuleCount
+      properties:
+        maxPercentageOptionCount:
+          type: integer
+          format: int32
+        maxTargetingRuleCount:
+          type: integer
+          format: int32
+        maxComparisonValueLength:
+          type: integer
+          format: int32
+        maxComparisonValueListLength:
+          type: integer
+          format: int32
+        maxComparisonValueListItemLength:
+          type: integer
+          format: int32
+        maxStringFlagValueLength:
+          type: integer
+          format: int32
+        maxConditionPerTargetingRuleCount:
+          type: integer
+          format: int32
+    SettingFormulaModel:
+      type: object
+      description: >
+        A setting's value in one environment, as ConfigCat's
+        `SettingFormulaModel` (get-setting-value-v2). The person fields are
+        always null, `targetingRules` is empty until #883, and approvals are
+        not supported, so `approveRequired`, `canBypassApproval` and
+        `changeRequestCount` are false / false / 0.
+      required:
+        - lastVersionId
+        - defaultValue
+        - targetingRules
+        - setting
+        - updatedAt
+        - percentageEvaluationAttribute
+        - lastUpdaterUserEmail
+        - lastUpdaterUserFullName
+        - integrationLinks
+        - settingTags
+        - settingIdsWherePrerequisite
+        - changeRequestCount
+        - config
+        - environment
+        - readOnly
+        - featureFlagLimitations
+        - approveRequired
+        - canBypassApproval
+        - reasonRequired
+      properties:
+        lastVersionId:
+          type: string
+          format: uuid
+          description: >
+            The version of this value. Send it back as `latestVersionId` to
+            refuse the write if someone changed the value in between.
+        defaultValue:
+          $ref: "#/components/schemas/ValueModel"
+        targetingRules:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        setting:
+          $ref: "#/components/schemas/SettingDataV2Model"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        percentageEvaluationAttribute:
+          type: string
+          nullable: true
+        lastUpdaterUserEmail:
+          type: string
+          nullable: true
+        lastUpdaterUserFullName:
+          type: string
+          nullable: true
+        integrationLinks:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        settingTags:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        settingIdsWherePrerequisite:
+          type: array
+          maxItems: 0
+          items:
+            type: integer
+            format: int32
+        changeRequestCount:
+          type: integer
+          format: int32
+        config:
+          $ref: "#/components/schemas/ConfigModel"
+        environment:
+          $ref: "#/components/schemas/EnvironmentModel"
+        readOnly:
+          type: boolean
+          description: True when the caller cannot write values here.
+        featureFlagLimitations:
+          $ref: "#/components/schemas/FeatureFlagLimitations"
+        approveRequired:
+          type: boolean
+        canBypassApproval:
+          type: boolean
+        reasonRequired:
+          type: boolean
+          description: >
+            True when a change note (`reason`) is required for a value change
+            in this environment.
+    OperationType:
+      type: string
+      enum: [unknown, add, remove, replace, move, copy, test]
+      description: >
+        ConfigCat's `OperationType`. `unknown` is accepted by the schema and
+        refused (400).
+    JsonPatchOperation:
+      type: object
+      description: One RFC 6902 operation, as ConfigCat's `JsonPatchOperation`.
+      required:
+        - op
+        - path
+      properties:
+        op:
+          $ref: "#/components/schemas/OperationType"
+        path:
+          type: string
+          minLength: 1
+          description: The target JSON Pointer (RFC 6901).
+        from:
+          type: string
+          nullable: true
+          description: The source JSON Pointer, for move and copy.
+        value:
+          nullable: true
+          description: The value, for add, replace and test.
     SdkKeysModel:
       type: object
       description: >
@@ -4470,6 +5111,7 @@ components:
         - description
         - order
         - reasonRequired
+        - approveRequired
       properties:
         product:
           $ref: "#/components/schemas/ProductModel"
@@ -4501,6 +5143,11 @@ components:
             Determines whether a mandatory reason must be given every time
             the Feature Flags or Settings are saved within this Environment.
             Always false in Confeature v1 — carried for wire parity.
+        approveRequired:
+          type: boolean
+          description: >
+            Whether changes need an approval. Always false: Confeature has no
+            approval flow. Carried for wire parity with ConfigCat.
     CreateEnvironmentModel:
       type: object
       required:
@@ -4584,6 +5231,20 @@ components:
           description: >
             Whether the invitation has expired. True when the invitation's
             expiry instant has passed; independent of redemption state.
+    ValueNotLive:
+      type: object
+      description: >
+        A value write that was saved but did not reach the edge (#879). One
+        constant body for every cause.
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [not_live]
+        message:
+          type: string
+          enum:
+            - "The value is saved but is not live yet. Retry the same request to make it live."
     SettingValue:
       type: object
       description: >

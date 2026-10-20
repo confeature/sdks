@@ -62,6 +62,22 @@ const setting = (key: string, name: string, type: string) => ({
   updated_at: 0,
 });
 
+// ConfigCat's `SettingModel`, which the api answers since #880.
+const settingModel = (key: string, name: string, settingType: string, order = 0) => ({
+  settingId: order + 1,
+  key,
+  name,
+  hint: null,
+  order,
+  settingType,
+  isJson: false,
+  configId: "cfg-1",
+  configName: "Main",
+  createdAt: "2026-10-20T00:00:00.000Z",
+  tags: [],
+  predefinedVariations: [],
+});
+
 // ── config ls (R5) ────────────────────────────────────────────────────────────
 
 Deno.test("config ls: renders the product's configs (R5)", async () => {
@@ -195,6 +211,63 @@ Deno.test("flag ls: renders key, name, and type for each setting (R5)", async ()
   assertStringIncludes(text, "boolean");
   assertStringIncludes(text, "retryCount");
   assertStringIncludes(text, "int");
+});
+
+Deno.test("flag ls: reads ConfigCat's SettingModel[] (the api since #880)", async () => {
+  const { io, out } = captureIo();
+  const code = await runFlagLs(ctx(io, ["--config-id", "cfg-1"]), {
+    readToken: () => Promise.resolve("tok"),
+    fetch: () =>
+      Promise.resolve(
+        jsonResponse(200, [
+          settingModel("enableDarkMode", "Enable dark mode", "boolean", 0),
+          settingModel("retryCount", "Retry count", "int", 1),
+        ]),
+      ),
+  });
+  assertEquals(code, ExitCode.OK);
+  const text = out.join("\n");
+  for (const want of ["enableDarkMode", "Enable dark mode", "boolean", "retryCount", "int"]) {
+    assertStringIncludes(text, want);
+  }
+});
+
+Deno.test("flag ls: --json emits the SettingModel[] the api sent (#880)", async () => {
+  const { io, out } = captureIo();
+  const list = [settingModel("enableDarkMode", "Enable dark mode", "boolean")];
+  const code = await runFlagLs(ctx(io, ["--config-id", "cfg-1"], { outputJson: true }), {
+    readToken: () => Promise.resolve("tok"),
+    fetch: () => Promise.resolve(jsonResponse(200, list)),
+  });
+  assertEquals(code, ExitCode.OK);
+  assertEquals(JSON.parse(out.join("\n")), list);
+});
+
+for (const [label, body] of [["{}", {}], ["null", null], ["a string", "flags"]] as const) {
+  Deno.test(`flag ls: a list body of ${label} is a runtime error, not an empty list (#880)`, async () => {
+    const { io } = captureIo();
+    let thrown: unknown;
+    try {
+      await runFlagLs(ctx(io, ["--config-id", "cfg-1"]), {
+        readToken: () => Promise.resolve("tok"),
+        fetch: () => Promise.resolve(jsonResponse(200, body)),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    assertEquals(thrown instanceof CliError, true);
+    assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+  });
+}
+
+Deno.test("flag ls: an empty SettingModel[] → 'no flags', exit 0 (#880)", async () => {
+  const { io, out } = captureIo();
+  const code = await runFlagLs(ctx(io, ["--config-id", "cfg-1"]), {
+    readToken: () => Promise.resolve("tok"),
+    fetch: () => Promise.resolve(jsonResponse(200, [])),
+  });
+  assertEquals(code, ExitCode.OK);
+  assertStringIncludes(out.join("\n").toLowerCase(), "no flags");
 });
 
 Deno.test("flag ls: missing --config-id → usage error naming the option (R9)", async () => {

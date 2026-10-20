@@ -552,13 +552,49 @@ export interface paths {
      * @description Returns the setting's value in this environment, projected into the SettingValue envelope. Every (environment, config, setting) triple has exactly one value row — the value is canonical, not an optional override — so the read always returns a value, mirroring ConfigCat's get-value behaviour where every setting has a value in every environment.
      */
     get: operations["getSettingValue"];
-    /** Set a per-environment value override for a setting */
+    /**
+     * Set a per-environment value override for a setting
+     * @description Sets the setting's value in one environment and makes it live there: no publish call is needed, and no other unpublished change ships with it. The response is 200 only once the value is in the environment's edge storage, where it is visible at once; other locations see it within 60 seconds (Workers KV propagation). A 503 means the value is saved but not live yet: retry the same request after Retry-After. A management token also needs config:publish.
+     */
     put: operations["setSettingValue"];
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/v2/environments/{environmentId}/settings/{settingId}/value": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Environment id (UUID). */
+        environmentId: string;
+        /** @description The setting's numeric id (`settingId` on SettingModel). */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a setting's value in one environment (v2)
+     * @description Returns the setting's evaluation formula in this environment: its value (`defaultValue`) and its targeting rules, which are always empty until targeting lands (#883). Aligned with ConfigCat's get-setting-value-v2.
+     */
+    get: operations["getSettingValueV2"];
+    /**
+     * Replace a setting's value in one environment (v2)
+     * @description Replaces the whole evaluation formula: a field that is not listed is reset. The value goes live in this environment with no publish call; the response is 200 only once it is in the environment's edge storage. A 503 means the value is saved but not live yet: retry the same request after Retry-After. `targetingRules` must be empty until #883, and `percentageEvaluationAttribute` null until #885. A management token also needs config:publish. Aligned with ConfigCat's replace-setting-value-v2.
+     */
+    put: operations["replaceSettingValueV2"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update a setting's value in one environment with JSON Patch (v2)
+     * @description Applies an RFC 6902 JSON Patch to the setting's evaluation formula (the model a PUT takes), then validates and writes the result as a PUT would. Allowed paths: `/defaultValue`, `/defaultValue/boolValue`, `/defaultValue/stringValue`, `/defaultValue/intValue`, `/defaultValue/doubleValue`, `/targetingRules`, `/percentageEvaluationAttribute`. At most 100 operations. A patch that changes nothing answers 204. Aligned with ConfigCat's update-setting-value-v2.
+     */
+    patch: operations["updateSettingValueV2"];
     trace?: never;
   };
   "/v1/products/{productId}/configs": {
@@ -1466,6 +1502,8 @@ export interface components {
       order: number;
       /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings within a Product are saved. Always false in Confeature v1 — carried for wire parity; populated when the product-preferences surface ships. */
       reasonRequired: boolean;
+      /** @description Whether changes need an approval. Always false: Confeature has no approval flow. Carried for wire parity with ConfigCat. */
+      approveRequired: boolean;
     };
     CreateProductRequest: {
       /** @description The name of the Product. */
@@ -1568,8 +1606,148 @@ export interface components {
       /** @description Optional operator-facing hint (ConfigCat SettingModel.hint). */
       hint?: string | null;
     };
-    SettingList: {
-      settings: components["schemas"]["Setting"][];
+    /** @description A Feature Flag or Setting in a config list. Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` and `predefinedVariations` are always empty in Confeature. */
+    SettingModel: {
+      /**
+       * Format: int32
+       * @description Identifier of the Feature Flag or Setting.
+       */
+      settingId: number;
+      key: components["schemas"]["SettingKey"];
+      /** @description Name of the Feature Flag or Setting. */
+      name: string;
+      /** @description Description of the Feature Flag or Setting. */
+      hint: string | null;
+      /**
+       * Format: int32
+       * @description The order of the setting in its config, from 0, by creation.
+       */
+      order: number;
+      settingType: components["schemas"]["SettingType"];
+      /** @description Always false in Confeature. */
+      isJson: boolean;
+      /** Format: uuid */
+      configId: string;
+      configName: string;
+      /** Format: date-time */
+      createdAt: string | null;
+      /** @description Tags are not supported yet; always empty. */
+      tags: Record<string, never>[];
+      /** @description Predefined variations are not supported yet; always empty. */
+      predefinedVariations: Record<string, never>[];
+    };
+    /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. The creator fields are always null: Confeature does not return member identities through this model. */
+    SettingDataV2Model: {
+      /** Format: int32 */
+      settingId: number;
+      key: components["schemas"]["SettingKey"];
+      name: string;
+      hint: string | null;
+      settingType: components["schemas"]["SettingType"];
+      isJson: boolean;
+      /** Format: int32 */
+      order: number;
+      /** Format: date-time */
+      createdAt: string | null;
+      creatorEmail: string | null;
+      creatorFullName: string | null;
+      predefinedVariations: Record<string, never>[];
+      isWatching: boolean;
+    };
+    /** @description A typed value, as ConfigCat's `ValueModel`: exactly the field that matches the setting's type is non-null. */
+    ValueModel: {
+      boolValue: boolean | null;
+      stringValue: string | null;
+      /** Format: int32 */
+      intValue: number | null;
+      /** Format: double */
+      doubleValue: number | null;
+      /**
+       * Format: uuid
+       * @description Always null in Confeature.
+       */
+      predefinedVariationId: string | null;
+    };
+    /** @description The value to set, as ConfigCat's `UpdateValueModel`: exactly one field, the one matching the setting's type, is non-null. `predefinedVariationId` is refused (400). */
+    UpdateValueModel: {
+      boolValue?: boolean | null;
+      stringValue?: string | null;
+      /** Format: int32 */
+      intValue?: number | null;
+      /** Format: double */
+      doubleValue?: number | null;
+      /** Format: uuid */
+      predefinedVariationId?: string | null;
+    };
+    /** @description The body of a v2 value PUT, as ConfigCat's `UpdateEvaluationFormulaModel`. A full replace: an omitted field is reset. */
+    UpdateEvaluationFormulaModel: {
+      defaultValue: components["schemas"]["UpdateValueModel"];
+      /** @description Must be empty or null until targeting lands (#883). */
+      targetingRules?: Record<string, never>[] | null;
+      /** @description Must be null until percentage options land (#885). */
+      percentageEvaluationAttribute?: string | null;
+    };
+    /** @description The limits this setting's values are held to, as ConfigCat's `FeatureFlagLimitations`. Every targeting limit is 0 until targeting lands (#883). */
+    FeatureFlagLimitations: {
+      /** Format: int32 */
+      maxPercentageOptionCount: number;
+      /** Format: int32 */
+      maxTargetingRuleCount: number;
+      /** Format: int32 */
+      maxComparisonValueLength: number;
+      /** Format: int32 */
+      maxComparisonValueListLength: number;
+      /** Format: int32 */
+      maxComparisonValueListItemLength: number;
+      /** Format: int32 */
+      maxStringFlagValueLength: number;
+      /** Format: int32 */
+      maxConditionPerTargetingRuleCount: number;
+    };
+    /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields are always null, `targetingRules` is empty until #883, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
+    SettingFormulaModel: {
+      /**
+       * Format: uuid
+       * @description The version of this value. Send it back as `latestVersionId` to refuse the write if someone changed the value in between.
+       */
+      lastVersionId: string;
+      defaultValue: components["schemas"]["ValueModel"];
+      targetingRules: Record<string, never>[];
+      setting: components["schemas"]["SettingDataV2Model"];
+      /** Format: date-time */
+      updatedAt: string | null;
+      percentageEvaluationAttribute: string | null;
+      lastUpdaterUserEmail: string | null;
+      lastUpdaterUserFullName: string | null;
+      integrationLinks: Record<string, never>[];
+      settingTags: Record<string, never>[];
+      settingIdsWherePrerequisite: number[];
+      /** Format: int32 */
+      changeRequestCount: number;
+      config: components["schemas"]["ConfigModel"];
+      environment: components["schemas"]["EnvironmentModel"];
+      /** @description True when the caller cannot write values here. */
+      readOnly: boolean;
+      featureFlagLimitations: components["schemas"]["FeatureFlagLimitations"];
+      approveRequired: boolean;
+      canBypassApproval: boolean;
+      /** @description True when a change note (`reason`) is required for a value change in this environment. */
+      reasonRequired: boolean;
+    };
+    /**
+     * @description ConfigCat's `OperationType`. `unknown` is accepted by the schema and refused (400).
+     * @enum {string}
+     */
+    OperationType: "unknown" | "add" | "remove" | "replace" | "move" | "copy" | "test";
+    /** @description One RFC 6902 operation, as ConfigCat's `JsonPatchOperation`. */
+    JsonPatchOperation: {
+      op: components["schemas"]["OperationType"];
+      /** @description The target JSON Pointer (RFC 6901). */
+      path: string;
+      /** @description The source JSON Pointer, for move and copy. */
+      from?: string | null;
+      /** @description The value, for add, replace and test. */
+      value?: unknown;
     };
     /** @description The SDK keys for a Config in a specified Environment. Schema aligned 1:1 with ConfigCat's `SdkKeysModel` (configcat-publicapi-node-client/model/sdk-keys-model.ts). */
     SdkKeysModel: {
@@ -1611,6 +1789,8 @@ export interface components {
       order: number;
       /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings are saved within this Environment. Always false in Confeature v1 — carried for wire parity. */
       reasonRequired: boolean;
+      /** @description Whether changes need an approval. Always false: Confeature has no approval flow. Carried for wire parity with ConfigCat. */
+      approveRequired: boolean;
     };
     CreateEnvironmentModel: {
       /** @description The name of the Environment. */
@@ -1647,6 +1827,13 @@ export interface components {
       createdAt: string;
       /** @description Whether the invitation has expired. True when the invitation's expiry instant has passed; independent of redemption state. */
       expired: boolean;
+    };
+    /** @description A value write that was saved but did not reach the edge (#879). One constant body for every cause. */
+    ValueNotLive: {
+      /** @enum {string} */
+      error: "not_live";
+      /** @enum {string} */
+      message: "The value is saved but is not live yet. Retry the same request to make it live.";
     };
     /** @description Per-environment setting value envelope. Matches ConfigCat's shape: `value` carries the override; `rolloutRules` and `rolloutPercentageItems` MUST be present but empty in phase 1 (segments / targeting are not yet supported); `settingType` is the value's type discriminator. Confeature persists only `value` and `settingType` for now. */
     SettingValue: {
@@ -2114,12 +2301,47 @@ export interface components {
         "application/xml": string;
       };
     };
+    /** @description Invalid request: a value that does not respect the setting's type or bounds, more than one value field, a predefined variation, targeting rules (#883) or a percentage evaluation attribute (#885), an invalid JSON Patch, a missing required reason, environment and setting in different products, or a config whose evaluationVersion is not v2. */
+    ValueWriteBadRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The stored value changed since `latestVersionId` (or since this request read it). Nothing was written; read the value again and retry. */
+    ValueWriteConflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The value is saved but not live yet. Retry the same request after Retry-After. */
+    ValueNotLive: {
+      headers: {
+        /** @description Seconds to wait before retrying. */
+        "Retry-After"?: number;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ValueNotLive"];
+      };
+    };
   };
   parameters: {
     /** @description The strong, quoted `ETag` of the config the SDK already holds, compared verbatim. A match answers `304 Not Modified`. */
     ConfigIfNoneMatch: string;
     /** @description The SDK's name and version, as every ConfigCat-compatible SDK sends it. Informational: it feeds the server-side deprecation signal and never changes the response. */
     ConfigSdkVersion: string;
+    /** @description The change note for the audit log. Required (400 reason_required) when the environment or its product requires a reason for changes. */
+    ValueWriteReason: string;
+    /** @description Accepted for ConfigCat compatibility. Confeature has no approval flow, so it has no effect, and it never bypasses a required reason. */
+    ValueWriteBypassApproval: "true" | "false";
+    /** @description The `lastVersionId` the client last read. When it no longer matches the stored value, the write is refused with 409 and nothing changes. */
+    ValueWriteLatestVersionId: string;
   };
   requestBodies: never;
   headers: {
@@ -3672,6 +3894,235 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      /** @description The value is saved but not live yet. Retry the same request after Retry-After. */
+      503: {
+        headers: {
+          /** @description Seconds to wait before retrying. */
+          "Retry-After"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValueNotLive"];
+        };
+      };
+    };
+  };
+  getSettingValueV2: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Environment id (UUID). */
+        environmentId: string;
+        /** @description The setting's numeric id (`settingId` on SettingModel). */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The setting's value data. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingFormulaModel"];
+        };
+      };
+      /** @description Environment and setting do not share a product, or the config's evaluationVersion is not v2. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks the required scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting or environment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  replaceSettingValueV2: {
+    parameters: {
+      query?: {
+        /** @description The change note for the audit log. Required (400 reason_required) when the environment or its product requires a reason for changes. */
+        reason?: components["parameters"]["ValueWriteReason"];
+        /** @description Accepted for ConfigCat compatibility. Confeature has no approval flow, so it has no effect, and it never bypasses a required reason. */
+        bypassApproval?: components["parameters"]["ValueWriteBypassApproval"];
+        /** @description The `lastVersionId` the client last read. When it no longer matches the stored value, the write is refused with 409 and nothing changes. */
+        latestVersionId?: components["parameters"]["ValueWriteLatestVersionId"];
+      };
+      header?: never;
+      path: {
+        /** @description Environment id (UUID). */
+        environmentId: string;
+        /** @description The setting's numeric id (`settingId` on SettingModel). */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateEvaluationFormulaModel"];
+      };
+    };
+    responses: {
+      /** @description The value was replaced and is live. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingFormulaModel"];
+        };
+      };
+      400: components["responses"]["ValueWriteBadRequest"];
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks setting-value:write, or it is a management token without config:publish. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting or environment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      409: components["responses"]["ValueWriteConflict"];
+      /** @description The request body is larger than 1 MiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      503: components["responses"]["ValueNotLive"];
+    };
+  };
+  updateSettingValueV2: {
+    parameters: {
+      query?: {
+        /** @description The change note for the audit log. Required (400 reason_required) when the environment or its product requires a reason for changes. */
+        reason?: components["parameters"]["ValueWriteReason"];
+        /** @description Accepted for ConfigCat compatibility. Confeature has no approval flow, so it has no effect, and it never bypasses a required reason. */
+        bypassApproval?: components["parameters"]["ValueWriteBypassApproval"];
+        /** @description The `lastVersionId` the client last read. When it no longer matches the stored value, the write is refused with 409 and nothing changes. */
+        latestVersionId?: components["parameters"]["ValueWriteLatestVersionId"];
+      };
+      header?: never;
+      path: {
+        /** @description Environment id (UUID). */
+        environmentId: string;
+        /** @description The setting's numeric id (`settingId` on SettingModel). */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["JsonPatchOperation"][];
+      };
+    };
+    responses: {
+      /** @description The patch was applied and the value is live. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingFormulaModel"];
+        };
+      };
+      /** @description The patch changed nothing. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["ValueWriteBadRequest"];
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks setting-value:write, or it is a management token without config:publish. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting or environment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      409: components["responses"]["ValueWriteConflict"];
+      /** @description The request body is larger than 1 MiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      503: components["responses"]["ValueNotLive"];
     };
   };
   listConfigs: {
@@ -3960,13 +4411,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List of settings in this config. */
+      /** @description The settings of this config, in ConfigCat's `SettingModel[]` shape, ordered by `order`. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SettingList"];
+          "application/json": components["schemas"]["SettingModel"][];
         };
       };
       /** @description Missing or invalid bearer token. */
