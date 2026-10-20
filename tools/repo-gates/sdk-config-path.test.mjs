@@ -10,8 +10,8 @@
  * URL must show the scan a CODE line holding both `configuration-files` and
  * `config_v6.json`, so a builder the rule cannot see fails instead of passing.
  *
- * Ported from the private monorepo (confeature-monorepo #795, where it ran in
- * the CDN's suite until the SDK copies there were removed). The files are read
+ * It ran in the hosted service's CDN suite until the SDK sources were
+ * removed from there; it lives here now, next to the code it reads. The files are read
  * here, in Node, from `git ls-files`: "tracked" is git's answer, not a glob's.
  * Fails closed: an empty listing throws rather than scan nothing.
  */
