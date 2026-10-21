@@ -6,4 +6,4 @@
  * `--version` prints exactly this value, and the smoke test asserts against it.
  * Keep this in sync with the `version` field in `deno.json` when releasing.
  */
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
