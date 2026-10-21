@@ -8,19 +8,25 @@
  * network — mirroring the #655 `read_*_test.ts` pattern.
  *
  * Assertions map to contracts/flag-value.md:
- *   R1  — update issues GET value → PUT value (coerced) → POST publish, in order.
+ *   R1  — update issues GET value → PUT value (coerced), and NOTHING after: a
+ *         value write is live in its environment once the PUT succeeds, so
+ *         there is no config publish (#933).
  *   R2  — show renders the value + type for the env.
  *   R3  — string/int/double coercion happy paths.
- *   R4  — a wrong-type `--value` is a usage error with NO PUT/publish.
+ *   R4  — a wrong-type `--value` is a usage error with NO PUT.
  *   R9  — `--reason` is placed in the PUT body (client side).
  *   R10 — logged-out → NotLoggedInError, NO network call.
  *   R11 — a missing required option → usage error naming it.
  *   R13 — `--json` emits stable machine-readable JSON.
  *   R14 — the token / reason is never printed.
+ *   #933 — a PUT answering `503 not_live` is "saved, not live yet": retry, with
+ *         the `Retry-After` wait when the header carries a valid one; any other
+ *         PUT failure keeps the plain api error and never claims a save.
  */
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { runFlagValue } from "../src/cli/commands/flag.ts";
+import { ApiError } from "../src/api/client.ts";
 import { CliError } from "../src/cli/errors.ts";
 import { NotLoggedInError } from "../src/cli/read.ts";
 import type { RunContext } from "../src/cli/commands/registry.ts";
@@ -42,10 +48,14 @@ function ctx(io: Io, args: string[], overrides: Partial<Globals> = {}): RunConte
   return { globals: globals({ apiUrl: "https://api.example", ...overrides }), args, io };
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -54,11 +64,13 @@ function settingValue(value: boolean | string | number, settingType: string) {
   return { value, rolloutRules: [], rolloutPercentageItems: [], settingType };
 }
 
-const PUBLISH_OK = {
-  config_id: "cfg-1",
-  sdk_keys_updated: 1,
-  setting_count: 3,
-  published_at: 1_700_000_000_000,
+/**
+ * The api's constant body for a value that was saved but did not reach the edge
+ * (#879, `ValueNotLive` in the contract) — byte-for-byte what it sends.
+ */
+const NOT_LIVE_BODY = {
+  error: "not_live",
+  message: "The value is saved but is not live yet. Retry the same request to make it live.",
 };
 
 /** Record every request a command issues: method + path + parsed JSON body. */
@@ -91,7 +103,7 @@ const VALUE_PATH = "/v1/environments/env-1/configs/cfg-1/settings/darkMode/value
 
 // ── flag value update — happy path (R1) ───────────────────────────────────────
 
-Deno.test("flag value update: issues GET → PUT(coerced) → publish in order (R1)", async () => {
+Deno.test("flag value update: issues GET → PUT(coerced) and no publish, LIVE row (R1, #933)", async () => {
   const { io, out } = captureIo();
   const { fetch, calls } = recordingFetch((call) => {
     if (call.method === "GET" && call.url.endsWith(VALUE_PATH)) {
@@ -100,8 +112,10 @@ Deno.test("flag value update: issues GET → PUT(coerced) → publish in order (
     if (call.method === "PUT" && call.url.endsWith(VALUE_PATH)) {
       return jsonResponse(200, settingValue(false, "boolean"));
     }
+    // A config publish would still succeed against this stub, so only the
+    // sequence assertion below can catch one being sent.
     if (call.method === "POST" && call.url.endsWith("/v1/configs/cfg-1/publish")) {
-      return jsonResponse(200, PUBLISH_OK);
+      return jsonResponse(200, { config_id: "cfg-1" });
     }
     return jsonResponse(404, { error: "not_found" });
   });
@@ -122,14 +136,19 @@ Deno.test("flag value update: issues GET → PUT(coerced) → publish in order (
   );
 
   assertEquals(code, ExitCode.OK);
-  // Exactly GET → PUT → publish, in that order.
+  // Exactly GET → PUT. The PUT is the write that makes the value live; a config
+  // publish after it would ship every other pending draft of the config (#933).
   assertEquals(
     calls.map((c) => c.method),
-    ["GET", "PUT", "POST"],
+    ["GET", "PUT"],
+  );
+  assertEquals(
+    calls.some((c) => c.url.includes("/publish")),
+    false,
+    "a value update must never publish the config",
   );
   assertStringIncludes(calls[0]!.url, VALUE_PATH);
   assertStringIncludes(calls[1]!.url, VALUE_PATH);
-  assertStringIncludes(calls[2]!.url, "/v1/configs/cfg-1/publish");
 
   // The PUT body carries the coerced typed value + the full SettingValue envelope.
   assertEquals((calls[1]!.body as { value: unknown }).value, false);
@@ -146,7 +165,9 @@ Deno.test("flag value update: issues GET → PUT(coerced) → publish in order (
   // old → new shown.
   assertStringIncludes(text, "true");
   assertStringIncludes(text, "false");
-  assertStringIncludes(text.toLowerCase(), "published");
+  // The outcome row reports the PUT's result, not a publish.
+  assertEquals(/^LIVE\s+yes\s*$/m.test(text), true, `expected a 'LIVE yes' row in:\n${text}`);
+  assertEquals(text.toLowerCase().includes("publish"), false);
 });
 
 // ── flag value update — preserves existing targeting (read-modify-write, #669) ─
@@ -170,7 +191,7 @@ Deno.test("flag value update: preserves existing rolloutRules/rolloutPercentageI
     if (call.method === "PUT" && call.url.endsWith(VALUE_PATH)) {
       return jsonResponse(200, settingValue(false, "boolean"));
     }
-    return jsonResponse(200, PUBLISH_OK);
+    return jsonResponse(404, { error: "not_found" });
   });
 
   const code = await runFlagValue(
@@ -199,12 +220,12 @@ Deno.test("flag value update: preserves existing rolloutRules/rolloutPercentageI
   );
 });
 
-Deno.test("flag value update: --json emits a stable success object (R13)", async () => {
+Deno.test("flag value update: --json reports live: true and no published key (R13, #933)", async () => {
   const { io, out } = captureIo();
   const { fetch } = recordingFetch((call) => {
     if (call.method === "GET") return jsonResponse(200, settingValue(true, "boolean"));
     if (call.method === "PUT") return jsonResponse(200, settingValue(false, "boolean"));
-    return jsonResponse(200, PUBLISH_OK);
+    return jsonResponse(404, { error: "not_found" });
   });
 
   const code = await runFlagValue(
@@ -232,56 +253,143 @@ Deno.test("flag value update: --json emits a stable success object (R13)", async
   assertEquals(parsed.environmentId, "env-1");
   assertEquals(parsed.before, true);
   assertEquals(parsed.after, false);
-  assertEquals(parsed.published, true);
+  // The JSON contract reports the PUT outcome; `published` is gone (#933).
+  assertEquals(parsed.live, true);
+  assertEquals("published" in parsed, false);
 });
 
-Deno.test("flag value update: PUT ok but publish FAILS → 'saved, not live' error, no false success (#656 review)", async () => {
+/** The argv of a plain `flag value update` of `darkMode` in `env-1`. */
+const UPDATE_ARGS = [
+  "update",
+  "--config-id",
+  "cfg-1",
+  "--key",
+  "darkMode",
+  "--environment-id",
+  "env-1",
+  "--value",
+  "false",
+];
+
+/**
+ * Run `flag value update` against a stub whose PUT answers `putResponse`, and
+ * return what was thrown, printed and requested.
+ */
+async function updateWithPut(
+  putResponse: () => Response,
+  overrides: Partial<Globals> = {},
+): Promise<{ thrown: unknown; out: string[]; err: string[]; calls: Call[] }> {
   const { io, out, err } = captureIo();
   const { fetch, calls } = recordingFetch((call) => {
     if (call.method === "GET") return jsonResponse(200, settingValue(true, "boolean"));
-    if (call.method === "PUT") return jsonResponse(200, settingValue(false, "boolean"));
-    // The value is now persisted, but publishing fails — the toggle is NOT live.
-    return jsonResponse(500, { error: "internal_error" });
+    if (call.method === "PUT") return putResponse();
+    return jsonResponse(404, { error: "not_found" });
   });
-
   let thrown: unknown;
   try {
-    await runFlagValue(
-      ctx(io, [
-        "update",
-        "--config-id",
-        "cfg-1",
-        "--key",
-        "darkMode",
-        "--environment-id",
-        "env-1",
-        "--value",
-        "false",
-      ]),
-      { readToken: () => Promise.resolve("tok"), fetch },
-    );
+    await runFlagValue(ctx(io, UPDATE_ARGS, overrides), {
+      readToken: () => Promise.resolve("tok"),
+      fetch,
+    });
   } catch (error) {
     thrown = error;
   }
+  return { thrown, out, err, calls };
+}
 
-  // The PUT happened (value saved) and publish was attempted and failed.
-  assertEquals(
-    calls.map((c) => c.method),
-    ["GET", "PUT", "POST"],
-  );
-  // The command fails (non-OK) and tells the operator the value was SAVED but NOT live.
-  assertEquals(thrown instanceof CliError, true);
-  assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
-  const message = (thrown as CliError).message.toLowerCase();
-  assertStringIncludes(message, "saved");
-  assertStringIncludes(message, "not live");
-  // It must NOT have printed a success line claiming the toggle is published.
-  const printed = [...out, ...err].join("\n").toLowerCase();
-  assertEquals(
-    printed.includes("published"),
-    false,
-    "must not claim published on a failed publish",
-  );
+Deno.test("flag value update: PUT 503 not_live with Retry-After → saved, not live, retry after N seconds (#933)", async () => {
+  for (
+    const [retryAfter, wait] of [
+      ["1", "1 second"],
+      ["30", "30 seconds"],
+    ] as const
+  ) {
+    for (const outputJson of [false, true]) {
+      const { thrown, out, calls } = await updateWithPut(
+        () => jsonResponse(503, NOT_LIVE_BODY, { "Retry-After": retryAfter }),
+        { outputJson },
+      );
+
+      // The PUT was the last call: nothing is published to "make it live".
+      assertEquals(calls.map((c) => c.method), ["GET", "PUT"]);
+      assertEquals(thrown instanceof CliError, true, `Retry-After ${retryAfter} should raise`);
+      assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+      const message = (thrown as CliError).message;
+      assertStringIncludes(message, "'darkMode'");
+      assertStringIncludes(message, "SAVED");
+      assertStringIncludes(message, "NOT live yet");
+      assertStringIncludes(message.toLowerCase(), "retry the same command");
+      assertStringIncludes(message, wait);
+      // Nothing on stdout: no success row, no JSON claiming the value is live.
+      assertEquals(out, [], "a not-live write must print nothing on stdout");
+    }
+  }
+});
+
+Deno.test("flag value update: PUT 503 not_live without a usable Retry-After → retry, no number (#933)", async () => {
+  // Absent, and every value that is not a non-negative integer number of
+  // seconds (an HTTP-date is valid HTTP, but not the seconds this CLI reports).
+  for (
+    const headers of [
+      {},
+      { "Retry-After": "" },
+      { "Retry-After": "soon" },
+      { "Retry-After": "-1" },
+      { "Retry-After": "1.5" },
+      { "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" },
+    ] as Record<string, string>[]
+  ) {
+    const { thrown, out } = await updateWithPut(() => jsonResponse(503, NOT_LIVE_BODY, headers));
+
+    const label = JSON.stringify(headers);
+    assertEquals(thrown instanceof CliError, true, `${label} should raise`);
+    assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+    const message = (thrown as CliError).message;
+    assertStringIncludes(message, "SAVED");
+    assertStringIncludes(message, "NOT live yet");
+    assertStringIncludes(message.toLowerCase(), "retry the same command");
+    assertEquals(/\d/.test(message), false, `${label}: no wait may be invented in: ${message}`);
+    assertEquals(out, []);
+  }
+});
+
+Deno.test("flag value update: any other PUT failure keeps the api error, never claims a save (#933)", async () => {
+  for (
+    const [status, body, headers] of [
+      [500, { error: "internal_error" }, {}],
+      // A 503 that is not the not_live body is an ordinary failure: nothing
+      // says the value was saved.
+      [503, { error: "service_unavailable" }, { "Retry-After": "1" }],
+      [503, null, {}],
+      [502, { error: "<html>bad gateway</html>" }, {}],
+      [400, { error: "invalid_request", message: "value does not match settingType" }, {}],
+      [403, { error: "forbidden" }, {}],
+      [404, { error: "not_found" }, {}],
+      [409, { error: "conflict" }, {}],
+    ] as [number, unknown, Record<string, string>][]
+  ) {
+    const { thrown, out, calls } = await updateWithPut(() =>
+      body === null ? new Response(null, { status, headers }) : jsonResponse(status, body, headers)
+    );
+
+    assertEquals(calls.map((c) => c.method), ["GET", "PUT"]);
+    assertEquals(thrown instanceof ApiError, true, `${status} should surface the ApiError`);
+    assertEquals((thrown as ApiError).status, status);
+    assertEquals((thrown as ApiError).exitCode, ExitCode.RUNTIME);
+    const message = (thrown as ApiError).message.toLowerCase();
+    assertEquals(message.includes("saved"), false, `${status} must not claim a save: ${message}`);
+    assertEquals(message.includes("live"), false, `${status} must not mention live: ${message}`);
+    assertEquals(out, []);
+  }
+});
+
+Deno.test("flag value update: PUT 401 stays AUTH (not logged in), never claims a save (#933)", async () => {
+  const { thrown, out } = await updateWithPut(() => jsonResponse(401, { error: "unauthorized" }));
+
+  assertEquals(thrown instanceof NotLoggedInError, true);
+  assertEquals((thrown as CliError).exitCode, ExitCode.AUTH);
+  assertEquals((thrown as CliError).message.toLowerCase().includes("saved"), false);
+  assertEquals(out, []);
 });
 
 Deno.test("flag value update: logged out → NotLoggedInError, NO network call (R10)", async () => {
@@ -378,7 +486,7 @@ Deno.test("flag value update: never prints the bearer token or the reason (R14)"
   const { fetch } = recordingFetch((call) => {
     if (call.method === "GET") return jsonResponse(200, settingValue(true, "boolean"));
     if (call.method === "PUT") return jsonResponse(200, settingValue(false, "boolean"));
-    return jsonResponse(200, PUBLISH_OK);
+    return jsonResponse(404, { error: "not_found" });
   });
 
   await runFlagValue(
@@ -417,7 +525,7 @@ Deno.test("flag value update: string/int/double coercion happy paths (R3)", asyn
     const { fetch, calls } = recordingFetch((call) => {
       if (call.method === "GET") return jsonResponse(200, settingValue(expected, type));
       if (call.method === "PUT") return jsonResponse(200, settingValue(expected, type));
-      return jsonResponse(200, PUBLISH_OK);
+      return jsonResponse(404, { error: "not_found" });
     });
 
     const code = await runFlagValue(
@@ -442,7 +550,7 @@ Deno.test("flag value update: string/int/double coercion happy paths (R3)", asyn
   }
 });
 
-Deno.test("flag value update: wrong-type --value → usage error, NO PUT/publish (R4)", async () => {
+Deno.test("flag value update: wrong-type --value → usage error, NO write (R4)", async () => {
   for (
     const [type, raw] of [
       ["boolean", "maybe"],
@@ -464,9 +572,9 @@ Deno.test("flag value update: wrong-type --value → usage error, NO PUT/publish
   ) {
     const { io } = captureIo();
     const { fetch, calls } = recordingFetch((call) => {
-      // The GET (to learn the type) is allowed; PUT/publish must NOT happen.
+      // The GET (to learn the type) is allowed; no write may happen.
       if (call.method === "GET") return jsonResponse(200, settingValue(false, type));
-      return jsonResponse(200, PUBLISH_OK);
+      return jsonResponse(404, { error: "not_found" });
     });
 
     let thrown: unknown;
@@ -497,7 +605,7 @@ Deno.test("flag value update: wrong-type --value → usage error, NO PUT/publish
     assertEquals(
       calls.some((c) => c.method === "PUT" || c.method === "POST"),
       false,
-      "a wrong-type value must not PUT or publish",
+      "a wrong-type value must not write",
     );
   }
 });
@@ -507,7 +615,7 @@ Deno.test("flag value update: --reason is placed in the PUT body (R9)", async ()
   const { fetch, calls } = recordingFetch((call) => {
     if (call.method === "GET") return jsonResponse(200, settingValue(true, "boolean"));
     if (call.method === "PUT") return jsonResponse(200, settingValue(false, "boolean"));
-    return jsonResponse(200, PUBLISH_OK);
+    return jsonResponse(404, { error: "not_found" });
   });
 
   await runFlagValue(

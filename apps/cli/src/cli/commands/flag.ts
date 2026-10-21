@@ -4,6 +4,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import type { components, operations } from "@confeature/contract/api";
 import { ExitCode } from "../exit.ts";
 import { CliError } from "../errors.ts";
+import { ApiError } from "../../api/client.ts";
 import type { Group, Leaf, RunContext } from "./registry.ts";
 import { openReadSession, type ReadDeps, requireOption, withSession } from "../read.ts";
 import { type Column, renderTable } from "../table.ts";
@@ -21,7 +22,9 @@ import { coerceValue } from "../value.ts";
  * short-circuits with NO network call (R8).
  *
  * `flag value show` / `flag value update` (spec 182 / #656) reads + sets a
- * flag's per-environment value through the same read seam.
+ * flag's per-environment value through the same read seam. A value write is
+ * live in its environment once it succeeds (#879), so `update` writes and
+ * stops, like ConfigCat's CLI (#933).
  */
 
 /** A row of `flag ls`: the fields both list shapes carry (#880 D-14). */
@@ -110,7 +113,31 @@ type SettingValue = operations["getSettingValue"]["responses"][200]["content"]["
 type SettingValuePutBody =
   & operations["setSettingValue"]["requestBody"]["content"]["application/json"]
   & { reason?: string };
-type PublishResponse = operations["publishConfig"]["responses"][200]["content"]["application/json"];
+/** The api's constant body for a value saved but not live yet (#879). */
+type ValueNotLive = components["schemas"]["ValueNotLive"];
+
+/**
+ * Whether a failed value PUT is the api's "saved, not live yet" answer: a `503`
+ * whose body is the contract's `ValueNotLive`. Only that answer proves the
+ * value was saved; every other failure (another 503 included) says nothing
+ * about the save, so the command must not claim one (#933).
+ */
+function isValueNotLive(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 503 &&
+    (error.body as Partial<ValueNotLive> | null)?.error === "not_live";
+}
+
+/**
+ * The wait a `Retry-After` header gives, in whole seconds, or `null` when it is
+ * absent or not a non-negative integer. An HTTP-date is valid HTTP but not
+ * what the api sends, so the CLI reports no number rather than guess one.
+ */
+function retryAfterSeconds(header: string | null): number | null {
+  const trimmed = header?.trim() ?? "";
+  if (!/^\d+$/.test(trimmed)) return null;
+  const seconds = Number(trimmed);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
 
 const FLAG_COLUMNS: Column<FlagRow>[] = [
   { header: "KEY", value: (s) => s.key },
@@ -203,19 +230,25 @@ export async function runFlagValueShow(ctx: RunContext, deps: ReadDeps = {}): Pr
 
 /**
  * `flag value update --config-id <id> --key <key> --environment-id <id>
- * --value <v> [--reason <note>]` — set a flag's value in one environment and
- * publish it so the change goes live (spec 182 / #656, US1/US2/US4).
+ * --value <v> [--reason <note>]` — set a flag's value in one environment
+ * (spec 182 / #656, US1/US2/US4). The value is live in that environment once
+ * the write succeeds (#879), the same as ConfigCat's CLI, which writes and
+ * stops.
  *
  * Flow (research §R4): GET the value (to learn the declared `settingType`, the
  * before-value, AND the existing targeting), coerce `--value` to that type
- * BEFORE any write (a wrong-type value is a USAGE error with no PUT/publish —
- * R4), PUT the typed `SettingValue` body overriding ONLY `value` and PRESERVING
- * the existing `rolloutRules` / `rolloutPercentageItems` (#669; read-modify-
- * write — never blind-overwrite), then POST the config `publish` so the new
- * value is projected to the served config (FR-002).
+ * BEFORE any write (a wrong-type value is a USAGE error with no PUT — R4), then
+ * PUT the typed `SettingValue` body overriding ONLY `value` and PRESERVING the
+ * existing `rolloutRules` / `rolloutPercentageItems` (#669; read-modify-write —
+ * never blind-overwrite). Nothing follows the PUT: a config publish would ship
+ * every other pending draft of the config, in every environment (#933).
+ *
+ * A `503 not_live` from the PUT means the value is saved but its projection did
+ * not land; the command says so and asks for the same command again, which the
+ * api makes live (#879). Any other failure is the plain api error.
  *
  * SECURITY: the bearer token and the `--reason` note are NEVER printed — only
- * the key / env / old→new value / published flag reach the output (R14).
+ * the key / env / old→new value / live flag reach the output (R14).
  */
 export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): Promise<ExitCode> {
   const flags = parseArgs(ctx.args, {
@@ -278,31 +311,20 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
   };
   if (reason !== undefined) putBody.reason = reason;
 
-  await withSession(
-    session,
-    (client) => client.put<SettingValue>(valuePath(environmentId, configId, key), putBody),
-  );
-
-  // Publish the config so the new value is projected to the served config —
-  // a toggle is not LIVE until publish (FR-002). Bodiless POST.
-  //
-  // The value is ALREADY persisted by the PUT above. If publishing fails
-  // (network, server error, or membership revoked in the narrow window between
-  // the two calls), the value is SAVED but NOT yet live — surface that exactly
-  // so the operator never mistakes a partial write for "nothing happened" or
-  // for "fully live" (review #656). The success output below is unreachable on
-  // this path, so the command never falsely claims `published: true`.
   try {
     await withSession(
       session,
-      (client) =>
-        client.post<PublishResponse>(`/v1/configs/${encodeURIComponent(configId)}/publish`),
+      (client) => client.put<SettingValue>(valuePath(environmentId, configId, key), putBody),
     );
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    // Only the api's not_live answer proves a save; anything else (401 → AUTH
+    // included) propagates untouched, so no other failure claims one.
+    if (!isValueNotLive(error)) throw error;
+    const seconds = retryAfterSeconds(error.headers.get("Retry-After"));
+    const when = seconds === null ? "" : ` after ${seconds} second${seconds === 1 ? "" : "s"}`;
     throw new CliError(
-      `flag value update: the value for '${key}' was SAVED but publishing failed — ` +
-        `it is NOT live yet. Retry, or publish the config from the dashboard. (${detail})`,
+      `flag value update: the value for '${key}' was SAVED but is NOT live yet. ` +
+        `Retry the same command${when} to make it live.`,
       ExitCode.RUNTIME,
     );
   }
@@ -315,7 +337,7 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
         settingType: current.settingType,
         before: current.value,
         after: coerced,
-        published: true,
+        live: true,
       }),
     );
     return ExitCode.OK;
@@ -328,7 +350,7 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
       ["TYPE", current.settingType],
       ["OLD", String(current.value)],
       ["NEW", String(coerced)],
-      ["PUBLISHED", "yes"],
+      ["LIVE", "yes"],
     ]),
   );
   return ExitCode.OK;
@@ -347,7 +369,8 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
  * naming it (R9); logged-out short-circuits with NO network call (R8).
  *
  * The new flag is seeded with its type's zero value in every environment; set a
- * value and publish (`flag value update`) to make it live.
+ * value with `flag value update`, which is live in its environment once it
+ * succeeds.
  */
 export async function runFlagCreate(ctx: RunContext, deps: ReadDeps = {}): Promise<ExitCode> {
   const flags = parseArgs(ctx.args, { string: ["config-id", "key", "name", "type", "hint"] });
@@ -569,7 +592,7 @@ const deleteLeaf: Leaf = {
 
 const valueLeaf: Leaf = {
   name: "value",
-  summary: "Show or set a flag's per-environment value.",
+  summary: "Show or set a flag's per-environment value (a set is live once it succeeds).",
   run: (ctx) => runFlagValue(ctx),
 };
 

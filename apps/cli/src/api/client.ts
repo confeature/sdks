@@ -43,11 +43,17 @@ export class ApiError extends CliError {
   readonly status: number;
   /** The parsed JSON error body, when the response carried one. */
   readonly body: unknown;
+  /**
+   * The response headers, so a caller can read a signal the api sends there —
+   * the `Retry-After` of a value write that is saved but not live yet (#933).
+   */
+  readonly headers: Headers;
 
-  constructor(status: number, message: string, body: unknown) {
+  constructor(status: number, message: string, body: unknown, headers: Headers = new Headers()) {
     super(message, status === 401 ? ExitCode.AUTH : ExitCode.RUNTIME);
     this.status = status;
     this.body = body;
+    this.headers = headers;
   }
 }
 
@@ -58,11 +64,12 @@ export class NetworkError extends CliError {
   }
 }
 
-/** The result of a raw request: status plus the parsed JSON body (or `null`). */
+/** The result of a raw request: status, headers, and the parsed JSON body (or `null`). */
 export interface ApiResponse<T> {
   status: number;
   ok: boolean;
   body: T;
+  headers: Headers;
 }
 
 export class ApiClient {
@@ -105,10 +112,9 @@ export class ApiClient {
   }
 
   /**
-   * Typed `POST` for the contract's writes (spec 182 / #656 — the config
-   * `publish` that makes a toggled value live). Same typing + redaction
-   * contract as {@link put}; a `body` of `undefined` issues a bodiless POST
-   * (e.g. `publish`, which reads no JSON body).
+   * Typed `POST` for the contract's writes (the creates, `member invite`,
+   * `sdk-key rotate`). Same typing + redaction contract as {@link put}; a
+   * `body` of `undefined` issues a bodiless POST.
    */
   post<TRes>(path: string, body?: unknown): Promise<TRes> {
     const init: RequestInit = { method: "POST" };
@@ -145,7 +151,7 @@ export class ApiClient {
     const res = await this.request<T>(path, init);
     if (!res.ok) {
       const message = errorMessage(res.status, res.body);
-      throw new ApiError(res.status, message, res.body);
+      throw new ApiError(res.status, message, res.body, res.headers);
     }
     return res.body;
   }
@@ -175,7 +181,7 @@ export class ApiClient {
     }
 
     const body = (await parseJsonBody(res)) as T;
-    return { status: res.status, ok: res.ok, body };
+    return { status: res.status, ok: res.ok, body, headers: res.headers };
   }
 }
 
