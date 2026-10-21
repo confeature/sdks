@@ -1222,6 +1222,9 @@ paths:
     delete:
       operationId: deleteProduct
       summary: Delete a product
+      description: >
+        Takes every SDK key of the product off the edge, so a management
+        token also needs config:publish.
       tags: [Products]
       security:
         - bearerAuth: []
@@ -1243,7 +1246,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks product:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:
@@ -1445,6 +1450,8 @@ paths:
         Cascades to setting_values and sdk_keys bound to this environment.
         The handler removes KV entries for every child sdk_key before
         issuing the D1 cascade so the eval CDN stops serving immediately.
+        That takes the environment off the edge, so a management token also
+        needs config:publish.
       tags: [Environments]
       security:
         - bearerAuth: []
@@ -1466,7 +1473,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks environment:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:
@@ -2020,6 +2029,9 @@ paths:
     delete:
       operationId: deleteConfig
       summary: Delete a config
+      description: >
+        Takes every SDK key of the config off the edge, so a management
+        token also needs config:publish.
       tags: [Configs]
       security:
         - bearerAuth: []
@@ -2041,7 +2053,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks config:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:
@@ -2453,7 +2467,9 @@ paths:
         (`rotateSdkKeys`). A deleted key stops serving within about 60 s at
         the edge; from then on the CDN answers it like any unknown key (403
         `AccessDenied`), and it never serves again. Requires the
-        `sdk-key:write` scope. Recorded in the audit log as `apiKeyRemoved`.
+        `sdk-key:write` scope; a management token also needs
+        `config:publish`, since the delete takes the key off the edge.
+        Recorded in the audit log as `apiKeyRemoved`.
       tags: [SDK Keys]
       security:
         - bearerAuth: []
@@ -2502,7 +2518,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks sdk-key:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:

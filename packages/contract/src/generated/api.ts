@@ -492,7 +492,10 @@ export interface paths {
     get: operations["getProduct"];
     put?: never;
     post?: never;
-    /** Delete a product */
+    /**
+     * Delete a product
+     * @description Takes every SDK key of the product off the edge, so a management token also needs config:publish.
+     */
     delete: operations["deleteProduct"];
     options?: never;
     head?: never;
@@ -531,7 +534,7 @@ export interface paths {
     post?: never;
     /**
      * Delete an environment
-     * @description Cascades to setting_values and sdk_keys bound to this environment. The handler removes KV entries for every child sdk_key before issuing the D1 cascade so the eval CDN stops serving immediately.
+     * @description Cascades to setting_values and sdk_keys bound to this environment. The handler removes KV entries for every child sdk_key before issuing the D1 cascade so the eval CDN stops serving immediately. That takes the environment off the edge, so a management token also needs config:publish.
      */
     delete: operations["deleteEnvironment"];
     options?: never;
@@ -626,7 +629,10 @@ export interface paths {
     get: operations["getConfig"];
     put?: never;
     post?: never;
-    /** Delete a config */
+    /**
+     * Delete a config
+     * @description Takes every SDK key of the config off the edge, so a management token also needs config:publish.
+     */
     delete: operations["deleteConfig"];
     options?: never;
     head?: never;
@@ -726,7 +732,7 @@ export interface paths {
     post?: never;
     /**
      * Delete an SDK key of a config in an environment (Confeature extension)
-     * @description CONFEATURE EXTENSION — not part of ConfigCat parity (ConfigCat deletes a key from its dashboard). Deletes the primary or the secondary SDK key. Deleting the primary promotes the secondary to primary. The only key cannot be deleted (409 `only_key`): generate a secondary first (`rotateSdkKeys`). A deleted key stops serving within about 60 s at the edge; from then on the CDN answers it like any unknown key (403 `AccessDenied`), and it never serves again. Requires the `sdk-key:write` scope. Recorded in the audit log as `apiKeyRemoved`.
+     * @description CONFEATURE EXTENSION — not part of ConfigCat parity (ConfigCat deletes a key from its dashboard). Deletes the primary or the secondary SDK key. Deleting the primary promotes the secondary to primary. The only key cannot be deleted (409 `only_key`): generate a secondary first (`rotateSdkKeys`). A deleted key stops serving within about 60 s at the edge; from then on the CDN answers it like any unknown key (403 `AccessDenied`), and it never serves again. Requires the `sdk-key:write` scope; a management token also needs `config:publish`, since the delete takes the key off the edge. Recorded in the audit log as `apiKeyRemoved`.
      */
     delete: operations["deleteSdkKey"];
     options?: never;
@@ -3412,7 +3418,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks product:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -3686,7 +3692,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks environment:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -4319,7 +4325,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks config:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -4847,7 +4853,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks sdk-key:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
