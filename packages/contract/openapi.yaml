@@ -2093,7 +2093,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks setting:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:
@@ -2300,7 +2302,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            The token lacks setting:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:
@@ -3185,6 +3189,10 @@ paths:
     post:
       operationId: rollbackGuardianEvent
       summary: One-click rollback of the suspect flag-value change.
+      description: >
+        Restores the suspect flag's value in this environment, live when SDKs
+        are still served the suspect change. A management token also needs
+        config:publish.
       tags: [Guardian]
       security:
         - bearerAuth: []
@@ -3222,6 +3230,14 @@ paths:
                 $ref: "#/components/schemas/GuardianRollbackResult"
         "400":
           description: A change note (reason) is required for this change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: >
+            The token lacks guardian:write, or it is a management token
+            without config:publish.
           content:
             application/json:
               schema:

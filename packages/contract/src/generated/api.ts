@@ -1005,7 +1005,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** One-click rollback of the suspect flag-value change. */
+    /**
+     * One-click rollback of the suspect flag-value change.
+     * @description Restores the suspect flag's value in this environment, live when SDKs are still served the suspect change. A management token also needs config:publish.
+     */
     post: operations["rollbackGuardianEvent"];
     delete?: never;
     options?: never;
@@ -4492,7 +4495,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks setting:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -4603,7 +4606,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description The token lacks setting:write, or it is a management token without config:publish. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -5556,6 +5559,15 @@ export interface operations {
       };
       /** @description A change note (reason) is required for this change. */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks guardian:write, or it is a management token without config:publish. */
+      403: {
         headers: {
           [name: string]: unknown;
         };
