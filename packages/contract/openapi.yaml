@@ -2925,6 +2925,16 @@ paths:
     post:
       operationId: receiveGuardianSignal
       summary: Inbound error-spike signal (token-auth; the customer's alert POSTs here).
+      description: >
+        Served by hooks.confeature.io, a dedicated ingress host that
+        persists no request logs. The path token is the integration's
+        credential, which Confeature stores only as a hash; this host keeps
+        the plaintext out of every Confeature log. The ingress hashes the
+        token and hands the api only that hash, never the token or the
+        request URL.
+      servers:
+        - url: https://hooks.confeature.io
+          description: Release Guardian webhook ingress
       tags: [Guardian]
       # NO security — authenticity is the path token. Body is ignored for auth in v1.
       parameters:
@@ -5750,7 +5760,10 @@ components:
           properties:
             webhookUrl:
               type: string
-              description: The full inbound URL with the plaintext token — returned ONCE, never again.
+              description: >
+                The full inbound URL with the plaintext token,
+                `https://hooks.confeature.io/v1/guardian/webhooks/{token}` —
+                returned ONCE, never again.
     GuardianChangeSummary:
       type: object
       description: A summary of a suspect/candidate audit_log change (no error data).

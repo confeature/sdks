@@ -890,7 +890,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Inbound error-spike signal (token-auth; the customer's alert POSTs here). */
+    /**
+     * Inbound error-spike signal (token-auth; the customer's alert POSTs here).
+     * @description Served by hooks.confeature.io, a dedicated ingress host that persists no request logs. The path token is the integration's credential, which Confeature stores only as a hash; this host keeps the plaintext out of every Confeature log. The ingress hashes the token and hands the api only that hash, never the token or the request URL.
+     */
     post: operations["receiveGuardianSignal"];
     delete?: never;
     options?: never;
@@ -2101,7 +2104,7 @@ export interface components {
       createdAt: number;
     };
     GuardianIntegrationCreated: components["schemas"]["GuardianIntegration"] & {
-      /** @description The full inbound URL with the plaintext token — returned ONCE, never again. */
+      /** @description The full inbound URL with the plaintext token, `https://hooks.confeature.io/v1/guardian/webhooks/{token}` — returned ONCE, never again. */
       webhookUrl: string;
     };
     /** @description A summary of a suspect/candidate audit_log change (no error data). */
