@@ -650,7 +650,10 @@ export interface paths {
     /** List settings in a config */
     get: operations["listSettings"];
     put?: never;
-    /** Create a setting within a config */
+    /**
+     * Create a setting within a config
+     * @description The new setting goes live with no publish call: when the 201 arrives it is served, with its initial value, in every published environment of the config. An environment never published receives it at its first publish. If the edge cannot be updated at that moment, the setting is still created and the 201 stands; the edge update is retried automatically.
+     */
     post: operations["createSetting"];
     delete?: never;
     options?: never;
@@ -669,7 +672,10 @@ export interface paths {
     get: operations["getSetting"];
     put?: never;
     post?: never;
-    /** Delete a setting */
+    /**
+     * Delete a setting
+     * @description The deletion goes live with no publish call: when the 204 arrives the setting is no longer served in any published environment of the config. If the edge cannot be updated at that moment, the setting is still deleted and the 204 stands; the edge update is retried automatically.
+     */
     delete: operations["deleteSetting"];
     options?: never;
     head?: never;
