@@ -29,6 +29,7 @@ from urllib.parse import quote
 
 import httpx
 
+from . import _httpx_log_guard
 from .logger import Logger
 from .sdk_key import is_utf8_encodable, is_valid_confeature_key_format, redact_sdk_key
 
@@ -103,6 +104,8 @@ class ConfigFetcher:
         }
         self._sync_client: httpx.Client | None = None
         self._async_client: httpx.AsyncClient | None = None
+        # httpx logs each request URL — the keyed one — at INFO (#835).
+        _httpx_log_guard.install()
 
     @property
     def url(self) -> str | None:
@@ -217,7 +220,8 @@ class ConfigFetcher:
             target = self._target()
             if isinstance(target, FetchResult):
                 return target
-            response = self._sync().get(target, headers=self._build_headers(etag))
+            with _httpx_log_guard.sdk_send():
+                response = self._sync().get(target, headers=self._build_headers(etag))
             return self._parse(response)
         except _InsecureRedirect:
             return self._refuse_redirect()
@@ -230,7 +234,8 @@ class ConfigFetcher:
             target = self._target()
             if isinstance(target, FetchResult):
                 return target
-            response = await self._async().get(target, headers=self._build_headers(etag))
+            with _httpx_log_guard.sdk_send():
+                response = await self._async().get(target, headers=self._build_headers(etag))
             return self._parse(response)
         except _InsecureRedirect:
             return self._refuse_redirect()
