@@ -19,6 +19,9 @@
  *   R11 — a missing required option → usage error naming it.
  *   R13 — `--json` emits stable machine-readable JSON.
  *   R14 — the token / reason is never printed.
+ *   #817 — the config's `evaluationVersion` picks the route. Every case here is
+ *         a v1 config, which keeps the by-key v1 routes; the v2 routes are
+ *         asserted in `flag_value_v2_test.ts`.
  *   #933 — a PUT answering `503 not_live` is "saved, not live yet": retry, with
  *         the `Retry-After` wait when the header carries a valid one; any other
  *         PUT failure keeps the plain api error and never claims a save.
@@ -80,10 +83,27 @@ interface Call {
   body: unknown;
 }
 
+/** The config read the route choice makes before any value call (#817). */
+const CONFIG_PATH = "/v1/configs/cfg-1";
+
+/** A `ConfigModel` as `GET /v1/configs/{configId}` returns it. */
+function configModel(evaluationVersion: string) {
+  return {
+    product: { productId: "prod-1", name: "P" },
+    configId: "cfg-1",
+    name: "Main",
+    description: null,
+    order: 0,
+    migratedConfigId: null,
+    evaluationVersion,
+  };
+}
+
 /**
  * Build a `fetch` stub that routes by `${method} ${pathSuffix}` and records
  * each call. The value path is matched by suffix so the test does not have to
- * spell out the full base URL.
+ * spell out the full base URL. The config read is answered here, as a v1
+ * config, so `routes` only sees the value calls (they are still recorded).
  */
 function recordingFetch(
   routes: (call: Call) => Response,
@@ -94,6 +114,9 @@ function recordingFetch(
     const body = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
     const call = { method, url, body };
     calls.push(call);
+    if (method === "GET" && url.endsWith(CONFIG_PATH)) {
+      return Promise.resolve(jsonResponse(200, configModel("v1")));
+    }
     return Promise.resolve(routes(call));
   };
   return { fetch, calls };
@@ -103,7 +126,7 @@ const VALUE_PATH = "/v1/environments/env-1/configs/cfg-1/settings/darkMode/value
 
 // ── flag value update — happy path (R1) ───────────────────────────────────────
 
-Deno.test("flag value update: issues GET → PUT(coerced) and no publish, LIVE row (R1, #933)", async () => {
+Deno.test("flag value update: v1 config issues GET config → GET → PUT(coerced), no publish, LIVE row (R1, #933)", async () => {
   const { io, out } = captureIo();
   const { fetch, calls } = recordingFetch((call) => {
     if (call.method === "GET" && call.url.endsWith(VALUE_PATH)) {
@@ -136,26 +159,26 @@ Deno.test("flag value update: issues GET → PUT(coerced) and no publish, LIVE r
   );
 
   assertEquals(code, ExitCode.OK);
-  // Exactly GET → PUT. The PUT is the write that makes the value live; a config
-  // publish after it would ship every other pending draft of the config (#933).
+  // Exactly config GET → value GET → PUT, on the v1 routes. The PUT is the
+  // write that makes the value live; a config publish after it would ship every
+  // other pending draft of the config (#933).
   assertEquals(
-    calls.map((c) => c.method),
-    ["GET", "PUT"],
+    calls.map((c) => `${c.method} ${new URL(c.url).pathname}`),
+    [`GET ${CONFIG_PATH}`, `GET ${VALUE_PATH}`, `PUT ${VALUE_PATH}`],
   );
   assertEquals(
     calls.some((c) => c.url.includes("/publish")),
     false,
     "a value update must never publish the config",
   );
-  assertStringIncludes(calls[0]!.url, VALUE_PATH);
-  assertStringIncludes(calls[1]!.url, VALUE_PATH);
+  assertEquals(calls.some((c) => c.url.includes("/v2/")), false, "a v1 config stays on v1");
 
   // The PUT body carries the coerced typed value + the full SettingValue envelope.
-  assertEquals((calls[1]!.body as { value: unknown }).value, false);
-  assertEquals((calls[1]!.body as { settingType: unknown }).settingType, "boolean");
-  assertEquals((calls[1]!.body as { rolloutRules: unknown[] }).rolloutRules, []);
+  assertEquals((calls[2]!.body as { value: unknown }).value, false);
+  assertEquals((calls[2]!.body as { settingType: unknown }).settingType, "boolean");
+  assertEquals((calls[2]!.body as { rolloutRules: unknown[] }).rolloutRules, []);
   assertEquals(
-    (calls[1]!.body as { rolloutPercentageItems: unknown[] }).rolloutPercentageItems,
+    (calls[2]!.body as { rolloutPercentageItems: unknown[] }).rolloutPercentageItems,
     [],
   );
 
@@ -311,7 +334,7 @@ Deno.test("flag value update: PUT 503 not_live with Retry-After → saved, not l
       );
 
       // The PUT was the last call: nothing is published to "make it live".
-      assertEquals(calls.map((c) => c.method), ["GET", "PUT"]);
+      assertEquals(calls.map((c) => c.method), ["GET", "GET", "PUT"]);
       assertEquals(thrown instanceof CliError, true, `Retry-After ${retryAfter} should raise`);
       assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
       const message = (thrown as CliError).message;
@@ -372,7 +395,7 @@ Deno.test("flag value update: any other PUT failure keeps the api error, never c
       body === null ? new Response(null, { status, headers }) : jsonResponse(status, body, headers)
     );
 
-    assertEquals(calls.map((c) => c.method), ["GET", "PUT"]);
+    assertEquals(calls.map((c) => c.method), ["GET", "GET", "PUT"]);
     assertEquals(thrown instanceof ApiError, true, `${status} should surface the ApiError`);
     assertEquals((thrown as ApiError).status, status);
     assertEquals((thrown as ApiError).exitCode, ExitCode.RUNTIME);
@@ -641,22 +664,20 @@ Deno.test("flag value update: --reason is placed in the PUT body (R9)", async ()
 
 // ── flag value show (R2 / R13) ────────────────────────────────────────────────
 
-Deno.test("flag value show: renders the value + type for the env (R2)", async () => {
+Deno.test("flag value show: v1 config renders the value + type for the env (R2, #817)", async () => {
   const { io, out } = captureIo();
-  const urls: string[] = [];
+  const { fetch, calls } = recordingFetch(() => jsonResponse(200, settingValue(true, "boolean")));
   const code = await runFlagValue(
     ctx(io, ["show", "--config-id", "cfg-1", "--key", "darkMode", "--environment-id", "env-1"]),
-    {
-      readToken: () => Promise.resolve("tok"),
-      fetch: (url) => {
-        urls.push(url);
-        return Promise.resolve(jsonResponse(200, settingValue(true, "boolean")));
-      },
-    },
+    { readToken: () => Promise.resolve("tok"), fetch },
   );
 
   assertEquals(code, ExitCode.OK);
-  assertEquals(urls, [`https://api.example${VALUE_PATH}`]);
+  // The config read picks the route; a v1 config reads the by-key v1 value.
+  assertEquals(calls.map((c) => c.url), [
+    `https://api.example${CONFIG_PATH}`,
+    `https://api.example${VALUE_PATH}`,
+  ]);
   const text = out.join("\n");
   assertStringIncludes(text, "env-1");
   assertStringIncludes(text, "boolean");
@@ -672,7 +693,7 @@ Deno.test("flag value show: --json emits the typed value envelope (R13)", async 
     }),
     {
       readToken: () => Promise.resolve("tok"),
-      fetch: () => Promise.resolve(jsonResponse(200, value)),
+      fetch: recordingFetch(() => jsonResponse(200, value)).fetch,
     },
   );
 

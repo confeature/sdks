@@ -8,8 +8,10 @@ adds `org` as a top-level concept).
 
 The scaffold (spec 179 / epic #652, sub-task #653) delivered a runnable executable, the command
 tree, deterministic configuration, and a secure credential store. Browser device-flow auth — `login`
-/ `whoami` / `logout` (spec 180 / #654) — is now wired. The remaining account interaction — the `ls`
-commands (#655), `flag value` (#656) — lands in later slices.
+/ `whoami` / `logout` (spec 180 / #654) — is wired, and so are the `ls` commands (#655) and
+`flag value show` / `flag value update` (#656). On a config whose `evaluationVersion` is `v2`,
+`flag value` uses ConfigCat's v2 value API by `settingId`, and an update replaces only the default
+value, so every targeting rule and percentage option is kept (#817).
 
 It is a **native Deno project** (the first in the monorepo), intentionally outside the pnpm
 workspace. The Deno toolchain is confined to `apps/cli`; it never touches the edge/data plane.
@@ -23,7 +25,7 @@ deno task run -- --version     # single version string
 deno task run -- login         # browser device-flow login (opens the approval page)
 deno task run -- whoami        # logged-in identity (via GET /v1/me), or "not logged in"
 deno task run -- logout        # revoke the token server-side + clear it locally
-deno task run -- flag ls       # "not yet implemented" (exit 3)
+deno task run -- flag ls --config-id <id>   # the config's feature flags
 ```
 
 ## Configure

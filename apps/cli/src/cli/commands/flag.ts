@@ -4,11 +4,17 @@ import { parseArgs } from "@std/cli/parse-args";
 import type { components, operations } from "@confeature/contract/api";
 import { ExitCode } from "../exit.ts";
 import { CliError } from "../errors.ts";
-import { ApiError } from "../../api/client.ts";
+import { type ApiClient, ApiError } from "../../api/client.ts";
 import type { Group, Leaf, RunContext } from "./registry.ts";
-import { openReadSession, type ReadDeps, requireOption, withSession } from "../read.ts";
+import {
+  openReadSession,
+  type ReadDeps,
+  type ReadSession,
+  requireOption,
+  withSession,
+} from "../read.ts";
 import { type Column, renderTable } from "../table.ts";
-import { coerceValue } from "../value.ts";
+import { coerceValue, type TypedValue } from "../value.ts";
 
 /**
  * `flag ls --config-id <id>` — list the feature flags (settings) of a config
@@ -22,9 +28,11 @@ import { coerceValue } from "../value.ts";
  * short-circuits with NO network call (R8).
  *
  * `flag value show` / `flag value update` (spec 182 / #656) reads + sets a
- * flag's per-environment value through the same read seam. A value write is
- * live in its environment once it succeeds (#879), so `update` writes and
- * stops, like ConfigCat's CLI (#933).
+ * flag's per-environment value through the same read seam, on the route the
+ * config's `evaluationVersion` picks: the v2 value API by `settingId` on a v2
+ * config, the by-key v1 route otherwise (#817). A value write is live in its
+ * environment once it succeeds (#879), so `update` writes and stops, like
+ * ConfigCat's CLI (#933).
  */
 
 /** A row of `flag ls`: the fields both list shapes carry (#880 D-14). */
@@ -105,7 +113,7 @@ function requireSettingType(raw: string | undefined, command: string): SettingTy
   return trimmed as SettingType;
 }
 
-// The per-environment value envelope (shared by GET value / PUT value). The PUT
+// The v1 per-environment value envelope (shared by GET value / PUT value). The PUT
 // body additionally carries an optional `reason` (the mandatory-notes gate);
 // the generated `SettingValue` schema omits it (additive — a ConfigCat client
 // never sends it), so the write body extends the GET shape with it.
@@ -170,13 +178,157 @@ export async function runFlagLs(ctx: RunContext, deps: ReadDeps = {}): Promise<E
   return ExitCode.OK;
 }
 
-/** Build the per-environment value path the GET/PUT value endpoints share. */
+/** Build the by-key v1 value path the GET/PUT value endpoints share. */
 function valuePath(environmentId: string, configId: string, key: string): string {
   return (
     `/v1/environments/${encodeURIComponent(environmentId)}` +
     `/configs/${encodeURIComponent(configId)}` +
     `/settings/${encodeURIComponent(key)}/value`
   );
+}
+
+// The reads the route choice makes, and the v2 value API's read and patch
+// shapes, threaded from the generated `operations` types (#817).
+type ConfigModel = operations["getConfig"]["responses"][200]["content"]["application/json"];
+type SettingRead = operations["getSetting"]["responses"][200]["content"]["application/json"];
+type SettingFormula =
+  operations["getSettingValueV2"]["responses"][200]["content"]["application/json"];
+type FormulaPatch =
+  operations["updateSettingValueV2"]["requestBody"]["content"]["application/json"];
+type ValueModel = components["schemas"]["ValueModel"];
+
+/** The `ValueModel` field that holds a value of each setting type. */
+const VALUE_FIELD = {
+  boolean: "boolValue",
+  string: "stringValue",
+  int: "intValue",
+  double: "doubleValue",
+} as const satisfies Record<SettingType, keyof ValueModel>;
+
+/** Where a flag's value lives in one environment, and which API speaks it. */
+type ValueRoute = { kind: "v1"; path: string } | { kind: "v2"; path: string };
+
+/**
+ * THE choice of value route for the `flag value` commands (#817). It is the
+ * only place the CLI decides it.
+ *
+ * A config whose `evaluationVersion` is `v2` keeps its values behind
+ * ConfigCat's v2 value API, addressed by the setting's numeric `settingId`
+ * (`/v2/environments/{environmentId}/settings/{settingId}/value`). Those values
+ * carry targeting rules and percentage options, and the by-key v1 route refuses
+ * a value that has them, so a v2 config must never be sent there. Any other
+ * config keeps the by-key v1 route, which needs no `settingId`.
+ *
+ * The CLI is addressed by `--config-id` and `--key`, so the route costs a
+ * config read, and on v2 a setting read for the `settingId`. ConfigCat's CLI
+ * makes the same two reads before a value call.
+ */
+async function valueRouteOf(
+  client: ApiClient,
+  environmentId: string,
+  configId: string,
+  key: string,
+): Promise<ValueRoute> {
+  const config = await client.get<ConfigModel>(`/v1/configs/${encodeURIComponent(configId)}`);
+  if (config.evaluationVersion !== "v2") {
+    return { kind: "v1", path: valuePath(environmentId, configId, key) };
+  }
+  const setting = await client.get<SettingRead>(
+    `/v1/configs/${encodeURIComponent(configId)}/settings/${encodeURIComponent(key)}`,
+  );
+  // The id becomes a path segment: anything but a positive integer is an api
+  // answer this CLI cannot address a value with.
+  if (!Number.isSafeInteger(setting.settingId) || setting.settingId < 1) {
+    throw new CliError(
+      `flag value: the api answered a setting id this CLI cannot read for '${key}'.`,
+      ExitCode.RUNTIME,
+    );
+  }
+  return {
+    kind: "v2",
+    path: `/v2/environments/${encodeURIComponent(environmentId)}` +
+      `/settings/${setting.settingId}/value`,
+  };
+}
+
+/** A flag's value in one environment, as the route that holds it answers it. */
+type ValueRead =
+  | { kind: "v1"; path: string; body: SettingValue }
+  | { kind: "v2"; path: string; body: SettingFormula };
+
+/** Choose the route (see {@link valueRouteOf}), then read the value through it. */
+async function readValue(
+  session: ReadSession,
+  environmentId: string,
+  configId: string,
+  key: string,
+): Promise<ValueRead> {
+  return await withSession(session, async (client): Promise<ValueRead> => {
+    const route = await valueRouteOf(client, environmentId, configId, key);
+    return route.kind === "v2"
+      ? { ...route, body: await client.get<SettingFormula>(route.path) }
+      : { ...route, body: await client.get<SettingValue>(route.path) };
+  });
+}
+
+/** The flag's declared type: the v1 envelope's, or the v2 setting's. */
+function settingTypeOf(read: ValueRead): SettingType {
+  return read.kind === "v2" ? read.body.setting.settingType : read.body.settingType;
+}
+
+/**
+ * The value the environment serves when no rule matches. On v2 that is the
+ * default value's typed field; a null there is an answer this CLI cannot show.
+ */
+function valueOf(read: ValueRead): TypedValue {
+  if (read.kind === "v1") return read.body.value;
+  const value = read.body.defaultValue[VALUE_FIELD[settingTypeOf(read)]];
+  if (value === null || value === undefined) {
+    throw new CliError(
+      "flag value: the api answered a value this CLI cannot read.",
+      ExitCode.RUNTIME,
+    );
+  }
+  return value;
+}
+
+/**
+ * Write `value` through the route the value was read from, changing nothing
+ * else about the flag (#669).
+ *
+ * - **v2**: a JSON Patch (RFC 6902) that replaces the default value's typed
+ *   field and nothing else, so every targeting rule, percentage option and the
+ *   percentage attribute stay as they are, by construction. The api applies
+ *   it to the value it holds at write time, so a rule added between the read
+ *   and the write is kept too. ConfigCat's CLI patches `/defaultValue` the same
+ *   way. The change note is the `reason` query parameter there.
+ * - **v1**: a full-replace `PUT` of the value envelope, so the targeting read
+ *   back above is sent unchanged. The api pins it empty today, and refuses a v1
+ *   write on a value that has v2 rules.
+ */
+async function writeValue(
+  session: ReadSession,
+  read: ValueRead,
+  value: TypedValue,
+  reason: string | undefined,
+): Promise<void> {
+  if (read.kind === "v2") {
+    const patch: FormulaPatch = [
+      { op: "replace", path: `/defaultValue/${VALUE_FIELD[settingTypeOf(read)]}`, value },
+    ];
+    const query = reason === undefined ? "" : `?reason=${encodeURIComponent(reason)}`;
+    // A 200 and a 204 ("the patch changed nothing") both answer a live value.
+    await withSession(session, (client) => client.patch<unknown>(`${read.path}${query}`, patch));
+    return;
+  }
+  const putBody: SettingValuePutBody = {
+    value,
+    settingType: read.body.settingType,
+    rolloutRules: read.body.rolloutRules,
+    rolloutPercentageItems: read.body.rolloutPercentageItems,
+  };
+  if (reason !== undefined) putBody.reason = reason;
+  await withSession(session, (client) => client.put<SettingValue>(read.path, putBody));
 }
 
 /** Render a (label, value) pair table — the show / update human surface. */
@@ -191,10 +343,12 @@ function renderPairs(pairs: [string, string][]): string {
 /**
  * `flag value show --config-id <id> --key <key> --environment-id <id>` — report
  * a flag's current value (and declared type) for one environment (spec 182 /
- * #656, US3). Calls `GET …/settings/{key}/value` and renders `(env, type,
- * value)`, or the raw typed `SettingValue` under `--json` (R2/R13). A missing
- * required option is a USAGE error naming it (R11); logged-out short-circuits
- * with NO network call (R10).
+ * #656, US3). The route follows the config's `evaluationVersion` (#817): the
+ * by-key v1 `SettingValue`, or the v2 `SettingFormulaModel` by `settingId`.
+ * Renders `(env, type, value)`, plus the targeting rule count on v2, where the
+ * value is the one served when no rule matches; `--json` prints the api's body
+ * as sent (R2/R13). A missing required option is a USAGE error naming it
+ * (R11); logged-out short-circuits with NO network call (R10).
  */
 export async function runFlagValueShow(ctx: RunContext, deps: ReadDeps = {}): Promise<ExitCode> {
   const flags = parseArgs(ctx.args, { string: ["config-id", "key", "environment-id"] });
@@ -207,24 +361,21 @@ export async function runFlagValueShow(ctx: RunContext, deps: ReadDeps = {}): Pr
   );
 
   const session = await openReadSession(ctx, deps);
-  const value = await withSession(
-    session,
-    (client) => client.get<SettingValue>(valuePath(environmentId, configId, key)),
-  );
+  const read = await readValue(session, environmentId, configId, key);
 
   if (session.outputJson) {
-    ctx.io.out(JSON.stringify(value));
+    ctx.io.out(JSON.stringify(read.body));
     return ExitCode.OK;
   }
 
-  ctx.io.out(
-    renderPairs([
-      ["KEY", key],
-      ["ENVIRONMENT", environmentId],
-      ["TYPE", value.settingType],
-      ["VALUE", String(value.value)],
-    ]),
-  );
+  const pairs: [string, string][] = [
+    ["KEY", key],
+    ["ENVIRONMENT", environmentId],
+    ["TYPE", settingTypeOf(read)],
+    ["VALUE", String(valueOf(read))],
+  ];
+  if (read.kind === "v2") pairs.push(["RULES", String(read.body.targetingRules.length)]);
+  ctx.io.out(renderPairs(pairs));
   return ExitCode.OK;
 }
 
@@ -235,17 +386,17 @@ export async function runFlagValueShow(ctx: RunContext, deps: ReadDeps = {}): Pr
  * the write succeeds (#879), the same as ConfigCat's CLI, which writes and
  * stops.
  *
- * Flow (research §R4): GET the value (to learn the declared `settingType`, the
- * before-value, AND the existing targeting), coerce `--value` to that type
- * BEFORE any write (a wrong-type value is a USAGE error with no PUT — R4), then
- * PUT the typed `SettingValue` body overriding ONLY `value` and PRESERVING the
- * existing `rolloutRules` / `rolloutPercentageItems` (#669; read-modify-write —
- * never blind-overwrite). Nothing follows the PUT: a config publish would ship
- * every other pending draft of the config, in every environment (#933).
+ * Flow (research §R4): read the value through the route the config's
+ * `evaluationVersion` picks (#817), to learn the declared type and the
+ * before-value; coerce `--value` to that type BEFORE any write (a wrong-type
+ * value is a USAGE error with no write — R4); then write ONLY the value, so
+ * the flag's targeting is never wiped (#669, see {@link writeValue}). Nothing
+ * follows the write: a config publish would ship every other pending draft of
+ * the config, in every environment (#933).
  *
- * A `503 not_live` from the PUT means the value is saved but its projection did
- * not land; the command says so and asks for the same command again, which the
- * api makes live (#879). Any other failure is the plain api error.
+ * A `503 not_live` from the write means the value is saved but its projection
+ * did not land; the command says so and asks for the same command again, which
+ * the api makes live (#879). Any other failure is the plain api error.
  *
  * SECURITY: the bearer token and the `--reason` note are NEVER printed — only
  * the key / env / old→new value / live flag reach the output (R14).
@@ -278,44 +429,20 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
 
   const session = await openReadSession(ctx, deps);
 
-  // GET the current value to learn the declared type + the before-value. This
-  // is the SAME resolver-gated endpoint as `show`, so the whole flow stays on
-  // the one cross-org gate this slice widens (research §R4).
-  const current = await withSession(
-    session,
-    (client) => client.get<SettingValue>(valuePath(environmentId, configId, key)),
-  );
+  // Read the current value to learn the declared type + the before-value. This
+  // is the SAME read as `show`, so the whole flow stays on one resolver-gated
+  // route (research §R4).
+  const current = await readValue(session, environmentId, configId, key);
+  const settingType = settingTypeOf(current);
+  const before = valueOf(current);
 
   // Coerce `--value` to the flag's declared type. A non-parsing value throws a
-  // type-naming USAGE error HERE — before the PUT — so a wrong-type input never
-  // reaches the server (R4); the server re-validates as defence in depth.
-  const coerced = coerceValue(rawValue, current.settingType);
-
-  // Read-modify-write (#669): override ONLY `value` and PRESERVE the flag's
-  // existing `rolloutRules` / `rolloutPercentageItems` read back from the GET
-  // above. `PUT …/value` is a FULL replace, so sending empty arrays here would
-  // silently wipe a flag's targeting / percentage-rollout on a plain value
-  // change. ConfigCat's clients read-modify-write the whole `SettingValue`
-  // envelope; we never blind-overwrite.
-  //
-  // Phase-1 boundary: server-side targeting is not implemented yet — the
-  // contract pins these arrays `maxItems: 0` and the api rejects non-empty
-  // rollouts, so the GET currently always returns empty arrays. This
-  // preservation is therefore a no-op against today's api and becomes
-  // load-bearing the moment segments / targeting lands (correct-by-construction).
-  const putBody: SettingValuePutBody = {
-    value: coerced,
-    settingType: current.settingType,
-    rolloutRules: current.rolloutRules,
-    rolloutPercentageItems: current.rolloutPercentageItems,
-  };
-  if (reason !== undefined) putBody.reason = reason;
+  // type-naming USAGE error HERE — before the write — so a wrong-type input
+  // never reaches the server (R4); the server re-validates as defence in depth.
+  const coerced = coerceValue(rawValue, settingType);
 
   try {
-    await withSession(
-      session,
-      (client) => client.put<SettingValue>(valuePath(environmentId, configId, key), putBody),
-    );
+    await writeValue(session, current, coerced, reason);
   } catch (error) {
     // Only the api's not_live answer proves a save; anything else (401 → AUTH
     // included) propagates untouched, so no other failure claims one.
@@ -334,8 +461,8 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
       JSON.stringify({
         key,
         environmentId,
-        settingType: current.settingType,
-        before: current.value,
+        settingType,
+        before,
         after: coerced,
         live: true,
       }),
@@ -347,8 +474,8 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
     renderPairs([
       ["KEY", key],
       ["ENVIRONMENT", environmentId],
-      ["TYPE", current.settingType],
-      ["OLD", String(current.value)],
+      ["TYPE", settingType],
+      ["OLD", String(before)],
       ["NEW", String(coerced)],
       ["LIVE", "yes"],
     ]),
