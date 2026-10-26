@@ -815,6 +815,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /healthz:
     get:
       operationId: getHealthz
@@ -971,6 +973,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listTokens
       summary: List management tokens
@@ -1070,6 +1074,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listProducts
       summary: List products
@@ -1219,6 +1225,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteProduct
       summary: Delete a product
@@ -1259,6 +1267,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/products/{productId}/environments:
     post:
       operationId: createEnvironment
@@ -1311,6 +1321,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listEnvironments
       summary: List environments in a product
@@ -1443,6 +1455,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteEnvironment
       summary: Delete an environment
@@ -1486,6 +1500,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/environments/{environmentId}/configs/{configId}/settings/{key}/value:
     # Divergence carry-over: ConfigCat exposes the per-env
     # value endpoint under /v1/environments/{environmentId}/settings/{settingId}/value
@@ -1639,6 +1655,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: >
             The value is saved but not live yet. Retry the same request after
@@ -1851,6 +1869,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           $ref: "#/components/responses/ValueNotLive"
     patch:
@@ -1921,6 +1941,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           $ref: "#/components/responses/ValueNotLive"
   /v1/products/{productId}/segments:
@@ -2037,6 +2059,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/segments/{segmentId}:
     parameters:
       - in: path
@@ -2141,6 +2165,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteSegment
       summary: Delete a segment
@@ -2179,6 +2205,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/products/{productId}/configs:
     post:
       operationId: createConfig
@@ -2231,6 +2259,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listConfigs
       summary: List configs in a product
@@ -2363,6 +2393,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteConfig
       summary: Delete a config
@@ -2403,6 +2435,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/settings:
     post:
       operationId: createSetting
@@ -2470,6 +2504,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listSettings
       summary: List settings in a config
@@ -2630,6 +2666,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteSetting
       summary: Delete a setting
@@ -2689,6 +2727,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/environments/{environmentId}:
     get:
       operationId: getSdkKeys
@@ -2815,6 +2855,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SdkKeyConflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/environments/{environmentId}/sdk-keys/{slot}:
     delete:
       operationId: deleteSdkKey
@@ -2901,6 +2943,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SdkKeyConflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/publish:
     # Divergence #2 from ConfigCat: ConfigCat auto-materialises configs to
     # its CDN on every setting-value write, so no explicit publish endpoint
@@ -2952,6 +2996,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/me:
     get:
       operationId: meGet
@@ -3188,6 +3234,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/products/{productId}/auditlogs:
     get:
       operationId: getProductAuditLogs
@@ -3362,6 +3410,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     get:
       operationId: listGuardianIntegrations
       summary: List a product's Guardian integrations (no tokens).
@@ -3431,6 +3481,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
     delete:
       operationId: deleteGuardianIntegration
       summary: Remove an integration (cascades its events).
@@ -3454,6 +3506,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/guardian/integrations/{integrationId}/rotate:
     post:
       operationId: rotateGuardianIntegration
@@ -3482,6 +3536,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/products/{productId}/guardian/events:
     get:
       operationId: listGuardianEvents
@@ -3545,6 +3601,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/guardian/events/{eventId}/dismiss:
     post:
       operationId: dismissGuardianEvent
@@ -3573,6 +3631,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/guardian/events/{eventId}/rollback:
     post:
       operationId: rollbackGuardianEvent
@@ -3654,6 +3714,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   # CLI browser device-flow auth. Management-plane only —
   # NONE of these enter the SDK config_v6 wire / wire-cases corpus. The
   # device authorization grant (RFC 8628): authorize → (browser approve via a
@@ -4156,6 +4218,24 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ValueNotLive"
+    RateLimited:
+      description: >
+        Too many management writes for this organization (#934). Each
+        organization may make a burst of 200 writes, then one per second;
+        every principal of the organization (session, management token, CLI
+        or MCP token) spends the same budget. Nothing was written: retry after
+        Retry-After seconds. Reads are not limited.
+      headers:
+        Retry-After:
+          required: true
+          description: Seconds until the organization's next write is admitted.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RateLimited"
   headers:
     ConfigCacheControl:
       required: true
@@ -6302,6 +6382,20 @@ components:
           description: >
             Whether the invitation has expired. True when the invitation's
             expiry instant has passed; independent of redemption state.
+    RateLimited:
+      type: object
+      description: >
+        A management write refused because its organization's write budget is
+        spent (#934). One constant body, the same the CLI device flow's
+        per-IP limit answers.
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [rate_limited]
+        message:
+          type: string
+          enum: [too many requests]
     ValueNotLive:
       type: object
       description: >

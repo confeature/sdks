@@ -2191,6 +2191,13 @@ export interface components {
       /** @description Whether the invitation has expired. True when the invitation's expiry instant has passed; independent of redemption state. */
       expired: boolean;
     };
+    /** @description A management write refused because its organization's write budget is spent (#934). One constant body, the same the CLI device flow's per-IP limit answers. */
+    RateLimited: {
+      /** @enum {string} */
+      error: "rate_limited";
+      /** @enum {string} */
+      message: "too many requests";
+    };
     /** @description A value write that was saved but did not reach the edge (#879). One constant body for every cause. */
     ValueNotLive: {
       /** @enum {string} */
@@ -2692,6 +2699,17 @@ export interface components {
       };
       content: {
         "application/json": components["schemas"]["ValueNotLive"];
+      };
+    };
+    /** @description Too many management writes for this organization (#934). Each organization may make a burst of 200 writes, then one per second; every principal of the organization (session, management token, CLI or MCP token) spends the same budget. Nothing was written: retry after Retry-After seconds. Reads are not limited. */
+    RateLimited: {
+      headers: {
+        /** @description Seconds until the organization's next write is admitted. */
+        "Retry-After": number;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["RateLimited"];
       };
     };
   };
@@ -3358,6 +3376,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getHealthz: {
@@ -3544,6 +3563,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   revokeToken: {
@@ -3693,6 +3713,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getProduct: {
@@ -3791,6 +3812,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   updateProduct: {
@@ -3854,6 +3876,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   listEnvironments: {
@@ -3967,6 +3990,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getEnvironment: {
@@ -4065,6 +4089,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   updateEnvironment: {
@@ -4128,6 +4153,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getSettingValue: {
@@ -4258,6 +4284,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
       /** @description The value is saved but not live yet. Retry the same request after Retry-After. */
       503: {
         headers: {
@@ -4465,6 +4492,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
       503: components["responses"]["ValueNotLive"];
     };
   };
@@ -4547,6 +4575,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
       503: components["responses"]["ValueNotLive"];
     };
   };
@@ -4679,6 +4708,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getSegment: {
@@ -4810,6 +4840,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   deleteSegment: {
@@ -4867,6 +4898,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   listConfigs: {
@@ -4980,6 +5012,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getConfig: {
@@ -5078,6 +5111,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   updateConfig: {
@@ -5141,6 +5175,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   listSettings: {
@@ -5263,6 +5298,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getSetting: {
@@ -5374,6 +5410,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   updateSetting: {
@@ -5439,6 +5476,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getSdkKeys: {
@@ -5552,6 +5590,7 @@ export interface operations {
           "application/json": components["schemas"]["SdkKeyConflict"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   deleteSdkKey: {
@@ -5624,6 +5663,7 @@ export interface operations {
           "application/json": components["schemas"]["SdkKeyConflict"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   publishConfig: {
@@ -5674,6 +5714,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   meGet: {
@@ -5890,6 +5931,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   getProductAuditLogs: {
@@ -6077,6 +6119,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   deleteGuardianIntegration: {
@@ -6106,6 +6149,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   updateGuardianIntegration: {
@@ -6150,6 +6194,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   rotateGuardianIntegration: {
@@ -6181,6 +6226,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   listGuardianEvents: {
@@ -6245,6 +6291,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   dismissGuardianEvent: {
@@ -6276,6 +6323,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   rollbackGuardianEvent: {
@@ -6352,6 +6400,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["RateLimited"];
     };
   };
   cliDeviceAuthorize: {
