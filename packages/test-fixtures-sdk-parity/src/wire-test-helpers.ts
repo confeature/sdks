@@ -19,9 +19,10 @@
  */
 
 import { SdkErrorCode } from "@confeature/sdk-shared";
-import { expect, type Mock, test, vi } from "vitest";
+import { describe, expect, type Mock, test, vi } from "vitest";
 
 import configBooleanBody from "../fixtures/config-v6.boolean.json" with { type: "json" };
+import wireCasesCorpus from "../fixtures/wire-cases.json" with { type: "json" };
 // FR-001's path for a key: the corpus oracle's ONE escaper (Go's
 // `url.PathEscape`), shared with scripts/validate-wire-cases.ts.
 import { fr001Path } from "./fr001-path.ts";
@@ -302,4 +303,151 @@ export function wireTestFor(
   knownSdkBugs: Readonly<Record<string, string>>,
 ): (caseId: string) => typeof test | typeof test.fails {
   return (caseId) => (caseId in knownSdkBugs ? test.fails : test);
+}
+
+// ---------------------------------------------------------------------------
+// The live wire-cases suite, shared (#925)
+// ---------------------------------------------------------------------------
+
+/** A recorded request, as `GET /admin/requests` lists it (the harness's own type). */
+interface HarnessRequest extends CapturedRequest {}
+
+// The harness's admin answers, cut down to what the suite reads. Declared here
+// rather than imported: the harness depends on this package (the corpus), so
+// importing its types back would make the two packages a cycle.
+interface HarnessState {
+  keys: string[];
+  faults: Record<string, unknown>;
+}
+type HarnessRequests = { ok: true; requests: HarnessRequest[] } | { ok: false; error: string };
+
+/** A config fetcher as an SDK's client wires it, judged by `assertWireCase`. */
+export interface LiveWireFetcher {
+  fetchAsync(
+    previousEtag: string | null,
+    signal: AbortSignal,
+  ): Promise<WireFetchOutcome & { errorMessage?: string }>;
+}
+
+export interface LiveWireSuiteOptions {
+  /** The SDK under test, as the suite names it (`sdk-bun`, …). */
+  sdkName: string;
+  /** The version the SDK stamps on its requests (`?sdk=`). */
+  sdkVersion: string;
+  /** Build the SDK's fetcher for a key, against the harness, with its own deadline. */
+  createFetcher: (harnessUrl: string, sdkKey: string, requestTimeoutMs?: number) => LiveWireFetcher;
+  /** Known SDK bugs, as STRICT expected failures: case id → ticket (#783 A7). */
+  knownSdkBugs?: Readonly<Record<string, string>>;
+  /** Defaults to `process.env`. */
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * Register an SDK's live wire-cases suite (#919, shared since #925): every
+ * case the RUNNING live-contract harness seeds is replayed over real HTTP with
+ * the SDK's own fetcher and judged by `assertWireCase`, the function the
+ * hermetic suite uses.
+ *
+ *   - The case set comes from the harness (`GET /admin/state` → `keys`).
+ *   - Each fetch must add exactly one entry to `GET /admin/requests`, so a
+ *     retrying SDK, or a request logged by an earlier run, cannot stand in for
+ *     the one under test.
+ *   - A timeout case is ended by the SDK's OWN deadline (a quarter of the
+ *     harness's hold), never by an abort the test fires.
+ *   - US4: one unseeded key reaches the Worker's own unknown-key answer.
+ *
+ * GATING (fail closed): skipped only when `CONFEATURE_LIVE` is unset. When it
+ * is set without `LIVE_HARNESS_URL`, or the harness does not answer, this
+ * REJECTS at module load (await it at top level); it never skips and never
+ * boots a harness of its own.
+ */
+export async function defineLiveWireSuite(options: LiveWireSuiteOptions): Promise<void> {
+  const env = options.env ?? process.env;
+  const live = env.CONFEATURE_LIVE === "1";
+  const harnessUrl = (env.LIVE_HARNESS_URL ?? "").replace(/\/$/, "");
+  const wireTest = wireTestFor(options.knownSdkBugs ?? {});
+
+  async function getJson<T>(path: string): Promise<T> {
+    const res = await fetch(`${harnessUrl}${path}`);
+    if (!res.ok) throw new Error(`harness ${path} answered ${res.status}: ${await res.text()}`);
+    return (await res.json()) as T;
+  }
+
+  if (live && !harnessUrl) {
+    throw new Error(
+      "CONFEATURE_LIVE=1 but LIVE_HARNESS_URL is not set — run through " +
+        "`live-contract-harness --corpus-seed --exec -- …`; a live suite must never pass by skipping",
+    );
+  }
+  const state = live ? await getJson<HarnessState>("/admin/state") : undefined;
+  const caseIds = [...(state?.keys ?? [])].sort();
+  const corpusById = new Map(
+    (wireCasesCorpus.cases as unknown as WireCase[]).map((c) => [c.id, c] as const),
+  );
+
+  async function requestsFor(sdkKey: string): Promise<HarnessRequest[]> {
+    const body = await getJson<HarnessRequests>(
+      `/admin/requests?sdkKey=${encodeURIComponent(sdkKey)}`,
+    );
+    if (!body.ok) throw new Error(`harness refused /admin/requests: ${body.error}`);
+    return body.requests;
+  }
+
+  describe.skipIf(!live)(`${options.sdkName} live wire-cases against the harness (#919)`, () => {
+    test("the harness serves a non-empty seeded set, all of it in the corpus", () => {
+      expect(caseIds.length).toBeGreaterThan(0);
+      expect(caseIds.filter((id) => !corpusById.has(id))).toEqual([]);
+    });
+
+    for (const id of caseIds) {
+      wireTest(id)(id, async () => {
+        const wireCase = corpusById.get(id)!;
+
+        let holdMs: number | undefined;
+        if (wireCase.server.behavior === "timeout") {
+          // The SDK's deadline is derived from the harness's hold (#783 A8).
+          const fault = state!.faults[id] as { kind?: string; ms?: number } | undefined;
+          holdMs = typeof fault === "object" && fault?.kind === "timeout" ? fault.ms : undefined;
+          if (holdMs === undefined) throw new Error(`${id} is seeded without a timeout fault`);
+        }
+
+        // The harness seeds each case under its id; a case that pins
+        // given.sdkKey is configured with that key instead (#803, FR-003).
+        const sdkKey = sdkKeyFor(wireCase, id);
+        const before = (await requestsFor(sdkKey)).length;
+        const startedAt = Date.now();
+        const fetcher = options.createFetcher(
+          harnessUrl,
+          sdkKey,
+          holdMs === undefined ? undefined : Math.floor(holdMs / 4),
+        );
+        const outcome = await fetcher.fetchAsync(
+          wireCase.given.previousEtag,
+          new AbortController().signal,
+        );
+        const elapsedMs = Date.now() - startedAt;
+
+        const log = await requestsFor(sdkKey);
+        expect(log.length - before, `${id}: requests sent by one fetch`).toBe(1);
+        if (holdMs !== undefined) {
+          // The SDK's own deadline ended the fetch, not the harness releasing it.
+          expect(elapsedMs, `${id}: aborted before the hold`).toBeLessThan(holdMs);
+        }
+        assertWireCase(wireCase, outcome, log.at(-1)!, sdkKey, options.sdkVersion);
+      });
+    }
+
+    test("an unseeded key reaches the Worker's own answer and reports invalidSdkKey (US4)", async () => {
+      const outcome = await options
+        .createFetcher(harnessUrl, "never-seeded-919")
+        .fetchAsync(null, new AbortController().signal);
+      expect(outcome.status).toBe("failed");
+      if (outcome.status === "failed") {
+        expect(ERROR_CODE_TO_CLASS[outcome.errorCode]).toBe("invalidSdkKey");
+        // The Worker's 403, not the fetcher refusing to send the key: the
+        // harness logs only seeded keys, so the status is the proof it was sent.
+        expect(outcome.errorMessage).toContain("(HTTP 403)");
+      }
+    });
+  });
 }
