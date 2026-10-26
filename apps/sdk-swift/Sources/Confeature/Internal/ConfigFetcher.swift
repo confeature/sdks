@@ -264,6 +264,27 @@ struct ConfigFetcher: Sendable {
     /// and `userInfo` quote the request URL, which holds the SDK key,
     /// and are never passed on. A mid-body reset surfaces here too:
     /// `data(for:)` throws instead of returning a truncated body.
+    /// The ``RefreshErrorCode`` ConfigCat Swift reports for the same
+    /// failure, from a failed result's key-free reason
+    /// (`Sources/ConfigCat/ConfigFetcher.swift`, 11.3.1): 403 / 404 →
+    /// `invalidSdkKey`, any other status → `unexpectedHttpResponse`, a
+    /// timeout → `httpRequestTimeout`, any other transport error →
+    /// `httpRequestFailure`, an unusable 200 body →
+    /// `invalidHttpResponseContent`. A key refused before sending is
+    /// `invalidSdkKey`; a base URL that cannot carry the request is
+    /// `unexpectedError` (#833).
+    static func refreshErrorCode(for reason: String?) -> RefreshErrorCode {
+        switch reason {
+        case "INVALID_SDK_KEY", "HTTP 403", "HTTP 404": return .invalidSdkKey
+        case "timeout": return .httpRequestTimeout
+        case "NON_UTF8_BODY", "MALFORMED_JSON": return .invalidHttpResponseContent
+        case "NON_HTTP_RESPONSE": return .unexpectedHttpResponse
+        case "invalid_request", nil: return .unexpectedError
+        case let r? where r.hasPrefix("HTTP "): return .unexpectedHttpResponse
+        default: return .httpRequestFailure
+        }
+    }
+
     static func classify(error: Error) -> String {
         if error is CancellationError {
             return "cancelled"

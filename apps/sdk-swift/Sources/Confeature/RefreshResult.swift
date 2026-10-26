@@ -6,6 +6,13 @@ import Foundation
 /// `RefreshErrorCode` enum (`Sources/ConfigCat/ConfigService.swift`)
 /// 1:1 — same case names, same raw integer values.
 @objc public enum RefreshErrorCode: Int {
+    // Cases and raw values are ConfigCat 11.3.1's `RefreshErrorCode`
+    // (`Sources/ConfigCat/ConfigService.swift`) 1:1 (#833).
+
+    /// An unexpected error occurred during the refresh (e.g. the
+    /// client is closed, or the base URL cannot carry a request).
+    case unexpectedError = -1
+
     /// No error — the refresh succeeded.
     case none = 0
 
@@ -15,18 +22,24 @@ import Foundation
     case localOnlyClient = 1
 
     /// Client is in offline mode; the remote fetch path is suspended.
-    case offlineClient = 2
+    case offlineClient = 3200
 
-    /// The HTTP request failed (transport-level — DNS, TCP, TLS).
-    case httpRequestFailure = 3
+    /// The SDK key is invalid: refused before sending, or answered
+    /// with 403 Forbidden / 404 Not Found.
+    case invalidSdkKey = 1100
 
-    /// The HTTP response was received but indicated an error
-    /// (non-2xx status, malformed body, ETag mismatch, etc.).
-    case httpResponseFailure = 4
+    /// An unexpected HTTP response was received (an unexpected
+    /// status code, or a response that is not HTTP).
+    case unexpectedHttpResponse = 1101
 
-    /// Some other unexpected error (e.g. client closed, JSON
-    /// deserialisation crash).
-    case unexpectedError = 5
+    /// The HTTP request timed out.
+    case httpRequestTimeout = 1102
+
+    /// The HTTP request failed (most likely a local network issue).
+    case httpRequestFailure = 1103
+
+    /// 200 OK, but its content is not a valid config.
+    case invalidHttpResponseContent = 1105
 }
 
 /// Outcome of a ``ConfeatureClient/forceRefresh()`` call. Mirrors

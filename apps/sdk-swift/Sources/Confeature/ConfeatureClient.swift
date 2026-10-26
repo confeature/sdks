@@ -403,8 +403,11 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
             return RefreshResult(
                 isSuccess: false, errorMessage: msg, errorCode: .offlineClient)
         }
-        await refreshOnce()
-        return RefreshResult(isSuccess: true, errorMessage: nil, errorCode: .none)
+        guard let failure = await refreshOnce() else {
+            return RefreshResult(isSuccess: true, errorMessage: nil, errorCode: .none)
+        }
+        return RefreshResult(
+            isSuccess: false, errorMessage: failure.message, errorCode: failure.code)
     }
 
     /// Overrides ``ConfeatureClientOptions/defaultUser`` at runtime.
@@ -554,7 +557,17 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
         }
     }
 
-    private func refreshOnce() async {
+    /// A failed refresh's outcome: a key-free message and its code.
+    private struct RefreshFailure {
+        let message: String
+        let code: RefreshErrorCode
+    }
+
+    /// Fetches once and applies the result. Returns nil when a config
+    /// was fetched or confirmed unchanged, the failure otherwise, so
+    /// ``forceRefresh()`` reports the outcome (#833).
+    @discardableResult
+    private func refreshOnce() async -> RefreshFailure? {
         let previousETag = stateQueue.sync { cachedETag }
 
         let result = await fetcher.fetch(previousETag: previousETag)
@@ -574,7 +587,9 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
                 if case .autoPoll = options.pollingMode {
                     setReadyState(.noFlagData)
                 }
-                return
+                return RefreshFailure(
+                    message: "Config fetch failed: the fetched body failed to parse",
+                    code: .invalidHttpResponseContent)
             }
             let etagChanged = stateQueue.sync { () -> Bool in
                 let changed = (cachedETag != result.etag) || (cachedBody == nil)
@@ -590,6 +605,7 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
             if case .autoPoll = options.pollingMode {
                 setReadyState(.hasUpToDateFlagData)
             }
+            return nil
         case .notModified:
             if let etag = result.etag {
                 stateQueue.sync {
@@ -602,6 +618,7 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
             if case .autoPoll = options.pollingMode {
                 setReadyState(.hasUpToDateFlagData)
             }
+            return nil
         case .failed:
             // Already logged inside ConfigFetcher; first-fetch
             // failure still fires the ready transition for AutoPoll
@@ -610,6 +627,11 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
                 let hasCache = stateQueue.sync { cachedBody != nil }
                 setReadyState(hasCache ? .hasCachedFlagDataOnly : .noFlagData)
             }
+            // The reason is a fixed, key-free code (ConfigFetcher).
+            let reason = result.error ?? "unknown"
+            return RefreshFailure(
+                message: "Config fetch failed: \(reason)",
+                code: ConfigFetcher.refreshErrorCode(for: result.error))
         }
     }
 
