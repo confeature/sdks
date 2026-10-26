@@ -15,19 +15,28 @@
 /** Opens `url` in the default browser; returns whether the spawn succeeded. */
 export type BrowserOpener = (url: string) => Promise<boolean>;
 
-/** Resolve the platform opener command for a URL. */
-function openerCommand(url: string): { cmd: string; args: string[] } {
-  switch (Deno.build.os) {
+/**
+ * The URL opener's binary on `os`: the one program the compiled binary may run
+ * there (`scripts/compile.ts` grants exactly this one per target, #904).
+ */
+export function openerOf(os: string): "open" | "cmd" | "xdg-open" {
+  switch (os) {
     case "darwin":
-      return { cmd: "open", args: [url] };
+      return "open";
     case "windows":
-      // `cmd /c start "" <url>` — the empty title arg avoids `start` swallowing
-      // a quoted URL as the window title.
-      return { cmd: "cmd", args: ["/c", "start", "", url] };
+      return "cmd";
     default:
       // Linux / *BSD.
-      return { cmd: "xdg-open", args: [url] };
+      return "xdg-open";
   }
+}
+
+/** Resolve the platform opener command for a URL. */
+function openerCommand(url: string): { cmd: string; args: string[] } {
+  const cmd = openerOf(Deno.build.os);
+  // `cmd /c start "" <url>` — the empty title arg avoids `start` swallowing a
+  // quoted URL as the window title.
+  return cmd === "cmd" ? { cmd, args: ["/c", "start", "", url] } : { cmd, args: [url] };
 }
 
 /**

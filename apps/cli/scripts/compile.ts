@@ -31,6 +31,8 @@
 
 import { join } from "@std/path";
 
+import { openerOf } from "../src/cli/browser.ts";
+
 /**
  * Least-privilege grants baked into the shipped binary.
  *
@@ -43,8 +45,11 @@ import { join } from "@std/path";
  *     any self-host or hosted deployment; a compile-time host allow-list would
  *     break self-host. The URL is still validated to an absolute http(s) URL at
  *     resolve time (`config/resolve.ts`).
- *   - `--allow-run=open,xdg-open,cmd` — only the platform browser openers
- *     (`cli/browser.ts`); never an open `--allow-run`.
+ *   - `--allow-run=<opener>` — only the target's own browser opener
+ *     (`openerOf` in `cli/browser.ts`): `open`, `xdg-open` or `cmd`. Granting all
+ *     three made Deno print an "Info Failed to resolve …" line for each opener
+ *     the platform lacks, before every command's output (#904). Never an open
+ *     `--allow-run`.
  *
  * Never `-A`.
  */
@@ -53,8 +58,19 @@ const PERMISSIONS = [
   "--allow-write",
   "--allow-env=XDG_CONFIG_HOME,HOME,APPDATA,USERPROFILE,CONFEATURE_API_URL,CONFEATURE_PROFILE",
   "--allow-net",
-  "--allow-run=open,xdg-open,cmd",
 ];
+
+/** The OS a Rust target triple names, as `Deno.build.os` spells it. */
+function osOf(target: string): string {
+  if (target.includes("apple-darwin")) return "darwin";
+  if (target.includes("windows")) return "windows";
+  return "linux";
+}
+
+/** The grants baked into the binary for `target`: the shared set plus its one opener. */
+export function permissionsFor(target: string): string[] {
+  return [...PERMISSIONS, `--allow-run=${openerOf(osOf(target))}`];
+}
 
 /** The five desktop targets Confeature ships (plan.md / research.md R5). */
 const TARGETS = [
@@ -87,7 +103,7 @@ async function compile(target: string): Promise<boolean> {
   const out = outputPath(target);
   console.log(`• compiling ${target} → ${out}`);
   const cmd = new Deno.Command("deno", {
-    args: ["compile", ...PERMISSIONS, "--target", target, "--output", out, ENTRY],
+    args: ["compile", ...permissionsFor(target), "--target", target, "--output", out, ENTRY],
     stdout: "inherit",
     stderr: "inherit",
   });
