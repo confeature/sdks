@@ -4,6 +4,9 @@
 
 require "socket"
 
+# The upstream gem this SDK mirrors, for the side-by-side checks (#931).
+require "configcat"
+
 RSpec.describe Confeature::Internal::ConfigFetcher do
   let(:silent_logger) { SpecHelpers::SilentLogger.new }
   let(:sdk_key) { SpecHelpers::SAMPLE_SDK_KEY }
@@ -274,6 +277,62 @@ RSpec.describe Confeature::Internal::ConfigFetcher do
       result = nil
       serve(cut) { |base| result = fetcher_for(sdk_key, base_url: base).fetch }
       expect([result.status, result.error]).to eq([:failed, "connection_reset"])
+    end
+
+    # #931 — the two behaviours above, judged against the upstream gem this
+    # SDK mirrors: `configcat` 8.0.1 (Gemfile.lock), lib/configcat/
+    # configfetcher.rb, `_fetch` and `_create_http`, run against the same
+    # socket. If the gem changes either one, these go red and say so.
+    describe "against the upstream configcat gem" do
+      # A ConfigCatLogger stand-in: the fetcher calls error(code, msg) / debug.
+      def upstream_log(lines)
+        log = Object.new
+        log.define_singleton_method(:error) { |code, message| lines << [code, message] }
+        %i[debug warning info].each { |name| log.define_singleton_method(name) { |*| nil } }
+        log
+      end
+
+      def upstream_fetch(base, timeout: 30)
+        lines = []
+        fetcher = ConfigCat::ConfigFetcher.new(
+          sdk_key, upstream_log(lines), "m", base_url: base, open_timeout: timeout, read_timeout: timeout
+        )
+        response = fetcher.get_configuration("")
+        fetcher.close
+        [response, lines]
+      end
+
+      # A DELIBERATE divergence. The gem leaves Net::HTTP's max_retries at its
+      # default (1, `_create_http` never sets it), so one fetch is two
+      # requests on a read timeout. This SDK sends one, as the shared corpus
+      # requires of every SDK (wire-cases `timeout`; found by the live suite,
+      # #920): the poller owns retrying.
+      it "the gem sends two requests on a read timeout, this SDK one" do
+        upstream = serve(nil) { |base| upstream_fetch(base, timeout: 0.2) }
+        ours = serve(nil) { |base| fetcher_for(sdk_key, timeout: 0.2, base_url: base).fetch }
+        expect([upstream, ours]).to eq([2, 1])
+      end
+
+      # The same failure class. The gem parses the short body, JSON fails, and
+      # its catch-all reports error 1103, "most likely due to a local network
+      # issue" — a transport failure, not a JSON one. This SDK reports
+      # connection_reset: fetchFailed, the same class (wire-cases
+      # `network-reset`). MUTATION (applied, #931): drop the truncated? check
+      # and ours reads MALFORMED_JSON, a different class from the gem's.
+      it "a body cut short is a transport failure in the gem and here" do
+        cut = lambda do |socket|
+          socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{\"f\":")
+          socket.close
+        end
+        upstream = nil
+        serve(cut) { |base| upstream = upstream_fetch(base) }
+        response, lines = upstream
+        expect(response.is_failed).to be(true)
+        expect(lines.map(&:first)).to eq([1103])
+        result = nil
+        serve(cut) { |base| result = fetcher_for(sdk_key, base_url: base).fetch }
+        expect([result.status, result.error]).to eq([:failed, "connection_reset"])
+      end
     end
   end
 
