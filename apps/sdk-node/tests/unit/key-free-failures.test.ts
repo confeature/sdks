@@ -98,6 +98,9 @@ function captureLogger(): Sink {
 
 type Mode = "hang" | "reset-mid-body" | "redirect-loop";
 
+/** A key no case uses: the path a stale request from another case carries. */
+const STALE_KEY = "configcat-sdk-1/STALESTALESTALESTALEST/STALESTALESTALESTALEST";
+
 let server: Server;
 let baseUrl = "";
 let mode: Mode = "hang";
@@ -150,6 +153,11 @@ describe("forced transport failures leak no SDK key (real fetch)", () => {
     for (const [forced, reason] of cases) {
       test(`${forced} — ${key.slice(0, 16)}…`, async () => {
         mode = forced;
+        // A previous case's late request — a redirect-loop hop landing after
+        // afterEach cleared the list — would sit at seenPaths[0] (#866). Seed
+        // one deterministically, so reading index 0 always fails, never only
+        // under load: the request that counts is this key's own.
+        seenPaths.push(`/configuration-files/${STALE_KEY}/config_v6.json`);
         const sink = captureLogger();
         const hookErrors: unknown[] = [];
         const client = new ConfigCatClient(key, 0, {
@@ -163,9 +171,11 @@ describe("forced transport failures leak no SDK key (real fetch)", () => {
 
         // The failure really happened, and on the raw path (FR-001).
         expect(refresh.isSuccess).toBe(false);
-        expect(new URL(seenPaths[0]!, baseUrl).pathname).toBe(
-          `/configuration-files/${key}/config_v6.json`,
-        );
+        const own = seenPaths
+          .map((p) => new URL(p, baseUrl).pathname)
+          .filter((p) => p !== `/configuration-files/${STALE_KEY}/config_v6.json`);
+        expect(own.length).toBeGreaterThan(0);
+        for (const path of own) expect(path).toBe(`/configuration-files/${key}/config_v6.json`);
         if (reason !== null) {
           expect(refresh.errorMessage).toContain(reason);
           expect(sink.lines.map((l) => l.message).join("\n")).toContain(reason);

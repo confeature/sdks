@@ -80,19 +80,26 @@ describe("Parity with configcat-node@11 (boolean evaluation)", () => {
     expect(value).toBe("string-default");
   });
 
-  test("public surface re-exports are present and named per configcat-common", async () => {
-    // Pulls the index — if any expected export disappeared, this would
-    // throw on import. We avoid pulling node:http via configcat-node.
-    const surface = await import("../../src/index.ts");
-    expect(typeof surface.getClient).toBe("function");
-    expect(typeof surface.disposeAllClients).toBe("function");
-    expect(typeof surface.createConsoleLogger).toBe("function");
-    expect(typeof surface.createFlagOverridesFromMap).toBe("function");
-    expect(surface.PollingMode.AutoPoll).toBe(0);
-    expect(surface.PollingMode.LazyLoad).toBe(1);
-    expect(surface.PollingMode.ManualPoll).toBe(2);
-    expect(surface.LogLevel.Error).toBe(1);
-    expect(surface.ClientCacheState.NoFlagData).toBe(0);
-    expect(surface.OverrideBehaviour.LocalOnly).toBe(0);
-  });
+  // An explicit timeout (#866): the dynamic import transforms the whole src/
+  // graph cold, which took over vitest's 5 s default at a host load of 10–15
+  // (dagger:all, 2026-10-05). The assertions are instant; only the import is slow.
+  test(
+    "public surface re-exports are present and named per configcat-common",
+    { timeout: 30_000 },
+    async () => {
+      // Pulls the index — if any expected export disappeared, this would
+      // throw on import. We avoid pulling node:http via configcat-node.
+      const surface = await import("../../src/index.ts");
+      expect(typeof surface.getClient).toBe("function");
+      expect(typeof surface.disposeAllClients).toBe("function");
+      expect(typeof surface.createConsoleLogger).toBe("function");
+      expect(typeof surface.createFlagOverridesFromMap).toBe("function");
+      expect(surface.PollingMode.AutoPoll).toBe(0);
+      expect(surface.PollingMode.LazyLoad).toBe(1);
+      expect(surface.PollingMode.ManualPoll).toBe(2);
+      expect(surface.LogLevel.Error).toBe(1);
+      expect(surface.ClientCacheState.NoFlagData).toBe(0);
+      expect(surface.OverrideBehaviour.LocalOnly).toBe(0);
+    },
+  );
 });
