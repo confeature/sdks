@@ -69,6 +69,11 @@ describe("decode — an address cannot hide behind an encoding", () => {
     ["&amp;#64;", "@"],
     ["＠", "@"],
     ["Maker\u200bLabs", "MakerLabs"],
+    // #870 item 5. MUTATION (applied): drop the octal arm, or require the
+    // trailing `;`, and these stay undecoded — an address hidden in plain sight.
+    ["\\100", "@"],
+    ["&#64", "@"],
+    ["&#x40", "@"],
   ])("%s decodes to %s", (input, want) => {
     expect(decode(input)).toBe(want);
   });
@@ -464,11 +469,47 @@ describe("the CLI", SPAWNS, () => {
 
   it("fails closed outside a git checkout", () => {
     rmSync(join(root, ".git"), { recursive: true, force: true });
-    expect(run().status).toBe(2);
+    // Hermetic (#870 item 8): a temp dir under some other checkout would let
+    // git find THAT repository and answer "no manifest" (exit 1) instead.
+    const r = spawnSync(process.execPath, [RULE], {
+      cwd: root,
+      env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(root) },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr.toString()).toMatch(/not a git checkout/);
+  });
+
+  it("fails closed when git itself cannot run (#870 item 8)", () => {
+    // No git on PATH: spawnSync errors with a null status. That must read as
+    // "not a git checkout" (exit 2), never as an empty, clean tree.
+    const r = spawnSync(process.execPath, [RULE], { cwd: root, env: { PATH: "/nonexistent" } });
+    expect(r.status).toBe(2);
+    expect(r.stderr.toString()).toMatch(/not a git checkout/);
   });
 
   it("main() returns the exit code", () => {
     const sink = { write: () => true };
     expect(main(["apps/sdk-x/package.json"], { root, out: sink, err: sink })).toBe(0);
+  });
+});
+
+describe("TOML URL fields are contact fields (#870 item 5)", () => {
+  // MUTATION (applied): drop the URL checks and each of these is [] — a
+  // mailto link in [project.urls] or a Cargo homepage reached the registry.
+  it("refuses an address in [project.urls]", () => {
+    const text = `[project]\nname = "x"\nauthors = [{ name = "MakerLabs" }]\n\n[project.urls]\nIssues = "mailto:${AT}"\n`;
+    expect(why("pyproject.toml", text)).toEqual(["5 an address in a contact field"]);
+  });
+
+  it("refuses an address in a Cargo homepage / repository / documentation key", () => {
+    for (const key of ["homepage", "repository", "documentation"]) {
+      const text = `[package]\nname = "x"\nauthors = ["MakerLabs"]\n${key} = "https://${AT}/x"\n`;
+      expect(why("Cargo.toml", text), key).toEqual(["4 an address in a contact field"]);
+    }
+  });
+
+  it("passes plain URLs", () => {
+    const text = `[package]\nname = "x"\nauthors = ["MakerLabs"]\nrepository = "https://github.com/confeature/sdks"\n\n[project.urls]\nHome = "https://confeature.io"\n`;
+    expect(why("Cargo.toml", text)).toEqual([]);
   });
 });

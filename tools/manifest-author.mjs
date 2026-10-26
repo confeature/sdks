@@ -132,24 +132,30 @@ const ESCAPES = { n: "\n", t: "\t", r: "\r", 0: "\0" };
 const fromCode = (n, fallback) => (n <= 0x10ffff ? String.fromCodePoint(n) : fallback);
 
 function decodeOnce(s) {
-  return s
-    .replace(
-      /\\(?:u\{([0-9a-f]{1,8})\}|u([0-9a-f]{4})|x([0-9a-f]{2})|(.))/gi,
-      (m, braced, u4, x2, ch) =>
-        braced !== undefined
-          ? fromCode(parseInt(braced, 16), m)
-          : u4 !== undefined || x2 !== undefined
-            ? String.fromCharCode(parseInt(u4 ?? x2, 16))
-            : (ESCAPES[ch] ?? ch),
-    )
-    .replace(/(?:%[0-9a-f]{2})+/gi, (run) =>
-      Buffer.from(run.replace(/%/g, ""), "hex").toString("utf8"),
-    )
-    .replace(/&#x([0-9a-f]+);/gi, (m, h) => fromCode(parseInt(h, 16), m))
-    .replace(/&#(\d+);/g, (m, d) => fromCode(Number(d), m))
-    .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m)
-    .replace(INVISIBLE, "")
-    .normalize("NFKC");
+  return (
+    s
+      .replace(
+        // `\100` is Ruby's (and C's) octal escape for `@` (#870 item 5).
+        /\\(?:u\{([0-9a-f]{1,8})\}|u([0-9a-f]{4})|x([0-9a-f]{2})|([0-7]{1,3})|(.))/gi,
+        (m, braced, u4, x2, oct, ch) =>
+          braced !== undefined
+            ? fromCode(parseInt(braced, 16), m)
+            : u4 !== undefined || x2 !== undefined
+              ? String.fromCharCode(parseInt(u4 ?? x2, 16))
+              : oct !== undefined
+                ? String.fromCharCode(parseInt(oct, 8))
+                : (ESCAPES[ch] ?? ch),
+      )
+      .replace(/(?:%[0-9a-f]{2})+/gi, (run) =>
+        Buffer.from(run.replace(/%/g, ""), "hex").toString("utf8"),
+      )
+      // A browser reads a numeric reference with no trailing `;` too (#870 item 5).
+      .replace(/&#x([0-9a-f]+);?/gi, (m, h) => fromCode(parseInt(h, 16), m))
+      .replace(/&#(\d+);?/g, (m, d) => fromCode(Number(d), m))
+      .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m)
+      .replace(INVISIBLE, "")
+      .normalize("NFKC")
+  );
 }
 
 /**
@@ -314,6 +320,18 @@ function checkToml(kind, t) {
       NOT_AUTHOR,
     ),
   ];
+  // URL fields are contact fields (#870 item 5): `[project.urls]` (PEP 621,
+  // where a `mailto:` link is common) and Cargo's homepage / repository /
+  // documentation keys hold no address.
+  const urlTable = /^[ \t]*\[[ \t]*["']?project["']?\.["']?urls["']?[ \t]*\][ \t]*(?:#[^\n]*)?$/gm;
+  for (const m of t.matchAll(urlTable)) {
+    const body = tomlTable(t, m.index + m[0].length);
+    if (hasAt(body)) out.push({ line: lineAt(t, m.index), why: ADDRESS });
+  }
+  const urlKeys = /^[ \t]*["']?(homepage|repository|documentation)["']?[ \t]*=[ \t]*([^\n]*)$/gm;
+  for (const m of t.matchAll(urlKeys)) {
+    if (hasAt(m[2])) out.push({ line: lineAt(t, m.index), why: ADDRESS });
+  }
   const named = [...t.matchAll(inline), ...t.matchAll(tables)].some((m) => m[1] === "authors");
   if (AUTHOR_FIELDS[kind].published(t) && !named) out.push({ line: 1, why: MISSING });
   return out;

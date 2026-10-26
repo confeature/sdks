@@ -923,7 +923,12 @@ describe("the sweep finds a gate in a directory nobody listed", () => {
         .map((v) => v.what)
         .join(),
     ).toMatch(/vendor\/scripts\/cascade-check\.sh can fail but has no declared home/);
-    for (const t of EXCLUDED_TREES) {
+    // Every exclusion carries a reason: this repository's (none today) and the
+    // fixture's, so the loop always asserts something (#870 item 4 — over the
+    // empty EXCLUDED_TREES alone it asserted nothing).
+    const exclusions = [...EXCLUDED_TREES, ...vendor];
+    expect(exclusions.length).toBeGreaterThan(0);
+    for (const t of exclusions) {
       expect(typeof t.reason).toBe("string");
       expect(t.reason.trim().length).toBeGreaterThan(40);
     }
