@@ -129,6 +129,17 @@ final class WireCasesTests: XCTestCase {
                 path: path, url: url.absoluteString,
                 ifNoneMatch: request.value(forHTTPHeaderField: "If-None-Match")),
             result: result)
+        // The request this suite intercepted must go where the case's base
+        // URL points. assertRequest checks `requestUrlPrefix` on the
+        // fetcher's `url` only, because the live suite cannot route to the
+        // case's host; the pre-#924 hermetic suite checked the SENT URL, and
+        // a mock answers any host, so without this a fetcher that sent the
+        // request elsewhere would pass here (#929).
+        if let prefix = WireCaseAssertions.expected(wireCase)["requestUrlPrefix"] as? String {
+            XCTAssertTrue(
+                url.absoluteString.hasPrefix(prefix),
+                "case \(id): sent URL \(url.absoluteString) does not start with \(prefix)")
+        }
     }
 
     /// A case's response body: a sibling fixture (`bodyRef`) or raw text
