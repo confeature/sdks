@@ -193,7 +193,19 @@ public class ConfigFetcher(
             header(HttpHeaders.UserAgent, userAgent)
             header(HttpHeaders.Accept, "application/json")
             if (!previousEtag.isNullOrEmpty()) {
-                header(HttpHeaders.IfNoneMatch, previousEtag)
+                if (isSendableHeaderValue(previousEtag)) {
+                    header(HttpHeaders.IfNoneMatch, previousEtag)
+                } else {
+                    // A stored ETag no engine may send (a byte outside tab and printable ASCII:
+                    // a cache written elsewhere can hold one). OkHttp, the Android engine, throws
+                    // on it, so every later fetch failed; CIO sends it mangled. Drop it and fetch
+                    // whole — the next 200 replaces it, as sdk-java and sdk-android do (#803,
+                    // #840). The value is not logged.
+                    logger.warning(
+                        "ConfigFetcher: dropped a stored ETag that is not a valid header value; " +
+                            "fetching without If-None-Match. sdkKey=" + SdkKey.redact(sdkKey),
+                    )
+                }
             }
         }
         val etag = resp.headers[HttpHeaders.ETag].orEmpty()
@@ -383,3 +395,7 @@ internal fun extractSettingsMap(body: JsonObject?): Map<String, JsonElement>? {
     val f = body["f"]
     return if (f is JsonObject) f.toMap() else null
 }
+
+/** OkHttp's header-value rule, the strictest engine this SDK ships: tab or printable ASCII. */
+internal fun isSendableHeaderValue(value: String): Boolean =
+    value.all { it == '\t' || it in '\u0020'..'\u007e' }
