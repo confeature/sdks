@@ -22,6 +22,9 @@
 #include <utility>
 #include <vector>
 
+#include "confeature/client.h"
+#include "confeature/config_cache.h"
+#include "confeature/polling_mode.h"
 #include "internal/sdk_key.h"
 
 using confeature::LogLevel;
@@ -617,4 +620,74 @@ TEST_CASE("ConfigFetcher caps the response body at kMaxBodyBytes", "[config_fetc
     REQUIRE(result.error == "body_too_large");
     requireKeyFree(key, *logger, result);
   }
+}
+
+namespace {
+
+// A ConfigCache serving one fixed entry, or throwing from read().
+class FixedCache : public confeature::ConfigCache {
+ public:
+  explicit FixedCache(std::optional<std::string> entry, bool throws = false)
+      : entry_(std::move(entry)), throws_(throws) {}
+  std::optional<std::string> read(const std::string& /*key*/) override {
+    if (throws_) {
+      throw std::runtime_error("custom cache failure");
+    }
+    return entry_;
+  }
+  void write(const std::string& /*key*/, const std::string& /*value*/) override {}
+
+ private:
+  std::optional<std::string> entry_;
+  bool throws_;
+};
+
+constexpr const char* kFlagResponse =
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: application/json\r\n"
+    "Content-Length: 34\r\n"
+    "Connection: close\r\n"
+    "\r\n"
+    "{\"f\":{\"x\":{\"t\":0,\"v\":{\"b\":true}}}}";
+
+// Builds a manual-poll client over `cache`, then fetches once from a mock.
+void constructsAndFetchesOver(std::shared_ptr<confeature::ConfigCache> cache) {
+  MockServer server;
+  server.enqueue(kFlagResponse);
+  server.start();
+  auto logger = std::make_shared<CapturingLogger>();
+  std::shared_ptr<confeature::ConfeatureClient> client;
+  REQUIRE_NOTHROW(client = confeature::ConfeatureClient::builder(kConfigCatKey)
+                               .pollingMode(confeature::PollingMode::manualPoll())
+                               .baseUrl(baseUrlFor(server))
+                               .logger(logger)
+                               .cache(std::move(cache))
+                               .build());
+  // The entry was ignored: nothing to evaluate before the first fetch.
+  REQUIRE(client->getValue<bool>("x", false) == false);
+  REQUIRE(client->forceRefresh());
+  REQUIRE(client->getValue<bool>("x", false) == true);
+  client->close();
+  server.stop();
+  bool warned = false;
+  for (const auto& line : logger->lines()) {
+    REQUIRE(line.find(kConfigCatKey) == std::string::npos);
+    warned = warned || line.find("ConfeatureClient: ignored") != std::string::npos;
+  }
+  REQUIRE(warned);
+}
+
+}  // namespace
+
+TEST_CASE("a cache entry with an out-of-range number is ignored, never thrown (#838)",
+          "[client][cache]") {
+  // MUTATION (applied, #838): catch only nlohmann::json::parse_error again and
+  // this throws out_of_range (406) from the constructor.
+  constructsAndFetchesOver(std::make_shared<FixedCache>(R"({"body":{"f":{}},"n":1e400})"));
+  constructsAndFetchesOver(std::make_shared<FixedCache>("1e400"));
+}
+
+TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)",
+          "[client][cache]") {
+  constructsAndFetchesOver(std::make_shared<FixedCache>(std::nullopt, /*throws=*/true));
 }

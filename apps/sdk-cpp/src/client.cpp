@@ -73,7 +73,18 @@ struct ConfeatureClient::Impl {
     if (!cache) {
       return;
     }
-    auto persisted = cache->read(cacheKey);
+    // A custom ConfigCache may throw despite its contract; a cache miss,
+    // never a throwing constructor (#838). Its message is not logged: a
+    // user cache's text is unknown, and may quote anything.
+    std::optional<std::string> persisted;
+    try {
+      persisted = cache->read(cacheKey);
+    } catch (...) {
+      if (logger) {
+        logger->warning("ConfeatureClient: ignored a cache read that threw");
+      }
+      return;
+    }
     if (!persisted.has_value()) {
       return;
     }
@@ -98,7 +109,13 @@ struct ConfeatureClient::Impl {
         // Hook bus (spec 111 / #268) — cache hit fires clientReady once.
         fireClientReadyOnce();
       }
-    } catch (const nlohmann::json::parse_error& err) {
+    } catch (const nlohmann::json::exception& err) {
+      // Every json exception, not only parse_error: a number like 1e400
+      // throws out_of_range (406) from parse (#838). The rest of the block
+      // reads `body` only after contains() and `etag` only after
+      // is_string(), so nothing else in it throws; the entry is ignored.
+      config.reset();
+      etag.reset();
       if (logger) {
         logger->warning(std::string("ConfeatureClient: ignored malformed cache entry — ") +
                         err.what());
