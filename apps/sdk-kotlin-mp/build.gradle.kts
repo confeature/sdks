@@ -136,6 +136,8 @@ kotlin {
                 implementation(kotlin("test-junit5"))
                 implementation("org.junit.jupiter:junit-jupiter:5.10.3")
                 implementation("io.ktor:ktor-client-mock:$ktorVersion")
+                // #840: the Android engine, run on the JVM against a real server.
+                implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
                 runtimeOnly("org.junit.platform:junit-platform-launcher:1.10.3")
 
                 // Spec 069 US3 — the official ConfigCat Kotlin SDK is the
