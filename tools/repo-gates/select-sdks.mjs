@@ -92,8 +92,8 @@ export const KINDS = [
 /** The select job's own id, whose outputs every other job reads. */
 export const SELECT_JOB = "select";
 
-/** Every output, in the order it is written. */
-export const OUTPUT_KEYS = ["gate", "known_red", "swift", "smoke", "gate_files", "summary"];
+/** Every output, in the order it is written: one per KINDS entry, then the two others (#927 B5). */
+export const OUTPUT_KEYS = [...KINDS.map((k) => k.output), "gate_files", "summary"];
 
 /** The events the workflow runs on: pushes and the schedule judge every SDK. */
 const ALL_EVENTS = ["push", "schedule"];
@@ -299,6 +299,28 @@ export function workspaceDependents(root, names) {
   return out;
 }
 
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Whether `x` is NOT a leg `routeSelection` could have written for `kind`
+ * (#927 B4): a bare name for a kind with no live suite, `{ name, live }` for a
+ * native live kind, and `{ name, daggerFn, live }` for a Dagger leg, which
+ * carries its waiver's `ticket` on the known-red output. The one statement of
+ * the leg shape, read back by conclude-sdk-gates.mjs.
+ */
+export function legProblem(kind, x) {
+  const leg =
+    isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
+  if (!kind.live) return typeof x !== "string" || !NAME.test(x);
+  if (kind.native !== undefined) return !leg;
+  return (
+    !leg ||
+    typeof x.daggerFn !== "string" ||
+    !DAGGER_FN.test(x.daggerFn) ||
+    (kind.output === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
+  );
+}
+
 /**
  * Route selected names into the job kinds. `baseManifest` is where the
  * known-red waiver is read on a pull request (the base commit's), and the
@@ -312,7 +334,7 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
     const w = (waivers?.sdks ?? []).find((s) => s?.name === name)?.ci?.knownRed;
     return typeof w === "string" && TICKET.test(w) ? w : null;
   };
-  const out = { gate: [], known_red: [], swift: [], smoke: [] };
+  const out = Object.fromEntries(KINDS.map((k) => [k.output, []]));
   for (const name of names) {
     const s = byName.get(name);
     if (s?.ci?.native !== undefined) {

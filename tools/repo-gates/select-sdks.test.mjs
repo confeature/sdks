@@ -22,6 +22,7 @@ import {
   MANIFEST,
   NAME,
   OUTPUT_KEYS,
+  legProblem,
   SelectError,
   classifyPath,
   gateFiles,
@@ -688,5 +689,27 @@ describe("the CLI", SPAWNS, () => {
     expect(JSON.parse(got.outputs.gate_files)).toEqual({ files: [], unnamed: 1 });
     for (const k of ["gate", "known_red", "swift", "smoke"])
       for (const n of names(got.outputs, k)) expect(n).toMatch(NAME);
+  });
+});
+
+describe("legProblem — the one statement of a leg's shape (#927 B4)", () => {
+  const kind = (output) => KINDS.find((k) => k.output === output);
+  it("accepts exactly the shape routeSelection writes for each kind", () => {
+    expect(legProblem(kind("smoke"), "node")).toBe(false);
+    expect(legProblem(kind("swift"), { name: "swift", live: true })).toBe(false);
+    expect(legProblem(kind("gate"), { name: "go", daggerFn: "go-test", live: false })).toBe(false);
+    expect(
+      legProblem(kind("known_red"), { name: "go", daggerFn: "go-test", live: false, ticket: "#1" }),
+    ).toBe(false);
+  });
+  it("refuses another kind's shape, a bad name, a missing live flag or a missing waiver", () => {
+    expect(legProblem(kind("smoke"), { name: "node", live: false })).toBe(true);
+    expect(legProblem(kind("swift"), "swift")).toBe(true);
+    expect(legProblem(kind("gate"), { name: "Go", daggerFn: "go-test", live: false })).toBe(true);
+    expect(legProblem(kind("gate"), { name: "go", daggerFn: "go-test" })).toBe(true);
+    expect(legProblem(kind("gate"), { name: "go", live: false })).toBe(true);
+    expect(legProblem(kind("known_red"), { name: "go", daggerFn: "go-test", live: false })).toBe(
+      true,
+    );
   });
 });
