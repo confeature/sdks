@@ -423,3 +423,129 @@ describe("the AutoPoll loop's poll() catch drops the thrown error (#803 FR-002)"
     }
   });
 });
+
+// ---- Tier 5: the client's evaluation-side catches (#841) ------------------
+
+/**
+ * #841 — the nine `catch` blocks that guard the client's public surface once
+ * forwarded the caught error to `logger.evalError(...)`, and through it to the
+ * `clientError` hook. None of them can receive a URL-quoting error today (the
+ * guarded calls are cache reads and pure evaluation; LazyLoad and ManualPoll
+ * are routed to AutoPoll, whose fetch errors are dropped in the service), so
+ * each is forced here: the guarded call throws an error quoting the keyed URL,
+ * and neither the log line, its `exception` argument, the hook nor the
+ * returned value may carry it.
+ */
+describe("the client's evaluation-side catches drop the thrown error (#841)", () => {
+  type Service = Record<string, unknown>;
+  interface Site {
+    /** The catch under test. */
+    name: string;
+    /** Name of the service method that throws, or null for `setupHooks`. */
+    throwingMethod: string | null;
+    /** Drives the client into that catch; returns what the caller sees. */
+    call: (client: ConfigCatClient) => unknown;
+  }
+
+  const sites: Site[] = [
+    { name: "setupHooks", throwingMethod: null, call: () => undefined },
+    {
+      name: "getValueAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getValueAsync("flag", false),
+    },
+    {
+      name: "getValueDetailsAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getValueDetailsAsync("flag", false),
+    },
+    { name: "getAllKeysAsync", throwingMethod: "getCurrent", call: (c) => c.getAllKeysAsync() },
+    { name: "getAllValuesAsync", throwingMethod: "getCurrent", call: (c) => c.getAllValuesAsync() },
+    {
+      name: "getAllValueDetailsAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getAllValueDetailsAsync(),
+    },
+    {
+      name: "getKeyAndValueAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getKeyAndValueAsync("v1"),
+    },
+    { name: "waitForReady", throwingMethod: "waitForReady", call: (c) => c.waitForReady() },
+    {
+      name: "dispose",
+      throwingMethod: "dispose",
+      call: (c) => {
+        c.dispose();
+        return undefined;
+      },
+    },
+  ];
+
+  const modes: Array<[string, 1 | 2]> = [
+    ["LazyLoad", 1],
+    ["ManualPoll", 2],
+  ];
+
+  for (const site of sites) {
+    for (const [modeName, pollingMode] of modes) {
+      test(`${site.name} (${modeName}) → fixed, key-free log + clientError + result`, async () => {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(() => Promise.resolve(new Response('{"f":{}}', { status: 200 }))),
+        );
+        const sink = captureLogger();
+        const hookErrors: unknown[] = [];
+        const url = `https://cdn.example.test/configuration-files/${CONFIGCAT_KEY}/config_v6.json`;
+        const thrown = new TypeError(`error sending request for url (${url})`, {
+          cause: Object.assign(new Error(`connection reset at ${url}`), { url }),
+        });
+        let throws = 0;
+        const raise = (): never => {
+          throws += 1;
+          throw thrown;
+        };
+
+        const client = new ConfigCatClient(CONFIGCAT_KEY, pollingMode, {
+          baseUrl: "https://cdn.example.test",
+          logger: sink.logger,
+          setupHooks: (hooks) => {
+            hooks.on("clientError", (...args) => hookErrors.push(args));
+            if (site.throwingMethod === null) raise();
+          },
+        });
+        const service = (client as unknown as { service: Service }).service;
+        const realDispose = (service.dispose as () => void).bind(service);
+        if (site.throwingMethod !== null) service[site.throwingMethod] = raise;
+        try {
+          const result = await site.call(client);
+
+          // The catch really ran, with an error that quotes the key.
+          expect(throws).toBe(1);
+          expect(textsOf(thrown).join("\n")).toContain(CONFIGCAT_KEY);
+          const evalLines = sink.lines.filter((l) => l.eventId === SdkErrorCode.EVAL_FAILED);
+          expect(evalLines).toHaveLength(1);
+          expect(hookErrors.length).toBeGreaterThan(0);
+
+          // A fixed message, no exception riding along, nothing keyed anywhere.
+          expect(evalLines[0]!.exception).toBeUndefined();
+          expectKeyFree(CONFIGCAT_KEY, "log lines", sink.lines);
+          expectKeyFree(CONFIGCAT_KEY, "clientError hook", hookErrors);
+          expectKeyFree(CONFIGCAT_KEY, "returned value", [result]);
+          if (site.name === "getValueDetailsAsync") {
+            // ConfigCat's shape keeps an errorException — a NEW key-free Error.
+            const details = result as { errorMessage?: string; errorException?: unknown };
+            expect(details.errorException).toBeInstanceOf(Error);
+            expect(details.errorException).not.toBe(thrown);
+            expect((details.errorException as Error).message).toBe(details.errorMessage);
+          }
+        } finally {
+          // Even when dispose() is the site under test: no timer may outlive it.
+          service.dispose = realDispose;
+          client.dispose();
+          realDispose();
+        }
+      });
+    }
+  }
+});

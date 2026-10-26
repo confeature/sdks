@@ -197,7 +197,13 @@ export class LoggerWrapper {
     );
   }
 
-  evalError(key: string, exception: unknown): void {
+  /**
+   * `exception` is optional because the SDK clients' own last-resort catches
+   * pass none: an error caught there may quote the keyed config URL, so it is
+   * dropped and only this fixed message travels (#841, as #803 did for the
+   * refresh path). The evaluator's catch still forwards its engine error.
+   */
+  evalError(key: string, exception?: unknown): void {
     this.emit(
       LogLevel.Error,
       SdkErrorCode.EVAL_FAILED,

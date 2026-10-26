@@ -19,6 +19,7 @@ import {
   LoggerWrapper,
   LogLevel,
   type RefreshResult,
+  SdkErrorCode,
 } from "@confeature/sdk-shared";
 
 import { DenoFileConfigCache } from "../../src/deno-file-cache.ts";
@@ -229,4 +230,140 @@ describe("a throwing refresh leaks no SDK key through the AutoPoll loop (FR-002,
       spy.mockRestore();
     }
   });
+});
+
+/**
+ * #841 — the nine `catch` blocks that guard the client's public surface once
+ * forwarded the caught error to `logger.evalError(...)`, and through it to the
+ * `clientError` hook. None of them can receive a URL-quoting error today (the
+ * guarded calls are cache reads, pure evaluation and local lifecycle calls;
+ * LazyLoad's `ensureFresh()` only starts a refresh it never awaits, and that
+ * refresh drops its own fetch errors), so each is forced here: the guarded
+ * call throws an error quoting the keyed URL, and neither the log line, its
+ * `exception` argument, the hook nor the returned value may carry it.
+ */
+describe("the client's evaluation-side catches drop the thrown error (#841)", () => {
+  type Service = Record<string, unknown>;
+  interface Site {
+    /** The catch under test. */
+    name: string;
+    /** Name of the service method that throws, or null for `setupHooks`. */
+    throwingMethod: string | null;
+    /** Drives the client into that catch; returns what the caller sees. */
+    call: (client: ConfeatureClient) => unknown;
+  }
+
+  const sites: Site[] = [
+    { name: "setupHooks", throwingMethod: null, call: () => undefined },
+    {
+      name: "getValueAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getValueAsync("flag", false),
+    },
+    {
+      name: "getValueDetailsAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getValueDetailsAsync("flag", false),
+    },
+    { name: "getAllKeysAsync", throwingMethod: "getCurrent", call: (c) => c.getAllKeysAsync() },
+    { name: "getAllValuesAsync", throwingMethod: "getCurrent", call: (c) => c.getAllValuesAsync() },
+    {
+      name: "getAllValueDetailsAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getAllValueDetailsAsync(),
+    },
+    {
+      name: "getKeyAndValueAsync",
+      throwingMethod: "getCurrent",
+      call: (c) => c.getKeyAndValueAsync("v1"),
+    },
+    { name: "waitForReady", throwingMethod: "waitForReady", call: (c) => c.waitForReady() },
+    {
+      name: "dispose",
+      throwingMethod: "dispose",
+      call: (c) => {
+        c.dispose();
+        return undefined;
+      },
+    },
+  ];
+
+  const modes = [PollingMode.LazyLoad, PollingMode.ManualPoll] as const;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  for (const site of sites) {
+    for (const pollingMode of modes) {
+      const modeName = pollingMode === PollingMode.LazyLoad ? "LazyLoad" : "ManualPoll";
+      test(`${site.name} (${modeName}) → fixed, key-free log + clientError + result`, async () => {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(() => Promise.resolve(new Response('{"f":{}}', { status: 200 }))),
+        );
+        const lines: Array<{ eventId: string; message: string; exception: unknown }> = [];
+        const clientErrors: unknown[] = [];
+        const sink: IConfigCatLogger = {
+          level: LogLevel.Debug,
+          log: (_level, eventId, message, exception) => {
+            lines.push({ eventId: String(eventId), message: message.toString(), exception });
+          },
+        };
+        const thrown = new TypeError(`error sending request for url (${URL_WITH_KEY})`, {
+          cause: new Error(`connection reset at ${URL_WITH_KEY}`),
+        });
+        let throws = 0;
+        const raise = (): never => {
+          throws += 1;
+          throw thrown;
+        };
+
+        const client = new ConfeatureClient(KEY, pollingMode, {
+          baseUrl: "https://cdn.example.test",
+          logger: sink,
+          cache: "memory",
+          setupHooks: (hooks) => {
+            hooks.on("clientError", (msg, ex) => clientErrors.push(msg, ex));
+            if (site.throwingMethod === null) raise();
+          },
+        });
+        const clientService = (client as unknown as { service: Service }).service;
+        const realDispose = (clientService.dispose as () => void).bind(clientService);
+        if (site.throwingMethod !== null) clientService[site.throwingMethod] = raise;
+        try {
+          const result = await site.call(client);
+
+          // The catch really ran, with an error that quotes the key.
+          expect(throws).toBe(1);
+          expect(textsOf(thrown).join("\n")).toContain(KEY);
+          const evalLines = lines.filter((l) => l.eventId === SdkErrorCode.EVAL_FAILED);
+          expect(evalLines).toHaveLength(1);
+          expect(clientErrors.length).toBeGreaterThan(0);
+
+          // A fixed message, no exception riding along, nothing keyed anywhere.
+          expect(evalLines[0]!.exception).toBeUndefined();
+          const texts = [...textsOf(lines), ...textsOf(clientErrors), ...textsOf(result)];
+          for (const secret of SECRETS) {
+            expect(
+              texts.filter((t) => t.includes(secret)),
+              `leaks ${secret.length}-char secret`,
+            ).toEqual([]);
+          }
+          if (site.name === "getValueDetailsAsync") {
+            // ConfigCat's shape keeps an errorException — a NEW key-free Error.
+            const details = result as { errorMessage?: string; errorException?: unknown };
+            expect(details.errorException).toBeInstanceOf(Error);
+            expect(details.errorException).not.toBe(thrown);
+            expect((details.errorException as Error).message).toBe(details.errorMessage);
+          }
+        } finally {
+          // Even when dispose() is the site under test: no timer may outlive it.
+          clientService.dispose = realDispose;
+          client.dispose();
+          realDispose();
+        }
+      });
+    }
+  }
 });

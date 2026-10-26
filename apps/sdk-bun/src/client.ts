@@ -132,6 +132,14 @@ export function disposeAllClients(): void {
  * Concrete client implementation. Every public async method body lives
  * inside a top-level try/catch — no exception ever escapes.
  *
+ * No caught error is ever forwarded, either: those catches hand the logger
+ * (and so the `clientError` hook) a fixed message and nothing else. None of
+ * them can receive an error quoting the keyed config URL today — they guard
+ * cache reads, pure evaluation and local lifecycle calls — but each sits one
+ * refactor away from it (ConfigCat's LazyLoad awaits the fetch on the
+ * evaluation path), and the SDK key must reach no log line and no hook
+ * payload (#841; #803 made the refresh path key-free the same way).
+ *
  * Class renamed `ConfigCatClient` → `ConfeatureClient` per the brand
  * (Principle II framing — method signatures stay byte-identical to
  * configcat-js). A `ConfigCatClient` alias is exported for migrating
@@ -184,8 +192,9 @@ export class ConfeatureClient implements IConfigCatClient {
     if (options?.setupHooks) {
       try {
         options.setupHooks(this.hooks);
-      } catch (err) {
-        this.logger.evalError("setupHooks", err);
+      } catch {
+        // The caught error is dropped, never forwarded: see the class doc (#841).
+        this.logger.evalError("setupHooks");
       }
     }
 
@@ -257,8 +266,9 @@ export class ConfeatureClient implements IConfigCatClient {
       this.service.ensureFresh();
       const cfg = this.service.getCurrent();
       return this.evaluator.evaluate(cfg, key, defaultValue, user ?? this.defaultUser).value;
-    } catch (err) {
-      this.logger.evalError(key, err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError(key);
       return defaultValue as SettingTypeOf<T>;
     }
   }
@@ -280,14 +290,16 @@ export class ConfeatureClient implements IConfigCatClient {
       this.service.ensureFresh();
       const cfg = this.service.getCurrent();
       return this.evaluator.evaluate(cfg, key, defaultValue, user ?? this.defaultUser);
-    } catch (err) {
-      this.logger.evalError(key, err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError(key);
       return {
         key,
         value: defaultValue as SettingTypeOf<T>,
         isDefaultValue: true,
         errorMessage: "Unexpected evaluation error.",
-        errorException: err,
+        // ConfigCat's shape keeps an errorException: a new key-free Error.
+        errorException: new Error("Unexpected evaluation error."),
       };
     }
   }
@@ -298,8 +310,9 @@ export class ConfeatureClient implements IConfigCatClient {
       this.service.ensureFresh();
       const cfg = this.service.getCurrent();
       return Object.keys(cfg.settings);
-    } catch (err) {
-      this.logger.evalError("getAllKeysAsync", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("getAllKeysAsync");
       return [];
     }
   }
@@ -317,8 +330,9 @@ export class ConfeatureClient implements IConfigCatClient {
         out.push(new SettingKeyValue(key, value));
       }
       return out;
-    } catch (err) {
-      this.logger.evalError("getAllValuesAsync", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("getAllValuesAsync");
       return [];
     }
   }
@@ -333,8 +347,9 @@ export class ConfeatureClient implements IConfigCatClient {
         out.push(this.evaluator.evaluate(cfg, key, null, user ?? this.defaultUser));
       }
       return out;
-    } catch (err) {
-      this.logger.evalError("getAllValueDetailsAsync", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("getAllValueDetailsAsync");
       return [];
     }
   }
@@ -349,8 +364,9 @@ export class ConfeatureClient implements IConfigCatClient {
         }
       }
       return null;
-    } catch (err) {
-      this.logger.evalError("getKeyAndValueAsync", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("getKeyAndValueAsync");
       return null;
     }
   }
@@ -379,8 +395,9 @@ export class ConfeatureClient implements IConfigCatClient {
         return Promise.resolve(ClientCacheState.HasLocalOverrideFlagDataOnly);
       }
       return this.service.waitForReady();
-    } catch (err) {
-      this.logger.evalError("waitForReady", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("waitForReady");
       return Promise.resolve(ClientCacheState.NoFlagData);
     }
   }
@@ -460,8 +477,9 @@ export class ConfeatureClient implements IConfigCatClient {
     this.disposed = true;
     try {
       this.service.dispose();
-    } catch (err) {
-      this.logger.evalError("dispose", err);
+    } catch {
+      // The caught error is dropped, never forwarded: see the class doc (#841).
+      this.logger.evalError("dispose");
     }
     this.hooks.clear();
     // Remove from singleton table — if a future getClient(sdkKey) is
