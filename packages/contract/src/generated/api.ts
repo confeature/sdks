@@ -581,12 +581,12 @@ export interface paths {
     };
     /**
      * Get a setting's value in one environment (v2)
-     * @description Returns the setting's evaluation formula in this environment: its value (`defaultValue`) and its targeting rules, which are always empty until targeting lands (#883). Aligned with ConfigCat's get-setting-value-v2.
+     * @description Returns the setting's evaluation formula in this environment: its value (`defaultValue`), its ordered targeting rules and its percentage evaluation attribute. Sensitive comparison values are returned in cleartext; only the SDK payload carries them hashed. Aligned with ConfigCat's get-setting-value-v2.
      */
     get: operations["getSettingValueV2"];
     /**
      * Replace a setting's value in one environment (v2)
-     * @description Replaces the whole evaluation formula: a field that is not listed is reset. The value goes live in this environment with no publish call; the response is 200 only once it is in the environment's edge storage. A 503 means the value is saved but not live yet: retry the same request after Retry-After. `targetingRules` must be empty until #883, and `percentageEvaluationAttribute` null until #885. A management token also needs config:publish. Aligned with ConfigCat's replace-setting-value-v2.
+     * @description Replaces the whole evaluation formula: a field that is not listed is reset. The value goes live in this environment with no publish call; the response is 200 only once it is in the environment's edge storage. A 503 means the value is saved but not live yet: retry the same request after Retry-After. A body without `targetingRules` deletes them. Targeting rules take user conditions with any of ConfigCat's 36 comparators, and prerequisite flag conditions: `equals` or `doesNotEqual` on another setting of the same config, with a value of that setting's type. A write that would make the settings' prerequisites form a cycle in this environment is refused, and writes nothing. A rule serves a value or percentage options; the last rule may have no conditions and serve percentage options to all other users. `percentageEvaluationAttribute` names the user attribute percentage options bucket on (null is Identifier). Segment conditions take `isIn` or `isNotIn` on a segment of the setting's own product. A management token also needs config:publish. Aligned with ConfigCat's replace-setting-value-v2.
      */
     put: operations["replaceSettingValueV2"];
     post?: never;
@@ -595,9 +595,67 @@ export interface paths {
     head?: never;
     /**
      * Update a setting's value in one environment with JSON Patch (v2)
-     * @description Applies an RFC 6902 JSON Patch to the setting's evaluation formula (the model a PUT takes), then validates and writes the result as a PUT would. Allowed paths: `/defaultValue`, `/defaultValue/boolValue`, `/defaultValue/stringValue`, `/defaultValue/intValue`, `/defaultValue/doubleValue`, `/targetingRules`, `/percentageEvaluationAttribute`. At most 100 operations. A patch that changes nothing answers 204. Aligned with ConfigCat's update-setting-value-v2.
+     * @description Applies an RFC 6902 JSON Patch to the setting's evaluation formula (the model a PUT takes), then validates and writes the result as a PUT would. Every operation (add, remove, replace, move, copy, test), array index, `-` and RFC 6901 escape is supported on `/defaultValue`, `/targetingRules` and `/percentageEvaluationAttribute` and anything below them, in `path` and in `from`; the patch is atomic. At most 100 operations. A stale `latestVersionId` answers 409 before the patch is applied. A patch that changes nothing answers 204. Aligned with ConfigCat's update-setting-value-v2.
      */
     patch: operations["updateSettingValueV2"];
+    trace?: never;
+  };
+  "/v1/products/{productId}/segments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * List segments
+     * @description Returns the product's segments, each with its `usage`: how many feature flags and settings reference it in their targeting rules. Aligned with ConfigCat's get-segments.
+     */
+    get: operations["getSegments"];
+    put?: never;
+    /**
+     * Create a segment
+     * @description Creates a segment in the product: one user condition, with a legacy comparator (`RolloutRuleComparator`) and a comparison value string, which targeting rules reference with `isIn` or `isNotIn`. A list comparator's value is comma-separated; `contains` and `doesNotContain` compare the whole value; a number may use a decimal comma. A sensitive comparison value is stored in cleartext and served hashed, its context salt being the segment's name. A management token also needs config:publish. Aligned with ConfigCat's create-segment.
+     */
+    post: operations["createSegment"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/segments/{segmentId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Segment (UUID). */
+        segmentId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a segment
+     * @description Returns a segment. Aligned with ConfigCat's get-segment.
+     */
+    get: operations["getSegment"];
+    /**
+     * Update a segment
+     * @description Updates a segment: a field that is absent or null keeps its value. The edit goes live, with no publish call, in every environment whose targeting rules reference the segment — at most 500 (config, environment) pairs; a segment used by more is refused with a 400 naming the bound. Renaming a segment re-hashes its sensitive comparison values. A management token also needs config:publish. Aligned with ConfigCat's update-segment.
+     */
+    put: operations["updateSegment"];
+    post?: never;
+    /**
+     * Delete a segment
+     * @description Deletes a segment. A segment that targeting rules still reference is refused with a 400 naming its usage, and nothing is deleted. A management token also needs config:publish. Aligned with ConfigCat's delete-segment.
+     */
+    delete: operations["deleteSegment"];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/v1/products/{productId}/configs": {
@@ -674,7 +732,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a setting
-     * @description The deletion goes live with no publish call: when the 204 arrives the setting is no longer served in any published environment of the config. If the edge cannot be updated at that moment, the setting is still deleted and the 204 stands; the edge update is retried automatically.
+     * @description The deletion goes live with no publish call: when the 204 arrives the setting is no longer served in any published environment of the config. If the edge cannot be updated at that moment, the setting is still deleted and the 204 stands; the edge update is retried automatically. A setting that is a prerequisite of other settings, in any environment, is not deleted: the 400 names them.
      */
     delete: operations["deleteSetting"];
     options?: never;
@@ -1700,12 +1758,235 @@ export interface components {
     /** @description The body of a v2 value PUT, as ConfigCat's `UpdateEvaluationFormulaModel`. A full replace: an omitted field is reset. */
     UpdateEvaluationFormulaModel: {
       defaultValue: components["schemas"]["UpdateValueModel"];
-      /** @description Must be empty or null until targeting lands (#883). */
-      targetingRules?: Record<string, never>[] | null;
-      /** @description Must be null until percentage options land (#885). */
+      /** @description The ordered targeting rules; the first rule a user matches serves its value. Null or omitted means none. */
+      targetingRules?: components["schemas"]["UpdateTargetingRuleModel"][] | null;
+      /** @description The user attribute percentage options bucket on, for every rule of this formula: 1 to 1000 characters, an empty string is refused. Null or omitted is `Identifier`. */
       percentageEvaluationAttribute?: string | null;
     };
-    /** @description The limits this setting's values are held to, as ConfigCat's `FeatureFlagLimitations`. Every targeting limit is 0 until targeting lands (#883). */
+    /**
+     * @description ConfigCat's `UserComparator`, in its order; every value is accepted. `semVerLess` … `semVerGreaterOrEquals`, `sensitiveTextEquals`, `sensitiveTextDoesNotEqual`, `textEquals` and `textDoesNotEqual` take a `stringValue`; the `number…` comparators and `dateTimeBefore` / `dateTimeAfter` (Unix seconds) take a `doubleValue`; every other one takes a `listValue`.
+     * @enum {string}
+     */
+    UserComparator:
+      | "isOneOf"
+      | "isNotOneOf"
+      | "containsAnyOf"
+      | "doesNotContainAnyOf"
+      | "semVerIsOneOf"
+      | "semVerIsNotOneOf"
+      | "semVerLess"
+      | "semVerLessOrEquals"
+      | "semVerGreater"
+      | "semVerGreaterOrEquals"
+      | "numberEquals"
+      | "numberDoesNotEqual"
+      | "numberLess"
+      | "numberLessOrEquals"
+      | "numberGreater"
+      | "numberGreaterOrEquals"
+      | "sensitiveIsOneOf"
+      | "sensitiveIsNotOneOf"
+      | "dateTimeBefore"
+      | "dateTimeAfter"
+      | "sensitiveTextEquals"
+      | "sensitiveTextDoesNotEqual"
+      | "sensitiveTextStartsWithAnyOf"
+      | "sensitiveTextNotStartsWithAnyOf"
+      | "sensitiveTextEndsWithAnyOf"
+      | "sensitiveTextNotEndsWithAnyOf"
+      | "sensitiveArrayContainsAnyOf"
+      | "sensitiveArrayDoesNotContainAnyOf"
+      | "textEquals"
+      | "textDoesNotEqual"
+      | "textStartsWithAnyOf"
+      | "textNotStartsWithAnyOf"
+      | "textEndsWithAnyOf"
+      | "textNotEndsWithAnyOf"
+      | "arrayContainsAnyOf"
+      | "arrayDoesNotContainAnyOf";
+    /**
+     * @description ConfigCat's `SegmentComparator`: whether the user is, or is not, in the segment (#886).
+     * @enum {string}
+     */
+    SegmentComparator: "isIn" | "isNotIn";
+    /**
+     * @description ConfigCat's `PrerequisiteComparator`: whether the prerequisite's served value equals, or does not equal, the condition's value.
+     * @enum {string}
+     */
+    PrerequisiteComparator: "equals" | "doesNotEqual";
+    /**
+     * @description ConfigCat's legacy comparator, the one a segment's condition takes (#886). The `isOneOf`, `isNotOneOf`, semver list and sensitive comparators read the value as a comma-separated list, each item trimmed; `contains` and `doesNotContain` compare the whole value; the number comparators read a decimal number, a decimal comma accepted.
+     * @enum {string}
+     */
+    RolloutRuleComparator:
+      | "isOneOf"
+      | "isNotOneOf"
+      | "contains"
+      | "doesNotContain"
+      | "semVerIsOneOf"
+      | "semVerIsNotOneOf"
+      | "semVerLess"
+      | "semVerLessOrEquals"
+      | "semVerGreater"
+      | "semVerGreaterOrEquals"
+      | "numberEquals"
+      | "numberDoesNotEqual"
+      | "numberLess"
+      | "numberLessOrEquals"
+      | "numberGreater"
+      | "numberGreaterOrEquals"
+      | "sensitiveIsOneOf"
+      | "sensitiveIsNotOneOf";
+    /** @description A new segment, as ConfigCat's model. */
+    CreateSegmentModel: {
+      name: string;
+      description?: string | null;
+      comparisonAttribute: string;
+      comparator: components["schemas"]["RolloutRuleComparator"];
+      comparisonValue: string;
+    };
+    /** @description A segment update, as ConfigCat's model: a field that is absent or null keeps its value; the result is held to the create bounds. */
+    UpdateSegmentModel: {
+      name?: string | null;
+      description?: string | null;
+      comparisonAttribute?: string | null;
+      comparator?: components["schemas"]["RolloutRuleComparator"] | null;
+      comparisonValue?: string | null;
+    };
+    /** @description A segment, as ConfigCat's model. The creator and updater fields are always null: Confeature does not return member identities through this model. A sensitive comparison value is returned in cleartext. */
+    SegmentModel: {
+      product: components["schemas"]["ProductModel"];
+      /** Format: uuid */
+      segmentId: string;
+      name: string;
+      description: string | null;
+      creatorEmail: string | null;
+      creatorFullName: string | null;
+      /** Format: date-time */
+      createdAt: string;
+      lastUpdaterEmail: string | null;
+      lastUpdaterFullName: string | null;
+      /** Format: date-time */
+      updatedAt: string;
+      comparisonAttribute: string;
+      comparator: components["schemas"]["RolloutRuleComparator"];
+      comparisonValue: string;
+    };
+    /** @description A segment as ConfigCat lists it, with its `usage`: how many feature flags and settings reference it. The creator and updater fields are always null. */
+    SegmentListModel: {
+      product: components["schemas"]["ProductModel"];
+      /** Format: uuid */
+      segmentId: string;
+      name: string;
+      description: string | null;
+      creatorEmail: string | null;
+      creatorFullName: string | null;
+      /** Format: date-time */
+      createdAt: string;
+      lastUpdaterEmail: string | null;
+      lastUpdaterFullName: string | null;
+      /** Format: date-time */
+      updatedAt: string;
+      /** Format: int32 */
+      usage: number;
+    };
+    /** @description One item of a list comparison value, as ConfigCat's model. */
+    UpdateComparisonValueListModel: {
+      value: string;
+      hint?: string | null;
+    };
+    /** @description The value a user attribute is compared to, as ConfigCat's model: exactly the field the comparator takes is non-null (see `UserComparator`). A `doubleValue` must be finite. A semver comparator's value (each non-blank list item, or the string) must be a semantic version the SDKs parse: `v?MAJOR.MINOR.PATCH`, an optional pre-release and build, at most 256 characters once trimmed. */
+    UpdateComparisonValueModel: {
+      stringValue?: string | null;
+      /** Format: double */
+      doubleValue?: number | null;
+      /** @description A list comparator's items. `minItems: 1` is Confeature's, not ConfigCat's (which sets none): an empty list matches no user under `isOneOf` or `containsAnyOf` and every user carrying the attribute under their negations, so the condition is dead or always true. It is refused as a misauthored condition rather than stored as one. */
+      listValue?: components["schemas"]["UpdateComparisonValueListModel"][] | null;
+    };
+    /** @description A condition on a user attribute, as ConfigCat's model. */
+    UpdateUserConditionModel: {
+      comparisonAttribute: string;
+      comparator: components["schemas"]["UserComparator"];
+      comparisonValue: components["schemas"]["UpdateComparisonValueModel"];
+    };
+    /** @description A condition on a segment, as ConfigCat's model (#886): a segment of the setting's own product, which cannot be deleted while a rule references it. */
+    UpdateSegmentConditionModel: {
+      /** Format: uuid */
+      segmentId: string;
+      comparator: components["schemas"]["SegmentComparator"];
+    };
+    /** @description A condition on a prerequisite flag, as ConfigCat's model: another setting of the same config, and a value of that setting's type (the one typed field of its type is set). The prerequisite is evaluated in the same environment. */
+    UpdatePrerequisiteFlagConditionModel: {
+      /** Format: int32 */
+      prerequisiteSettingId: number;
+      comparator: components["schemas"]["PrerequisiteComparator"];
+      prerequisiteComparisonValue: components["schemas"]["UpdateValueModel"];
+    };
+    /** @description One AND-ed condition, as ConfigCat's model: exactly one of its three fields is non-null. */
+    UpdateConditionModel: {
+      userCondition?: components["schemas"]["UpdateUserConditionModel"] | null;
+      segmentCondition?: components["schemas"]["UpdateSegmentConditionModel"] | null;
+      prerequisiteFlagCondition?:
+        | components["schemas"]["UpdatePrerequisiteFlagConditionModel"]
+        | null;
+    };
+    /** @description A percentage option, as ConfigCat's model. A rule's percentages are integers from 0 to 100 and sum to exactly 100; a boolean setting has exactly two options; the value has the setting's type. */
+    UpdatePercentageOptionModel: {
+      /** Format: int32 */
+      percentage: number;
+      value: components["schemas"]["UpdateValueModel"];
+    };
+    /** @description A targeting rule, as ConfigCat's model. It sets exactly one of `value` and `percentageOptions`; it has one or more conditions, or none only as the last rule serving percentage options. */
+    UpdateTargetingRuleModel: {
+      conditions?: components["schemas"]["UpdateConditionModel"][] | null;
+      percentageOptions?: components["schemas"]["UpdatePercentageOptionModel"][] | null;
+      value?: components["schemas"]["UpdateValueModel"] | null;
+    };
+    ComparisonValueListModel: {
+      value: string;
+      hint: string | null;
+    };
+    /** @description The value a user attribute is compared to: exactly the field the comparator takes is non-null. Sensitive values are in cleartext. */
+    ComparisonValueModel: {
+      stringValue: string | null;
+      /** Format: double */
+      doubleValue: number | null;
+      listValue: components["schemas"]["ComparisonValueListModel"][] | null;
+    };
+    UserConditionModel: {
+      comparisonAttribute: string;
+      comparator: components["schemas"]["UserComparator"];
+      comparisonValue: components["schemas"]["ComparisonValueModel"];
+    };
+    SegmentConditionModel: {
+      /** Format: uuid */
+      segmentId: string;
+      comparator: components["schemas"]["SegmentComparator"];
+    };
+    PrerequisiteFlagConditionModel: {
+      /** Format: int32 */
+      prerequisiteSettingId: number;
+      comparator: components["schemas"]["PrerequisiteComparator"];
+      prerequisiteComparisonValue: components["schemas"]["ValueModel"];
+    };
+    /** @description One AND-ed condition; exactly one of its three fields is non-null. */
+    ConditionModel: {
+      userCondition: components["schemas"]["UserConditionModel"] | null;
+      segmentCondition: components["schemas"]["SegmentConditionModel"] | null;
+      prerequisiteFlagCondition: components["schemas"]["PrerequisiteFlagConditionModel"] | null;
+    };
+    PercentageOptionModel: {
+      /** Format: int32 */
+      percentage: number;
+      value: components["schemas"]["ValueModel"];
+    };
+    /** @description A targeting rule, as ConfigCat's model: its AND-ed conditions, then either its `value` or its `percentageOptions` (empty when it serves a value). */
+    TargetingRuleModel: {
+      conditions: components["schemas"]["ConditionModel"][];
+      percentageOptions: components["schemas"]["PercentageOptionModel"][];
+      value: components["schemas"]["ValueModel"] | null;
+    };
+    /** @description The limits this setting's values are held to, as ConfigCat's `FeatureFlagLimitations`: ConfigCat's published maxima, each one enforced. */
     FeatureFlagLimitations: {
       /** Format: int32 */
       maxPercentageOptionCount: number;
@@ -1722,7 +2003,7 @@ export interface components {
       /** Format: int32 */
       maxConditionPerTargetingRuleCount: number;
     };
-    /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields are always null, `targetingRules` is empty until #883, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
+    /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields are always null, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
     SettingFormulaModel: {
       /**
        * Format: uuid
@@ -1730,7 +2011,8 @@ export interface components {
        */
       lastVersionId: string;
       defaultValue: components["schemas"]["ValueModel"];
-      targetingRules: Record<string, never>[];
+      /** @description The ordered targeting rules, sensitive values in cleartext. */
+      targetingRules: components["schemas"]["TargetingRuleModel"][];
       setting: components["schemas"]["SettingDataV2Model"];
       /** Format: date-time */
       updatedAt: string | null;
@@ -1739,6 +2021,7 @@ export interface components {
       lastUpdaterUserFullName: string | null;
       integrationLinks: Record<string, never>[];
       settingTags: Record<string, never>[];
+      /** @description The settings whose targeting rules in this environment have this setting as a prerequisite, by ascending id. */
       settingIdsWherePrerequisite: number[];
       /** Format: int32 */
       changeRequestCount: number;
@@ -1991,7 +2274,7 @@ export interface components {
       | "management_token_minted"
       | "management_token_revoked";
     /**
-     * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature value `configPublished`. Confeature's emitter only produces the config-plane subset it supports.
+     * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature values `configPublished` and `settingTargetingRulesChanged` (a change to a value's targeting rules, its sensitive comparison values redacted; ConfigCat records it under `settingValueChanged`). Confeature's emitter only produces the config-plane subset it supports.
      * @enum {string}
      */
     AuditLogType:
@@ -2070,7 +2353,8 @@ export interface components {
       | "segmentDeleted"
       | "webhookSigningKeyDeleted"
       | "webhookSigningKeyCreated"
-      | "configPublished";
+      | "configPublished"
+      | "settingTargetingRulesChanged";
     /** @enum {string} */
     GuardianEventStatus: "open" | "acknowledged" | "rolled_back" | "dismissed";
     CreateGuardianIntegrationRequest: {
@@ -2319,7 +2603,7 @@ export interface components {
         "application/xml": string;
       };
     };
-    /** @description Invalid request: a value that does not respect the setting's type or bounds, more than one value field, a predefined variation, targeting rules (#883) or a percentage evaluation attribute (#885), an invalid JSON Patch, a missing required reason, environment and setting in different products, or a config whose evaluationVersion is not v2. */
+    /** @description Invalid request: a value that does not respect the setting's type or bounds, more than one value field, a predefined variation, a targeting rule that breaks a formula invariant or a limit of `featureFlagLimitations` (the message names the field, never the value), a comparison value of the wrong kind for its comparator, an empty list, a semantic version no SDK can parse, a number that is not finite, percentage options that break a rule of `percentageOptions` (integers 0 to 100 summing to 100, exactly two for a boolean setting), a prerequisite flag condition on the setting itself, on a setting that is not in this config (missing or another config's, one message), with a value of another type than its prerequisite's, or that would form a cycle of prerequisites, a segment condition on a segment that is not in this product (missing or another product's, one message), an invalid JSON Patch, a formula larger than 900000 bytes, a missing required reason, environment and setting in different products, or a config whose evaluationVersion is not v2. */
     ValueWriteBadRequest: {
       headers: {
         [name: string]: unknown;
@@ -3809,7 +4093,7 @@ export interface operations {
           "application/json": components["schemas"]["SettingValue"];
         };
       };
-      /** @description Environment and setting do not share a product. */
+      /** @description Environment and setting do not share a product, or the value has targeting rules, which this envelope cannot carry: the message names the v2 value route (`/v2/environments/{environmentId}/settings/{settingId}/value`). */
       400: {
         headers: {
           [name: string]: unknown;
@@ -3876,7 +4160,7 @@ export interface operations {
           "application/json": components["schemas"]["SettingValue"];
         };
       };
-      /** @description Invalid request body, or env and setting do not share a product, or rolloutRules/rolloutPercentageItems is non-empty (out of scope until segments / targeting lands). */
+      /** @description Invalid request body, or env and setting do not share a product, or rolloutRules/rolloutPercentageItems is non-empty (v1 rollout rules are #890), or the value has v2 targeting rules, which this envelope would wipe: nothing is written, and the message names the v2 value route (`/v2/environments/{environmentId}/settings/{settingId}/value`). */
       400: {
         headers: {
           [name: string]: unknown;
@@ -4141,6 +4425,325 @@ export interface operations {
         };
       };
       503: components["responses"]["ValueNotLive"];
+    };
+  };
+  getSegments: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The product's segments. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SegmentListModel"][];
+        };
+      };
+      /** @description The product id is not a UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks segment:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Product not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  createSegment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateSegmentModel"];
+      };
+    };
+    responses: {
+      /** @description The segment was created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SegmentModel"];
+        };
+      };
+      /** @description A field outside ConfigCat's bounds, a list longer than maxComparisonValueListLength or with an item longer than maxComparisonValueListItemLength, or a comparison value its comparator cannot read (a number or a semantic version). The message names the field, never the value. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks segment:write, or it is a management token without config:publish. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Product not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The request body is larger than 512 KiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  getSegment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Segment (UUID). */
+        segmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The segment. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SegmentModel"];
+        };
+      };
+      /** @description The segment id is not a UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks segment:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Segment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  updateSegment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Segment (UUID). */
+        segmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateSegmentModel"];
+      };
+    };
+    responses: {
+      /** @description The segment was updated and is live. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SegmentModel"];
+        };
+      };
+      /** @description A field outside ConfigCat's bounds, a comparison value its comparator cannot read (the message names the field, never the value), or a segment used in more than 500 (config, environment) pairs. Nothing is written. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks segment:write, or it is a management token without config:publish. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Segment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The request body is larger than 512 KiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  deleteSegment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Segment (UUID). */
+        segmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The segment was deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Targeting rules still reference the segment (the message names its usage). Nothing is deleted. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks segment:write, or it is a management token without config:publish. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Segment not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
     };
   };
   listConfigs: {
@@ -4611,6 +5214,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description A change note (reason) is required for this change, or the setting is a prerequisite of other settings (the message names them). Nothing is deleted. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
       };
       /** @description Missing or invalid bearer token. */
       401: {
@@ -5599,7 +6211,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description The flag's value changed since the suspect (use force to override). */
+      /** @description The flag's value changed since the suspect (use force to override), or while the rollback was writing (nothing was rolled back; retry). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -5608,7 +6220,7 @@ export interface operations {
           "application/json": components["schemas"]["GuardianValueChanged"];
         };
       };
-      /** @description Rollback not available for this change type (not a flag-value change). */
+      /** @description Rollback not available: the suspect is not a flag-value change, the same write also changed the flag's targeting rules (revert it through the v2 value API), or the value to restore is outside the setting's domain. */
       422: {
         headers: {
           [name: string]: unknown;

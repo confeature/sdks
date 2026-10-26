@@ -1534,7 +1534,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/SettingValue"
         "400":
-          description: Environment and setting do not share a product.
+          description: >
+            Environment and setting do not share a product, or the value has
+            targeting rules, which this envelope cannot carry: the message
+            names the v2 value route
+            (`/v2/environments/{environmentId}/settings/{settingId}/value`).
           content:
             application/json:
               schema:
@@ -1608,8 +1612,11 @@ paths:
         "400":
           description: >
             Invalid request body, or env and setting do not share a product,
-            or rolloutRules/rolloutPercentageItems is non-empty (out of scope
-            until segments / targeting lands).
+            or rolloutRules/rolloutPercentageItems is non-empty (v1 rollout
+            rules are #890), or the value has v2 targeting rules, which this
+            envelope would wipe: nothing is written, and the message names
+            the v2 value route
+            (`/v2/environments/{environmentId}/settings/{settingId}/value`).
           content:
             application/json:
               schema:
@@ -1670,9 +1677,10 @@ paths:
       summary: Get a setting's value in one environment (v2)
       description: >
         Returns the setting's evaluation formula in this environment: its
-        value (`defaultValue`) and its targeting rules, which are always
-        empty until targeting lands (#883). Aligned with ConfigCat's
-        get-setting-value-v2.
+        value (`defaultValue`), its ordered targeting rules and its
+        percentage evaluation attribute. Sensitive comparison values are
+        returned in cleartext; only the SDK payload carries them hashed.
+        Aligned with ConfigCat's get-setting-value-v2.
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
@@ -1717,10 +1725,19 @@ paths:
         reset. The value goes live in this environment with no publish call;
         the response is 200 only once it is in the environment's edge storage.
         A 503 means the value is saved but not live yet: retry the same request
-        after Retry-After. `targetingRules` must be empty until #883, and
-        `percentageEvaluationAttribute` null until #885. A management token
-        also needs config:publish. Aligned with ConfigCat's
-        replace-setting-value-v2.
+        after Retry-After. A body without `targetingRules` deletes them.
+        Targeting rules take user conditions with any of ConfigCat's 36
+        comparators, and prerequisite flag conditions: `equals` or
+        `doesNotEqual` on another setting of the same config, with a value of
+        that setting's type. A write that would make the settings'
+        prerequisites form a cycle in this environment is refused, and writes
+        nothing. A rule serves a value or percentage options; the last
+        rule may have no conditions and serve percentage options to all other
+        users. `percentageEvaluationAttribute` names the user attribute
+        percentage options bucket on (null is Identifier). Segment
+        conditions take `isIn` or `isNotIn` on a segment of the setting's
+        own product. A management token also needs config:publish. Aligned
+        with ConfigCat's replace-setting-value-v2.
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
@@ -1779,12 +1796,13 @@ paths:
       description: >
         Applies an RFC 6902 JSON Patch to the setting's evaluation formula (the
         model a PUT takes), then validates and writes the result as a PUT
-        would. Allowed paths: `/defaultValue`, `/defaultValue/boolValue`,
-        `/defaultValue/stringValue`, `/defaultValue/intValue`,
-        `/defaultValue/doubleValue`, `/targetingRules`,
-        `/percentageEvaluationAttribute`. At most 100 operations. A patch that
-        changes nothing answers 204. Aligned with ConfigCat's
-        update-setting-value-v2.
+        would. Every operation (add, remove, replace, move, copy, test), array
+        index, `-` and RFC 6901 escape is supported on `/defaultValue`,
+        `/targetingRules` and `/percentageEvaluationAttribute` and anything
+        below them, in `path` and in `from`; the patch is atomic. At most 100
+        operations. A stale `latestVersionId` answers 409 before the patch is
+        applied. A patch that changes nothing answers 204. Aligned with
+        ConfigCat's update-setting-value-v2.
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
@@ -1842,6 +1860,262 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           $ref: "#/components/responses/ValueNotLive"
+  /v1/products/{productId}/segments:
+    # ConfigCat's "Segments" routes (#886). A segment belongs to a product; the
+    # product is resolved with the caller's membership, and another org's
+    # product answers 404 like a missing one.
+    parameters:
+      - in: path
+        name: productId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Identifier of the Product (UUID).
+    get:
+      operationId: getSegments
+      summary: List segments
+      description: >
+        Returns the product's segments, each with its `usage`: how many
+        feature flags and settings reference it in their targeting rules.
+        Aligned with ConfigCat's get-segments.
+      tags: [Segments]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The product's segments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SegmentListModel"
+        "400":
+          description: The product id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks segment:read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createSegment
+      summary: Create a segment
+      description: >
+        Creates a segment in the product: one user condition, with a legacy
+        comparator (`RolloutRuleComparator`) and a comparison value string,
+        which targeting rules reference with `isIn` or `isNotIn`. A list
+        comparator's value is comma-separated; `contains` and
+        `doesNotContain` compare the whole value; a number may use a decimal
+        comma. A sensitive comparison value is stored in cleartext and served
+        hashed, its context salt being the segment's name. A management
+        token also needs config:publish. Aligned with ConfigCat's
+        create-segment.
+      tags: [Segments]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSegmentModel"
+      responses:
+        "201":
+          description: The segment was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentModel"
+        "400":
+          description: A field outside ConfigCat's bounds, a list longer than maxComparisonValueListLength or with an item longer than maxComparisonValueListItemLength, or a comparison value its comparator cannot read (a number or a semantic version). The message names the field, never the value.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks segment:write, or it is a management token without config:publish.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The request body is larger than 512 KiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/segments/{segmentId}:
+    parameters:
+      - in: path
+        name: segmentId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Identifier of the Segment (UUID).
+    get:
+      operationId: getSegment
+      summary: Get a segment
+      description: Returns a segment. Aligned with ConfigCat's get-segment.
+      tags: [Segments]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The segment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentModel"
+        "400":
+          description: The segment id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks segment:read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Segment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: updateSegment
+      summary: Update a segment
+      description: >
+        Updates a segment: a field that is absent or null keeps its value.
+        The edit goes live, with no publish call, in every environment whose
+        targeting rules reference the segment — at most 500 (config,
+        environment) pairs; a segment used by more is refused with a 400
+        naming the bound. Renaming a segment re-hashes its sensitive
+        comparison values. A management token also needs config:publish.
+        Aligned with ConfigCat's update-segment.
+      tags: [Segments]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSegmentModel"
+      responses:
+        "200":
+          description: The segment was updated and is live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentModel"
+        "400":
+          description: A field outside ConfigCat's bounds, a comparison value its comparator cannot read (the message names the field, never the value), or a segment used in more than 500 (config, environment) pairs. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks segment:write, or it is a management token without config:publish.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Segment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The request body is larger than 512 KiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteSegment
+      summary: Delete a segment
+      description: >
+        Deletes a segment. A segment that targeting rules still reference is
+        refused with a 400 naming its usage, and nothing is deleted. A
+        management token also needs config:publish. Aligned with ConfigCat's
+        delete-segment.
+      tags: [Segments]
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: The segment was deleted.
+        "400":
+          description: Targeting rules still reference the segment (the message names its usage). Nothing is deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks segment:write, or it is a management token without config:publish.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Segment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/products/{productId}/configs:
     post:
       operationId: createConfig
@@ -2301,7 +2575,8 @@ paths:
         setting is no longer served in any published environment of the
         config. If the edge cannot be updated at that moment, the setting is
         still deleted and the 204 stands; the edge update is retried
-        automatically.
+        automatically. A setting that is a prerequisite of other settings, in
+        any environment, is not deleted: the 400 names them.
       tags: [Settings]
       security:
         - bearerAuth: []
@@ -2322,6 +2597,15 @@ paths:
       responses:
         "204":
           description: Setting deleted.
+        "400":
+          description: >
+            A change note (reason) is required for this change, or the setting
+            is a prerequisite of other settings (the message names them).
+            Nothing is deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid bearer token.
           content:
@@ -3284,13 +3568,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: The flag's value changed since the suspect (use force to override).
+          description: >
+            The flag's value changed since the suspect (use force to override),
+            or while the rollback was writing (nothing was rolled back; retry).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/GuardianValueChanged"
         "422":
-          description: Rollback not available for this change type (not a flag-value change).
+          description: >
+            Rollback not available: the suspect is not a flag-value change, the
+            same write also changed the flag's targeting rules (revert it
+            through the v2 value API), or the value to restore is outside the
+            setting's domain.
           content:
             application/json:
               schema:
@@ -3762,10 +4052,22 @@ components:
     ValueWriteBadRequest:
       description: >
         Invalid request: a value that does not respect the setting's type or
-        bounds, more than one value field, a predefined variation, targeting
-        rules (#883) or a percentage evaluation attribute (#885), an invalid
-        JSON Patch, a missing required reason, environment and setting in
-        different products, or a config whose evaluationVersion is not v2.
+        bounds, more than one value field, a predefined variation, a targeting
+        rule that breaks a formula invariant or a limit of
+        `featureFlagLimitations` (the message names the field, never the
+        value), a comparison value of the wrong kind for its comparator, an
+        empty list, a semantic version no SDK can parse, a number that is not
+        finite, percentage options that break a rule of
+        `percentageOptions` (integers 0 to 100 summing to 100, exactly two
+        for a boolean setting), a prerequisite flag condition on the setting
+        itself, on a setting that is not in this config (missing or another
+        config's, one message), with a value of another type than its
+        prerequisite's, or that would form a cycle of prerequisites, a
+        segment condition on a segment that is not in this product (missing
+        or another product's, one message), an invalid JSON Patch, a
+        formula larger than 900000 bytes, a missing required reason,
+        environment and setting in different products, or a config whose
+        evaluationVersion is not v2.
       content:
         application/json:
           schema:
@@ -4940,21 +5242,557 @@ components:
         targetingRules:
           type: array
           nullable: true
-          maxItems: 0
-          description: Must be empty or null until targeting lands (#883).
+          maxItems: 500
+          description: >
+            The ordered targeting rules; the first rule a user matches serves
+            its value. Null or omitted means none.
           items:
-            type: object
+            $ref: "#/components/schemas/UpdateTargetingRuleModel"
         percentageEvaluationAttribute:
           type: string
           nullable: true
           maxLength: 1000
-          description: Must be null until percentage options land (#885).
+          description: >
+            The user attribute percentage options bucket on, for every rule of
+            this formula: 1 to 1000 characters, an empty string is refused.
+            Null or omitted is `Identifier`.
+    UserComparator:
+      type: string
+      description: >
+        ConfigCat's `UserComparator`, in its order; every value is accepted.
+        `semVerLess` … `semVerGreaterOrEquals`, `sensitiveTextEquals`,
+        `sensitiveTextDoesNotEqual`, `textEquals` and `textDoesNotEqual` take a
+        `stringValue`; the `number…` comparators and `dateTimeBefore` /
+        `dateTimeAfter` (Unix seconds) take a `doubleValue`; every other one
+        takes a `listValue`.
+      enum:
+        - isOneOf
+        - isNotOneOf
+        - containsAnyOf
+        - doesNotContainAnyOf
+        - semVerIsOneOf
+        - semVerIsNotOneOf
+        - semVerLess
+        - semVerLessOrEquals
+        - semVerGreater
+        - semVerGreaterOrEquals
+        - numberEquals
+        - numberDoesNotEqual
+        - numberLess
+        - numberLessOrEquals
+        - numberGreater
+        - numberGreaterOrEquals
+        - sensitiveIsOneOf
+        - sensitiveIsNotOneOf
+        - dateTimeBefore
+        - dateTimeAfter
+        - sensitiveTextEquals
+        - sensitiveTextDoesNotEqual
+        - sensitiveTextStartsWithAnyOf
+        - sensitiveTextNotStartsWithAnyOf
+        - sensitiveTextEndsWithAnyOf
+        - sensitiveTextNotEndsWithAnyOf
+        - sensitiveArrayContainsAnyOf
+        - sensitiveArrayDoesNotContainAnyOf
+        - textEquals
+        - textDoesNotEqual
+        - textStartsWithAnyOf
+        - textNotStartsWithAnyOf
+        - textEndsWithAnyOf
+        - textNotEndsWithAnyOf
+        - arrayContainsAnyOf
+        - arrayDoesNotContainAnyOf
+    SegmentComparator:
+      type: string
+      enum: [isIn, isNotIn]
+      description: >
+        ConfigCat's `SegmentComparator`: whether the user is, or is not, in
+        the segment (#886).
+    PrerequisiteComparator:
+      type: string
+      enum: [equals, doesNotEqual]
+      description: >
+        ConfigCat's `PrerequisiteComparator`: whether the prerequisite's
+        served value equals, or does not equal, the condition's value.
+    RolloutRuleComparator:
+      type: string
+      enum:
+        - isOneOf
+        - isNotOneOf
+        - contains
+        - doesNotContain
+        - semVerIsOneOf
+        - semVerIsNotOneOf
+        - semVerLess
+        - semVerLessOrEquals
+        - semVerGreater
+        - semVerGreaterOrEquals
+        - numberEquals
+        - numberDoesNotEqual
+        - numberLess
+        - numberLessOrEquals
+        - numberGreater
+        - numberGreaterOrEquals
+        - sensitiveIsOneOf
+        - sensitiveIsNotOneOf
+      description: >
+        ConfigCat's legacy comparator, the one a segment's condition takes
+        (#886). The `isOneOf`, `isNotOneOf`, semver list and sensitive
+        comparators read the value as a comma-separated list, each item
+        trimmed; `contains` and `doesNotContain` compare the whole value; the
+        number comparators read a decimal number, a decimal comma accepted.
+    CreateSegmentModel:
+      type: object
+      additionalProperties: false
+      description: A new segment, as ConfigCat's model.
+      required:
+        - name
+        - comparisonAttribute
+        - comparator
+        - comparisonValue
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        comparisonAttribute:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comparator:
+          $ref: "#/components/schemas/RolloutRuleComparator"
+        comparisonValue:
+          type: string
+          minLength: 1
+          maxLength: 65535
+    UpdateSegmentModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A segment update, as ConfigCat's model: a field that is absent or
+        null keeps its value; the result is held to the create bounds.
+      properties:
+        name:
+          type: string
+          nullable: true
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        comparisonAttribute:
+          type: string
+          nullable: true
+          maxLength: 1000
+        comparator:
+          allOf:
+            - $ref: "#/components/schemas/RolloutRuleComparator"
+          nullable: true
+        comparisonValue:
+          type: string
+          nullable: true
+          maxLength: 65535
+    SegmentModel:
+      type: object
+      description: >
+        A segment, as ConfigCat's model. The creator and updater fields are
+        always null: Confeature does not return member identities through
+        this model. A sensitive comparison value is returned in cleartext.
+      required:
+        - createdAt
+        - creatorEmail
+        - creatorFullName
+        - description
+        - lastUpdaterEmail
+        - lastUpdaterFullName
+        - name
+        - product
+        - segmentId
+        - updatedAt
+        - comparisonAttribute
+        - comparator
+        - comparisonValue
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductModel"
+        segmentId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        creatorEmail:
+          type: string
+          nullable: true
+        creatorFullName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastUpdaterEmail:
+          type: string
+          nullable: true
+        lastUpdaterFullName:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        comparisonAttribute:
+          type: string
+        comparator:
+          $ref: "#/components/schemas/RolloutRuleComparator"
+        comparisonValue:
+          type: string
+    SegmentListModel:
+      type: object
+      description: >
+        A segment as ConfigCat lists it, with its `usage`: how many feature
+        flags and settings reference it. The creator and updater fields are
+        always null.
+      required:
+        - createdAt
+        - creatorEmail
+        - creatorFullName
+        - description
+        - lastUpdaterEmail
+        - lastUpdaterFullName
+        - name
+        - product
+        - segmentId
+        - updatedAt
+        - usage
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductModel"
+        segmentId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        creatorEmail:
+          type: string
+          nullable: true
+        creatorFullName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastUpdaterEmail:
+          type: string
+          nullable: true
+        lastUpdaterFullName:
+          type: string
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        usage:
+          type: integer
+          format: int32
+    UpdateComparisonValueListModel:
+      type: object
+      additionalProperties: false
+      description: One item of a list comparison value, as ConfigCat's model.
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          maxLength: 255
+        hint:
+          type: string
+          nullable: true
+          maxLength: 1500
+    UpdateComparisonValueModel:
+      type: object
+      additionalProperties: false
+      description: >
+        The value a user attribute is compared to, as ConfigCat's model:
+        exactly the field the comparator takes is non-null (see
+        `UserComparator`). A `doubleValue` must be finite. A semver
+        comparator's value (each non-blank list item, or the string) must be
+        a semantic version the SDKs parse: `v?MAJOR.MINOR.PATCH`, an optional
+        pre-release and build, at most 256 characters once trimmed.
+      properties:
+        stringValue:
+          type: string
+          nullable: true
+          maxLength: 65535
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+        listValue:
+          type: array
+          nullable: true
+          description: >
+            A list comparator's items. `minItems: 1` is Confeature's, not
+            ConfigCat's (which sets none): an empty list matches no user under
+            `isOneOf` or `containsAnyOf` and every user carrying the attribute
+            under their negations, so the condition is dead or always true. It is refused as a
+            misauthored condition rather than stored as one.
+          minItems: 1
+          maxItems: 15000
+          items:
+            $ref: "#/components/schemas/UpdateComparisonValueListModel"
+    UpdateUserConditionModel:
+      type: object
+      additionalProperties: false
+      description: A condition on a user attribute, as ConfigCat's model.
+      required:
+        - comparisonAttribute
+        - comparator
+        - comparisonValue
+      properties:
+        comparisonAttribute:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comparator:
+          $ref: "#/components/schemas/UserComparator"
+        comparisonValue:
+          $ref: "#/components/schemas/UpdateComparisonValueModel"
+    UpdateSegmentConditionModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A condition on a segment, as ConfigCat's model (#886): a segment of
+        the setting's own product, which cannot be deleted while a rule
+        references it.
+      required:
+        - segmentId
+        - comparator
+      properties:
+        segmentId:
+          type: string
+          format: uuid
+        comparator:
+          $ref: "#/components/schemas/SegmentComparator"
+    UpdatePrerequisiteFlagConditionModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A condition on a prerequisite flag, as ConfigCat's model: another
+        setting of the same config, and a value of that setting's type (the
+        one typed field of its type is set). The prerequisite is evaluated in
+        the same environment.
+      required:
+        - prerequisiteSettingId
+        - comparator
+        - prerequisiteComparisonValue
+      properties:
+        prerequisiteSettingId:
+          type: integer
+          format: int32
+        comparator:
+          $ref: "#/components/schemas/PrerequisiteComparator"
+        prerequisiteComparisonValue:
+          $ref: "#/components/schemas/UpdateValueModel"
+    UpdateConditionModel:
+      type: object
+      additionalProperties: false
+      description: >
+        One AND-ed condition, as ConfigCat's model: exactly one of its three
+        fields is non-null.
+      properties:
+        userCondition:
+          allOf:
+            - $ref: "#/components/schemas/UpdateUserConditionModel"
+          nullable: true
+        segmentCondition:
+          allOf:
+            - $ref: "#/components/schemas/UpdateSegmentConditionModel"
+          nullable: true
+        prerequisiteFlagCondition:
+          allOf:
+            - $ref: "#/components/schemas/UpdatePrerequisiteFlagConditionModel"
+          nullable: true
+    UpdatePercentageOptionModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A percentage option, as ConfigCat's model. A rule's percentages are
+        integers from 0 to 100 and sum to exactly 100; a boolean setting has
+        exactly two options; the value has the setting's type.
+      required:
+        - percentage
+        - value
+      properties:
+        percentage:
+          type: integer
+          format: int32
+        value:
+          $ref: "#/components/schemas/UpdateValueModel"
+    UpdateTargetingRuleModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A targeting rule, as ConfigCat's model. It sets exactly one of `value`
+        and `percentageOptions`; it has one or more conditions, or none only
+        as the last rule serving percentage options.
+      properties:
+        conditions:
+          type: array
+          nullable: true
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/UpdateConditionModel"
+        percentageOptions:
+          type: array
+          nullable: true
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/UpdatePercentageOptionModel"
+        value:
+          allOf:
+            - $ref: "#/components/schemas/UpdateValueModel"
+          nullable: true
+    ComparisonValueListModel:
+      type: object
+      required:
+        - value
+        - hint
+      properties:
+        value:
+          type: string
+        hint:
+          type: string
+          nullable: true
+          maxLength: 1500
+    ComparisonValueModel:
+      type: object
+      description: >
+        The value a user attribute is compared to: exactly the field the
+        comparator takes is non-null. Sensitive values are in cleartext.
+      required:
+        - stringValue
+        - doubleValue
+        - listValue
+      properties:
+        stringValue:
+          type: string
+          nullable: true
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+        listValue:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/ComparisonValueListModel"
+    UserConditionModel:
+      type: object
+      required:
+        - comparisonAttribute
+        - comparator
+        - comparisonValue
+      properties:
+        comparisonAttribute:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        comparator:
+          $ref: "#/components/schemas/UserComparator"
+        comparisonValue:
+          $ref: "#/components/schemas/ComparisonValueModel"
+    SegmentConditionModel:
+      type: object
+      required:
+        - segmentId
+        - comparator
+      properties:
+        segmentId:
+          type: string
+          format: uuid
+        comparator:
+          $ref: "#/components/schemas/SegmentComparator"
+    PrerequisiteFlagConditionModel:
+      type: object
+      required:
+        - prerequisiteSettingId
+        - comparator
+        - prerequisiteComparisonValue
+      properties:
+        prerequisiteSettingId:
+          type: integer
+          format: int32
+        comparator:
+          $ref: "#/components/schemas/PrerequisiteComparator"
+        prerequisiteComparisonValue:
+          $ref: "#/components/schemas/ValueModel"
+    ConditionModel:
+      type: object
+      description: One AND-ed condition; exactly one of its three fields is non-null.
+      required:
+        - userCondition
+        - segmentCondition
+        - prerequisiteFlagCondition
+      properties:
+        userCondition:
+          allOf:
+            - $ref: "#/components/schemas/UserConditionModel"
+          nullable: true
+        segmentCondition:
+          allOf:
+            - $ref: "#/components/schemas/SegmentConditionModel"
+          nullable: true
+        prerequisiteFlagCondition:
+          allOf:
+            - $ref: "#/components/schemas/PrerequisiteFlagConditionModel"
+          nullable: true
+    PercentageOptionModel:
+      type: object
+      required:
+        - percentage
+        - value
+      properties:
+        percentage:
+          type: integer
+          format: int32
+        value:
+          $ref: "#/components/schemas/ValueModel"
+    TargetingRuleModel:
+      type: object
+      description: >
+        A targeting rule, as ConfigCat's model: its AND-ed conditions, then
+        either its `value` or its `percentageOptions` (empty when it serves a
+        value).
+      required:
+        - conditions
+        - percentageOptions
+        - value
+      properties:
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConditionModel"
+        percentageOptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PercentageOptionModel"
+        value:
+          allOf:
+            - $ref: "#/components/schemas/ValueModel"
+          nullable: true
     FeatureFlagLimitations:
       type: object
       description: >
         The limits this setting's values are held to, as ConfigCat's
-        `FeatureFlagLimitations`. Every targeting limit is 0 until targeting
-        lands (#883).
+        `FeatureFlagLimitations`: ConfigCat's published maxima, each one
+        enforced.
       required:
         - maxPercentageOptionCount
         - maxTargetingRuleCount
@@ -4990,9 +5828,8 @@ components:
       description: >
         A setting's value in one environment, as ConfigCat's
         `SettingFormulaModel` (get-setting-value-v2). The person fields are
-        always null, `targetingRules` is empty until #883, and approvals are
-        not supported, so `approveRequired`, `canBypassApproval` and
-        `changeRequestCount` are false / false / 0.
+        always null, and approvals are not supported, so `approveRequired`,
+        `canBypassApproval` and `changeRequestCount` are false / false / 0.
       required:
         - lastVersionId
         - defaultValue
@@ -5024,9 +5861,10 @@ components:
           $ref: "#/components/schemas/ValueModel"
         targetingRules:
           type: array
-          maxItems: 0
+          maxItems: 500
+          description: The ordered targeting rules, sensitive values in cleartext.
           items:
-            type: object
+            $ref: "#/components/schemas/TargetingRuleModel"
         setting:
           $ref: "#/components/schemas/SettingDataV2Model"
         updatedAt:
@@ -5054,7 +5892,9 @@ components:
             type: object
         settingIdsWherePrerequisite:
           type: array
-          maxItems: 0
+          description: >
+            The settings whose targeting rules in this environment have this
+            setting as a prerequisite, by ascending id.
           items:
             type: integer
             format: int32
@@ -5614,9 +6454,11 @@ components:
       description: >
         ConfigCat audit log event type. Lists ConfigCat's full enum verbatim
         (incl. its own casing inconsistencies) for migration-client
-        deserializer safety, PLUS the additive Confeature value
-        `configPublished`. Confeature's emitter only produces the config-plane
-        subset it supports.
+        deserializer safety, PLUS the additive Confeature values
+        `configPublished` and `settingTargetingRulesChanged` (a change to a
+        value's targeting rules, its sensitive comparison values redacted;
+        ConfigCat records it under `settingValueChanged`). Confeature's emitter
+        only produces the config-plane subset it supports.
       enum:
         - productCreated
         - productChanged
@@ -5695,6 +6537,7 @@ components:
         - webhookSigningKeyCreated
         # --- Confeature additive extension (no ConfigCat equivalent) ---
         - configPublished
+        - settingTargetingRulesChanged
     # ── Release Guardian — management-plane component shapes.
     #    `before`/`after`/`current` are arbitrary JSON values: modelled with the
     #    concrete `{}` (empty schema = "any JSON") + `nullable: true`, NOT a bare
