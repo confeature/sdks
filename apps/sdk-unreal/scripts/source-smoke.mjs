@@ -27,7 +27,7 @@
  */
 
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../../../tools/lib/is-entry.mjs";
 
@@ -132,6 +132,56 @@ export function fixtureNames(testTexts) {
   return [...out].sort();
 }
 
+/**
+ * The directory variables the tests load fixtures through, as FIXTURES-relative
+ * paths (TestPaths.h: FindFixturesDirectory, FindUpstreamFixturesDirectory).
+ */
+const FIXTURE_DIRS = { FixturesDir: "", UpstreamDir: "upstream" };
+
+/**
+ * Every fixture the tests load, by the path they load it from (#930): the
+ * `FixturesDir` / `UpstreamDir` argument followed by a `TEXT("<file>.json")`,
+ * or by `FPaths::Combine(TEXT("<dir>"), TEXT("<file>.json"))`. A file-name
+ * literal that is not in one of those forms is returned as `unresolved`: a
+ * load the smoke cannot place is reported, never matched by name alone (a
+ * same-named file in another directory used to pass).
+ */
+export function fixtureRefs(testTexts) {
+  const paths = new Set();
+  const unresolved = new Set();
+  const dirs = Object.keys(FIXTURE_DIRS).join("|");
+  const direct = new RegExp(`\\b(${dirs})\\s*,\\s*TEXT\\("([A-Za-z0-9_.-]+\\.json)"\\)`, "g");
+  const nested = new RegExp(
+    `\\b(${dirs})\\s*,\\s*FPaths::Combine\\(\\s*TEXT\\("([A-Za-z0-9_.-]+)"\\)\\s*,\\s*TEXT\\("([A-Za-z0-9_.-]+\\.json)"\\)\\s*\\)`,
+    "g",
+  );
+  for (const t of testTexts) {
+    const placed = new Set();
+    for (const m of t.matchAll(direct)) {
+      paths.add(join(FIXTURE_DIRS[m[1]], m[2]));
+      placed.add(m[2]);
+    }
+    for (const m of t.matchAll(nested)) {
+      paths.add(join(FIXTURE_DIRS[m[1]], m[2], m[3]));
+      placed.add(m[3]);
+    }
+    for (const name of fixtureNames([t])) if (!placed.has(name)) unresolved.add(name);
+  }
+  return { paths: [...paths].sort(), unresolved: [...unresolved].sort() };
+}
+
+/** The fixtures check over test sources, given which FIXTURES-relative paths exist. */
+export function checkFixtures(testTexts, exists) {
+  const { paths, unresolved } = fixtureRefs(testTexts);
+  if (paths.length === 0 && unresolved.length === 0) return ["the tests name no fixture file"];
+  return [
+    ...unresolved.map(
+      (n) => `fixture ${n} is named but not loaded through FixturesDir or UpstreamDir`,
+    ),
+    ...paths.filter((p) => !exists(p)).map((p) => `fixture ${p} is missing from ${FIXTURES}`),
+  ];
+}
+
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {
     const p = join(dir, e);
@@ -157,16 +207,12 @@ export function run(root) {
   check("checklist", () => checkChecklist(read(CHECKLIST), read(CLIENT_HEADER)));
   check("derivation", () => checkDerivation(read(CHECKLIST)));
   check("fixtures", () => {
-    const tests = readdirSync(join(root, TESTS))
+    // Every test source under Private/Tests, subdirectories included (#930).
+    const tests = walk(join(root, TESTS))
       .filter((f) => f.endsWith(".cpp") || f.endsWith(".h"))
-      .map((f) => read(`${TESTS}/${f}`));
-    const names = fixtureNames(tests);
-    if (names.length === 0) return ["the tests name no fixture file"];
+      .map((f) => readFileSync(f, "utf8"));
     if (!existsSync(join(root, FIXTURES))) return [`${FIXTURES} does not exist`];
-    const present = new Set(walk(join(root, FIXTURES)).map((p) => basename(p)));
-    return names
-      .filter((n) => !present.has(n))
-      .map((n) => `fixture ${n} is missing from ${FIXTURES}`);
+    return checkFixtures(tests, (p) => existsSync(join(root, FIXTURES, p)));
   });
   return results;
 }

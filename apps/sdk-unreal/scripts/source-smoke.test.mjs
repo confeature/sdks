@@ -4,6 +4,8 @@
 // sound input and failing on one defect; the last test runs it on this tree.
 
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -12,8 +14,10 @@ import {
   checkChecklist,
   checkDerivation,
   checkUplugin,
+  checkFixtures,
   checklistNames,
   fixtureNames,
+  fixtureRefs,
   run,
   summary,
 } from "./source-smoke.mjs";
@@ -73,6 +77,63 @@ test("derivation: the checklist cites what it was derived from and an anchor dat
 test("fixtures: only file names, never message strings, are collected", () => {
   const t = `TEXT("wire-cases.json") TEXT("Failed to parse wire-cases.json") TEXT("a/b.json")`;
   assert.deepEqual(fixtureNames([t]), ["wire-cases.json"]);
+});
+
+test("fixtures: each is matched by the path it is loaded from, not by name (#930 F1)", () => {
+  const t = `FPaths::Combine(FixturesDir, TEXT("wire-cases.json"));
+    ReadJsonObject(UpstreamDir, TEXT("content-by-key.json"));
+    FPaths::Combine(UpstreamDir, FPaths::Combine(TEXT("evaluationlog"), TEXT("_configs.json")));`;
+  assert.deepEqual(fixtureRefs([t]), {
+    paths: [
+      "upstream/content-by-key.json",
+      "upstream/evaluationlog/_configs.json",
+      "wire-cases.json",
+    ],
+    unresolved: [],
+  });
+  const all = new Set(fixtureRefs([t]).paths);
+  assert.deepEqual(
+    checkFixtures([t], (p) => all.has(p)),
+    [],
+  );
+  // MUTATION (applied, #930): match by basename again and this passes — the
+  // right name in the wrong directory (wire-cases.json under upstream/).
+  const wrongDir = new Set(
+    [...all].filter((p) => p !== "wire-cases.json").concat("upstream/wire-cases.json"),
+  );
+  assert.deepEqual(
+    checkFixtures([t], (p) => wrongDir.has(p)),
+    ["fixture wire-cases.json is missing from packages/test-fixtures-sdk-parity/fixtures"],
+  );
+  // A file-name literal the smoke cannot place is reported, not matched by name.
+  assert.deepEqual(
+    checkFixtures([`Load(TEXT("orphan.json"));`], () => true),
+    ["fixture orphan.json is named but not loaded through FixturesDir or UpstreamDir"],
+  );
+});
+
+test("fixtures: a test in a subdirectory of Private/Tests is scanned (#930 F2)", () => {
+  const root = mkdtempSync(join(tmpdir(), "unreal-smoke-"));
+  try {
+    const plugin = join(root, "apps/sdk-unreal/Plugins/Confeature");
+    const tests = join(plugin, "Source/Confeature/Private/Tests");
+    mkdirSync(join(tests, "Nested"), { recursive: true });
+    mkdirSync(join(root, "packages/test-fixtures-sdk-parity/fixtures"), { recursive: true });
+    writeFileSync(join(root, "packages/test-fixtures-sdk-parity/fixtures/present.json"), "{}");
+    writeFileSync(join(tests, "Top.cpp"), 'FPaths::Combine(FixturesDir, TEXT("present.json"));');
+    // MUTATION (applied, #930): read only the top level and this is [] — the
+    // nested test's missing fixture is never seen.
+    writeFileSync(
+      join(tests, "Nested/Deep.cpp"),
+      'FPaths::Combine(FixturesDir, TEXT("absent.json"));',
+    );
+    const fixtures = run(root).find((r) => r.name === "fixtures");
+    assert.deepEqual(fixtures.problems, [
+      "fixture absent.json is missing from packages/test-fixtures-sdk-parity/fixtures",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the summary's first line says this is not a build, and a problem fails it", () => {
