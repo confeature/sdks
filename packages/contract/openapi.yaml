@@ -1652,6 +1652,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValueNotLive"
+  /v2/configs/{configId}/environments/{environmentId}/values:
+    # ConfigCat's get-setting-values-v2 (#939): every setting's formula of one
+    # config in one environment, in one call.
+    parameters:
+      - in: path
+        name: configId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Config id (UUID).
+      - in: path
+        name: environmentId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Environment id (UUID).
+    get:
+      operationId: getSettingValuesV2
+      summary: Get every setting's value of a config in one environment (v2)
+      description: >
+        Returns every setting's evaluation formula of one config in one
+        environment. Each entry of `settingFormulas` is what
+        getSettingValueV2 returns for that setting, without the config and
+        environment envelope, which is given once. Entries are ordered as the
+        config's settings list. Aligned with ConfigCat's get-setting-values-v2.
+      tags: [Setting Values V2]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Every setting's value data in this environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigSettingFormulasModel"
+        "400":
+          description: The config's evaluationVersion is not v2.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks the required scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            Config or environment not found, or the environment is not in the
+            config's product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v2/environments/{environmentId}/settings/{settingId}/value:
     # ConfigCat's "Feature Flag & Setting values V2" routes, by numeric
     # settingId (#880). Only for configs whose evaluationVersion is v2.
@@ -5823,6 +5886,117 @@ components:
         maxConditionPerTargetingRuleCount:
           type: integer
           format: int32
+    ConfigSettingFormulaModel:
+      type: object
+      description: >
+        One setting's value in one environment, as ConfigCat's
+        `ConfigSettingFormulaModel` (an entry of get-setting-values-v2): the
+        fields of SettingFormulaModel without its config and environment
+        envelope. The person fields are always null, and approvals are not
+        supported, so `changeRequestCount` is 0.
+      required:
+        - lastVersionId
+        - defaultValue
+        - targetingRules
+        - setting
+        - updatedAt
+        - percentageEvaluationAttribute
+        - lastUpdaterUserEmail
+        - lastUpdaterUserFullName
+        - integrationLinks
+        - settingTags
+        - settingIdsWherePrerequisite
+        - changeRequestCount
+      properties:
+        lastVersionId:
+          type: string
+          format: uuid
+          description: >
+            The version of this value. Send it back as `latestVersionId` to
+            refuse the write if someone changed the value in between.
+        defaultValue:
+          $ref: "#/components/schemas/ValueModel"
+        targetingRules:
+          type: array
+          maxItems: 500
+          description: The ordered targeting rules, sensitive values in cleartext.
+          items:
+            $ref: "#/components/schemas/TargetingRuleModel"
+        setting:
+          $ref: "#/components/schemas/SettingDataV2Model"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        percentageEvaluationAttribute:
+          type: string
+          nullable: true
+        lastUpdaterUserEmail:
+          type: string
+          nullable: true
+        lastUpdaterUserFullName:
+          type: string
+          nullable: true
+        integrationLinks:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        settingTags:
+          type: array
+          maxItems: 0
+          items:
+            type: object
+        settingIdsWherePrerequisite:
+          type: array
+          description: >
+            The settings whose targeting rules in this environment have this
+            setting as a prerequisite, by ascending id.
+          items:
+            type: integer
+            format: int32
+        changeRequestCount:
+          type: integer
+          format: int32
+    ConfigSettingFormulasModel:
+      type: object
+      description: >
+        Every setting's value of one config in one environment, as ConfigCat's
+        `ConfigSettingFormulasModel` (get-setting-values-v2). Approvals are not
+        supported, so `approveRequired` and `canBypassApproval` are false.
+      required:
+        - config
+        - environment
+        - readOnly
+        - settingFormulas
+        - featureFlagLimitations
+        - approveRequired
+        - canBypassApproval
+        - reasonRequired
+      properties:
+        config:
+          $ref: "#/components/schemas/ConfigModel"
+        environment:
+          $ref: "#/components/schemas/EnvironmentModel"
+        readOnly:
+          type: boolean
+          description: True when the caller cannot write values here.
+        settingFormulas:
+          type: array
+          description: Every setting's formula, in the config's settings-list order.
+          items:
+            $ref: "#/components/schemas/ConfigSettingFormulaModel"
+        featureFlagLimitations:
+          $ref: "#/components/schemas/FeatureFlagLimitations"
+        approveRequired:
+          type: boolean
+        canBypassApproval:
+          type: boolean
+        reasonRequired:
+          type: boolean
+          description: >
+            True when a change note (`reason`) is required for a value change
+            in this environment.
     SettingFormulaModel:
       type: object
       description: >

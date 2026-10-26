@@ -567,6 +567,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v2/configs/{configId}/environments/{environmentId}/values": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Config id (UUID). */
+        configId: string;
+        /** @description Environment id (UUID). */
+        environmentId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get every setting's value of a config in one environment (v2)
+     * @description Returns every setting's evaluation formula of one config in one environment. Each entry of `settingFormulas` is what getSettingValueV2 returns for that setting, without the config and environment envelope, which is given once. Entries are ordered as the config's settings list. Aligned with ConfigCat's get-setting-values-v2.
+     */
+    get: operations["getSettingValuesV2"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v2/environments/{environmentId}/settings/{settingId}/value": {
     parameters: {
       query?: never;
@@ -2002,6 +2027,43 @@ export interface components {
       maxStringFlagValueLength: number;
       /** Format: int32 */
       maxConditionPerTargetingRuleCount: number;
+    };
+    /** @description One setting's value in one environment, as ConfigCat's `ConfigSettingFormulaModel` (an entry of get-setting-values-v2): the fields of SettingFormulaModel without its config and environment envelope. The person fields are always null, and approvals are not supported, so `changeRequestCount` is 0. */
+    ConfigSettingFormulaModel: {
+      /**
+       * Format: uuid
+       * @description The version of this value. Send it back as `latestVersionId` to refuse the write if someone changed the value in between.
+       */
+      lastVersionId: string;
+      defaultValue: components["schemas"]["ValueModel"];
+      /** @description The ordered targeting rules, sensitive values in cleartext. */
+      targetingRules: components["schemas"]["TargetingRuleModel"][];
+      setting: components["schemas"]["SettingDataV2Model"];
+      /** Format: date-time */
+      updatedAt: string | null;
+      percentageEvaluationAttribute: string | null;
+      lastUpdaterUserEmail: string | null;
+      lastUpdaterUserFullName: string | null;
+      integrationLinks: Record<string, never>[];
+      settingTags: Record<string, never>[];
+      /** @description The settings whose targeting rules in this environment have this setting as a prerequisite, by ascending id. */
+      settingIdsWherePrerequisite: number[];
+      /** Format: int32 */
+      changeRequestCount: number;
+    };
+    /** @description Every setting's value of one config in one environment, as ConfigCat's `ConfigSettingFormulasModel` (get-setting-values-v2). Approvals are not supported, so `approveRequired` and `canBypassApproval` are false. */
+    ConfigSettingFormulasModel: {
+      config: components["schemas"]["ConfigModel"];
+      environment: components["schemas"]["EnvironmentModel"];
+      /** @description True when the caller cannot write values here. */
+      readOnly: boolean;
+      /** @description Every setting's formula, in the config's settings-list order. */
+      settingFormulas: components["schemas"]["ConfigSettingFormulaModel"][];
+      featureFlagLimitations: components["schemas"]["FeatureFlagLimitations"];
+      approveRequired: boolean;
+      canBypassApproval: boolean;
+      /** @description True when a change note (`reason`) is required for a value change in this environment. */
+      reasonRequired: boolean;
     };
     /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields are always null, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
     SettingFormulaModel: {
@@ -4205,6 +4267,67 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ValueNotLive"];
+        };
+      };
+    };
+  };
+  getSettingValuesV2: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Config id (UUID). */
+        configId: string;
+        /** @description Environment id (UUID). */
+        environmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Every setting's value data in this environment. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigSettingFormulasModel"];
+        };
+      };
+      /** @description The config's evaluationVersion is not v2. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks the required scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Config or environment not found, or the environment is not in the config's product. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
     };
