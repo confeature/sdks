@@ -36,6 +36,8 @@ import {
   referenceFindings,
   surfaceFindings,
   exemptTokenFindings,
+  idTokenExceptionFindings,
+  ID_TOKEN_EXCEPTIONS,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
@@ -2501,6 +2503,138 @@ describe("continue-on-error in any workflow holding a credentialed job (round 11
           job["continue-on-error"] = true;
         },
         /cli-windows-install-verify\.yml: \S+: sets continue-on-error: \(its failure would be reported green\)/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+});
+
+describe("the attest job is rule 2's one named exception, and no wider (#903)", () => {
+  const A = (w) => w[C].jobs.attest;
+  const step0 = { name: "injected", run: "bash apps/cli/scripts/check-on-main.sh" };
+  const checkout = {
+    name: "Checkout",
+    uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+    with: { "fetch-depth": 1, "persist-credentials": false },
+  };
+  it("control: the real attest job fits its exception", () =>
+    expect(idTokenExceptionFindings(BASE)).toEqual([]));
+  it("records the attest job, by name, with exactly its two permissions", () =>
+    expect(ID_TOKEN_EXCEPTIONS).toEqual({
+      "cli-release.yml#attest": expect.objectContaining({
+        permissions: { "id-token": "write", attestations: "write" },
+      }),
+    }));
+  it.each(
+    ROWS.rows([
+      [
+        "I1 attest: gains contents: read",
+        (w) => void (A(w).permissions.contents = "read"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I2 attest: gains contents: write",
+        (w) => void (A(w).permissions.contents = "write"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I3 attest: gains packages: write",
+        (w) => void (A(w).permissions.packages = "write"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I4 attest: permissions: write-all",
+        (w) => void (A(w).permissions = "write-all"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I5 attest: bound to an environment",
+        (w) => void (A(w).environment = "cli-release"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job sets environment:/,
+      ],
+      [
+        "I6 attest: a run: step of project code",
+        (w) => void A(w).steps.splice(1, 0, { ...step0 }),
+        /attest: ID_TOKEN_EXCEPTIONS: step injected has a run: block/,
+      ],
+      [
+        "I7 attest: a checkout beside the token",
+        (w) => void A(w).steps.unshift({ ...checkout }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job runs \[/,
+      ],
+      [
+        "I8 attest: another action after the attestation",
+        (w) =>
+          void A(w).steps.push({
+            name: "x",
+            uses: "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
+            with: { script: "1" },
+          }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job runs \[/,
+      ],
+      [
+        "I9 attest: a secret in the attest step's env",
+        (w) => void (A(w).steps[1].env = { T: "${{ secrets.R2_SECRET_ACCESS_KEY }}" }),
+        /attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github\.token or secrets/,
+      ],
+      [
+        "I10 attest: the token handed to the attest step",
+        (w) => void (A(w).steps[1].with["github-token"] = "${{ github.token }}"),
+        /attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github\.token or secrets/,
+      ],
+      [
+        "I11 attest: a job-level env",
+        (w) => void (A(w).env = { BASH_ENV: "x" }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job sets env:/,
+      ],
+      [
+        "I12 attest: a forged subject",
+        (w) =>
+          void (A(w).steps[1].with = {
+            "subject-name": "confeature-x86_64-unknown-linux-gnu",
+            "subject-digest": `sha256:${"0".repeat(64)}`,
+          }),
+        /attest: step 2 \(Attest every released file/,
+      ],
+      [
+        "I13 attest: renamed, its exception names no job",
+        (w) => {
+          w[C].jobs.provenance = A(w);
+          delete w[C].jobs.attest;
+          w[C].jobs.upload.needs = ["build", "release", "provenance"];
+        },
+        /attest: ID_TOKEN_EXCEPTIONS: records a job the workflow does not have/,
+      ],
+      [
+        "I14 build: gains id-token: write",
+        (w) => void (w[C].jobs.build.permissions["id-token"] = "write"),
+        /cli-release\.yml: build: requests id-token: write outside an environment/,
+      ],
+      [
+        "I15 release: gains id-token: write",
+        (w) => void (w[C].jobs.release.permissions["id-token"] = "write"),
+        /cli-release\.yml: release: requests id-token: write outside an environment/,
+      ],
+      [
+        "I16 sdk-publish setup: gains id-token: write",
+        (w) => void (w[P].jobs.setup.permissions = { contents: "read", "id-token": "write" }),
+        /sdk-publish\.yml: setup: requests id-token: write outside an environment/,
+      ],
+      [
+        "I17 a new workflow's attest-shaped job, outside the exception",
+        (w) =>
+          void (w["new.yml"] = {
+            on: { push: { tags: ["cli-v*"] } },
+            permissions: { contents: "read" },
+            jobs: { attest: structuredClone(A(w)) },
+          }),
+        /new\.yml: attest: requests id-token: write outside an environment/,
       ],
     ]),
   )("refuses %s", (label, mutate, why) => {

@@ -18,7 +18,10 @@
  *   2. NO CREDENTIALS OUTSIDE AN ENVIRONMENT. A job that binds no environment
  *      requests no `id-token: write` and reads no `secrets` context, and no
  *      workflow grants either at the top level, where every job would inherit
- *      it. A pack job or a dry run is exactly such a job.
+ *      it. A pack job or a dry run is exactly such a job. The one named
+ *      exception is ID_TOKEN_EXCEPTIONS (#903: cli-release's attest job, which
+ *      signs keyless build provenance), held to its recorded shape exactly:
+ *      its permissions, no environment, no run: step, only its actions.
  *   3. CREDENTIALED JOBS FAIL CLOSED ON GRAMMAR. EVERY job bound to an
  *      environment (a registry's, or cli-release's, whose two jobs hold the R2
  *      token) is held to strict-shell.mjs's minimal grammar (simple commands,
@@ -392,7 +395,8 @@ const onMain = () =>
  * continue-on-error, timeout-minutes, permissions, environment, outputs…).
  * cli-release's build (its on-main guard and the SHA256SUMS step decide what
  * is released, yet it holds no token, so no credential rule reads it),
- * release and upload (each re-runs the guard first), and release-gate's test
+ * release and upload (each re-runs the guard first), attest (#903, the
+ * ID_TOKEN_EXCEPTIONS job), and release-gate's test
  * (WRITE_TOKEN_EXEMPT: rules 3 and 15 skip it). Round 11: freezing only the
  * steps let a job-level `env: BASH_ENV`, `defaults.run.shell`, `container:`
  * or `runs-on: self-hosted` run other code before every frozen step.
@@ -413,9 +417,17 @@ export const FROZEN_JOB_KEYS = {
     "timeout-minutes": 10,
     permissions: { contents: "write" },
   },
+  [`${CLI_WORKFLOW}#attest`]: {
+    name: "attest ${{ github.ref_name }}",
+    needs: "build",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 10,
+    permissions: { "id-token": "write", attestations: "write" },
+  },
   [`${CLI_WORKFLOW}#upload`]: {
     name: "upload ${{ github.ref_name }} to R2",
-    needs: ["build", "release"],
+    // attest first (#903): nothing reaches R2 unattested.
+    needs: ["build", "release", "attest"],
     "runs-on": "ubuntu-latest",
     environment: "cli-release",
     "timeout-minutes": 15,
@@ -599,6 +611,12 @@ export const ACTION_SURFACE = {
         "008e0b0518054df4ed7658b2b1f74cc2ca5865505ed4ab8cc9b90ae3fce62afb",
         { env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" } },
       ),
+    ],
+    // FROZEN_JOBS and ID_TOKEN_EXCEPTIONS (#903): the artifact, then the
+    // attestation over every file of it, nothing else.
+    attest: [
+      download("cli-dist", "dist"),
+      step(PIN.attest, { with: { "subject-path": "dist/confeature-*\ndist/SHA256SUMS\n" } }),
     ],
     upload: [
       fullCheckout(),
@@ -1792,6 +1810,7 @@ function credentialExposureRules(file, jobId, job, doc, add) {
  */
 export const WRITE_PERMISSIONS = {
   "cli-release.yml#release": ["contents"],
+  "cli-release.yml#attest": ["attestations", "id-token"],
   "release-gate.yml#test": ["issues"],
   "sdk-publish.yml#publish-npm": ["id-token"],
   "sdk-publish.yml#publish-pypi": ["id-token"],
@@ -1906,6 +1925,58 @@ export const WRITE_TOKEN_EXEMPT = {
   "release-gate.yml#test":
     "issues: write only; publishes nothing; every step frozen; no expression names github.token or secrets",
 };
+
+/**
+ * Rule 2's one named exception (#903): a job that requests `id-token: write`
+ * outside an environment. cli-release's attest job mints an OIDC token for
+ * attest-build-provenance, which exchanges it for a short-lived Sigstore
+ * certificate and signs keyless build provenance over the released files; an
+ * environment would add nothing but a second name for the same tag policy.
+ * The exception is its recorded shape, exactly, checked by
+ * idTokenExceptionFindings independently of the frozen tables (re-recording
+ * ACTION_SURFACE or FROZEN_JOB_KEYS never widens it): `permissions` is the
+ * recorded map and nothing more (no `contents`, no other write), no
+ * environment, no job-level env/defaults/container/services, no reusable
+ * call, no run: step (no project code runs beside the token), each step one of
+ * `actions`, in that order, and no expression naming github.token or secrets.
+ */
+export const ID_TOKEN_EXCEPTIONS = {
+  [`${CLI_WORKFLOW}#attest`]: {
+    why: "keyless build provenance (actions/attest-build-provenance) over the artifact upload puts on R2",
+    permissions: { "id-token": "write", attestations: "write" },
+    actions: [PIN.download, PIN.attest],
+  },
+};
+
+/** ID_TOKEN_EXCEPTIONS, each held to its recorded shape (#903). */
+export function idTokenExceptionFindings(workflows) {
+  const out = [];
+  for (const [key, want] of Object.entries(ID_TOKEN_EXCEPTIONS)) {
+    const [file, jobId] = key.split("#");
+    const job = workflows[file]?.jobs?.[jobId];
+    const add = (why) => out.push({ file, job: jobId, why: `ID_TOKEN_EXCEPTIONS: ${why}` });
+    if (job === undefined || job === null) {
+      add("records a job the workflow does not have");
+      continue;
+    }
+    if (canonical(job.permissions ?? null) !== canonical(want.permissions))
+      add(
+        `the job's permissions are ${canonical(job.permissions ?? null)}, the exception records ${canonical(want.permissions)}`,
+      );
+    for (const k of ["environment", "env", "defaults", "container", "services", "uses", "secrets"])
+      if (job[k] !== undefined) add(`the job sets ${k}:, which the exception does not allow`);
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    for (const s of steps)
+      if (s?.run !== undefined)
+        add(`step ${s?.name ?? "?"} has a run: block (the exception runs no project code)`);
+    const got = steps.map((s) => (typeof s?.uses === "string" ? s.uses : null));
+    if (canonical(got) !== canonical(want.actions))
+      add(`the job runs ${canonical(got)}, the exception records ${canonical(want.actions)}`);
+    if (allExpressions(job).some(readsCredentialContext))
+      add("an expression of the job names github.token or secrets");
+  }
+  return out;
+}
 
 /**
  * Whether an expression can reach the job's token or a secret (round 11):
@@ -2178,7 +2249,11 @@ function jobRules(args) {
         add(file, jobId, `reads secret ${name}, which environment ${env} does not declare`);
     }
   }
-  if (env === undefined && grantsIdToken(job?.permissions))
+  if (
+    env === undefined &&
+    grantsIdToken(job?.permissions) &&
+    !Object.hasOwn(ID_TOKEN_EXCEPTIONS, `${file}#${jobId}`)
+  )
     add(file, jobId, "requests id-token: write outside an environment");
   // Rule 2: a secret only where an environment declares it.
   if (env === undefined) {
@@ -2941,6 +3016,7 @@ export function allFindings({ settings, manifest, workflows, scriptOutputs, acti
     ...writePermissionFindings(workflows),
     ...continueOnErrorFindings(workflows),
     ...exemptTokenFindings(workflows, actions),
+    ...idTokenExceptionFindings(workflows),
     ...daggerFnFindings(manifest),
     ...sdkGateFindings({ settings, manifest, workflows }),
   ];

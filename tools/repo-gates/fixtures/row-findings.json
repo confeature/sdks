@@ -103,7 +103,7 @@
   "T2 cli upload: a job-level TAG": [
     "cli-release.yml: upload: a credentialed job's env: TAG is cli-v0.0.1, not its pinned expression",
     "cli-release.yml: upload: a credentialed job's step Upload v<ver>/ to R2 redefines the job's TAG",
-    "cli-release.yml: upload: the job's keys are {\"env\":{\"TAG\":\"cli-v0.0.1\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"TAG\":\"cli-v0.0.1\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "N10 a TAG from the event's commit message": [
     "cli-release.yml: upload: a credentialed job's env: TAG is ${{ github.event.head_commit.message }}, not its pinned expression",
@@ -603,12 +603,12 @@
     "cli-release.yml: upload: env.R2_SECRET_ACCESS_KEY: the credential R2_SECRET_ACCESS_KEY is read only by a run: block",
     "cli-release.yml: upload: step 5 (Upload v<ver>/ to R2) is {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}, ACTION_SURFACE records {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}",
     "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it",
-    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":{\"name\":\"cli-release\",\"url\":\"https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}\"},\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":{\"name\":\"cli-release\",\"url\":\"https://example.com/${{ env.R2_SECRET_ACCESS_KEY }}\"},\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "A11/E1 a credential moved to the job env": [
     "cli-release.yml: upload: step 5 (Upload v<ver>/ to R2) is {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}, ACTION_SURFACE records {\"env\":{\"CLOUDFLARE_ACCOUNT_ID\":\"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\",\"R2_ACCESS_KEY_ID\":\"${{ secrets.R2_ACCESS_KEY_ID }}\",\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\",\"TAG\":\"${{ github.ref_name }}\"},\"name\":\"Upload v<ver>/ to R2\",\"run\":{\"sha256\":\"e17412b10b8cd8b204b4fdaae7542a3d09f01b860dee5e23950c220f25e83d82\"}}",
     "cli-release.yml: upload: the credential R2_SECRET_ACCESS_KEY is set in the job's env; only the env: of the step that reads it may set it",
-    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"R2_SECRET_ACCESS_KEY\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "a credential set on a step whose run: does not read it": [
     "sdk-publish.yml: publish-go: step Upload sets the credential DEPLOY_KEY but its run: does not read it"
@@ -1288,6 +1288,7 @@
   ],
   "W1 cli-release: workflow env BASH_ENV": [
     "cli-release.yml: -: the workflow's env/defaults are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\",\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: attest: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "cli-release.yml: promote: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "cli-release.yml: release: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "cli-release.yml: upload: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow"
@@ -1298,7 +1299,7 @@
   ],
   "W3 upload: job env BASH_ENV": [
     "cli-release.yml: upload: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
-    "cli-release.yml: upload: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+    "cli-release.yml: upload: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "W4 build: job env BASH_ENV": [
     "cli-release.yml: build: the job's keys are {\"env\":{\"BASH_ENV\":\"apps/cli/scripts/x.sh\"},\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
@@ -1316,12 +1317,14 @@
   ],
   "W8 cli-release: workflow defaults.run.shell": [
     "cli-release.yml: -: the workflow's env/defaults are {\"defaults\":{\"run\":{\"shell\":\"bash -c 'source ./evil.sh; bash -e {0}'\"}},\"env\":{\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: attest: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
     "cli-release.yml: promote: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
     "cli-release.yml: release: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')",
     "cli-release.yml: upload: a credentialed job runs a shell other than plain bash (bash -c 'source ./evil.sh; bash -e {0}')"
   ],
   "W9 cli-release: workflow defaults.run.working-directory": [
     "cli-release.yml: -: the workflow's env/defaults are {\"defaults\":{\"run\":{\"working-directory\":\"apps/cli/fake\"}},\"env\":{\"NODE_VERSION\":\"22.23.3\"}}, FROZEN_WORKFLOW_KEYS records {\"env\":{\"NODE_VERSION\":\"22.23.3\"}}",
+    "cli-release.yml: attest: a credentialed job sets working-directory: (an exception would resolve another script)",
     "cli-release.yml: promote: a credentialed job sets working-directory: (an exception would resolve another script)",
     "cli-release.yml: release: a credentialed job sets working-directory: (an exception would resolve another script)",
     "cli-release.yml: upload: a credentialed job sets working-directory: (an exception would resolve another script)"
@@ -1339,6 +1342,7 @@
     "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"extra\":\"${{ steps.sums.outputs.digest }}\",\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
   ],
   "W12c build: needs dropped": [
+    "cli-release.yml: attest: does not wait on workflow-rules",
     "cli-release.yml: build: does not wait on workflow-rules",
     "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}",
     "cli-release.yml: promote: does not wait on workflow-rules",
@@ -1358,7 +1362,7 @@
     "cli-release.yml: upload: reads secret CLOUDFLARE_ACCOUNT_ID, which environment sdk-publish-npm does not declare",
     "cli-release.yml: upload: reads secret R2_ACCESS_KEY_ID, which environment sdk-publish-npm does not declare",
     "cli-release.yml: upload: reads secret R2_SECRET_ACCESS_KEY, which environment sdk-publish-npm does not declare",
-    "cli-release.yml: upload: the job's keys are {\"environment\":\"sdk-publish-npm\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+    "cli-release.yml: upload: the job's keys are {\"environment\":\"sdk-publish-npm\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
   ],
   "X1 test: job env github['token']": [
     "release-gate.yml: test: names github.token or secrets in a WRITE_TOKEN_EXEMPT job (its token reaches its frozen github-script step only)",
@@ -1502,5 +1506,116 @@
     "cli-windows-install-verify.yml: verify-windows-install: sets continue-on-error: (its failure would be reported green)",
     "cli-windows-install-verify.yml: verify-windows-install: step Pre-promote - the checkout's latest path, against the current latest's if: steps.resolve.outputs.pinned == 'true' is not a recorded condition (skipped-vs-ran is public)",
     "cli-windows-install-verify.yml: verify-windows-install: step The SERVED script, as users run it, under Windows PowerShell 5.1's if: steps.resolve.outputs.pinned != 'true' is not a recorded condition (skipped-vs-ran is public)"
+  ],
+  "I1 attest: gains contents: read": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job's permissions are {\"attestations\":\"write\",\"contents\":\"read\",\"id-token\":\"write\"}, the exception records {\"attestations\":\"write\",\"id-token\":\"write\"}",
+    "cli-release.yml: attest: the job's keys are {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"contents\":\"read\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I2 attest: gains contents: write": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job's permissions are {\"attestations\":\"write\",\"contents\":\"write\",\"id-token\":\"write\"}, the exception records {\"attestations\":\"write\",\"id-token\":\"write\"}",
+    "cli-release.yml: attest: grants write on [attestations, contents, id-token], WRITE_PERMISSIONS records [attestations, id-token]",
+    "cli-release.yml: attest: the job's keys are {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"contents\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I3 attest: gains packages: write": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job's permissions are {\"attestations\":\"write\",\"id-token\":\"write\",\"packages\":\"write\"}, the exception records {\"attestations\":\"write\",\"id-token\":\"write\"}",
+    "cli-release.yml: attest: grants write on [attestations, id-token, packages], WRITE_PERMISSIONS records [attestations, id-token]",
+    "cli-release.yml: attest: the job's keys are {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\",\"packages\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I4 attest: permissions: write-all": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job's permissions are \"write-all\", the exception records {\"attestations\":\"write\",\"id-token\":\"write\"}",
+    "cli-release.yml: attest: grants write on [write-all], WRITE_PERMISSIONS records [attestations, id-token]",
+    "cli-release.yml: attest: the job's keys are {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":\"write-all\",\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I5 attest: bound to an environment": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job sets environment:, which the exception does not allow",
+    "cli-release.yml: attest: the job's keys are {\"environment\":\"cli-release\",\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I6 attest: a run: step of project code": [
+    "cli-release.yml: attest step injected: a credentialed job runs `bash apps/cli/scripts/check-on-main.sh`: bash is not a command a credentialed job runs",
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: step injected has a run: block (the exception runs no project code)",
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job runs [\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",null,\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\"], the exception records [\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\"]",
+    "cli-release.yml: attest: runs 3 steps, ACTION_SURFACE records 2",
+    "cli-release.yml: attest: step 2 (injected) is {\"name\":\"injected\",\"run\":{\"sha256\":\"bb87d1cd6b1365efb4e66c0088fd9dc2e619414d6fb730f6fd1a9194226f5757\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}",
+    "cli-release.yml: attest: step 3 (Attest every released file (GitHub artifact attestation)) is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}, ACTION_SURFACE records null"
+  ],
+  "I7 attest: a checkout beside the token": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job runs [\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\"], the exception records [\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\"]",
+    "cli-release.yml: attest: runs 3 steps, ACTION_SURFACE records 2",
+    "cli-release.yml: attest: step 1 (Checkout) is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}, ACTION_SURFACE records {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"cli-dist\",\"path\":\"dist\"}}",
+    "cli-release.yml: attest: step 2 (Receive the build) is {\"uses\":\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"with\":{\"name\":\"cli-dist\",\"path\":\"dist\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}",
+    "cli-release.yml: attest: step 3 (Attest every released file (GitHub artifact attestation)) is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}, ACTION_SURFACE records null"
+  ],
+  "I8 attest: another action after the attestation": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job runs [\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\"], the exception records [\"actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093\",\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\"]",
+    "cli-release.yml: attest: runs 3 steps, ACTION_SURFACE records 2",
+    "cli-release.yml: attest: step 3 (x) is {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b\"}}}, ACTION_SURFACE records null"
+  ],
+  "I9 attest: a secret in the attest step's env": [
+    "cli-release.yml: attest step Attest every released file (GitHub artifact attestation): secrets.R2_SECRET_ACCESS_KEY: a job outside an environment declares no secret R2_SECRET_ACCESS_KEY",
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github.token or secrets",
+    "cli-release.yml: attest: a credentialed job's env: it sets T, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: attest: reads the secrets context outside an environment",
+    "cli-release.yml: attest: step 2 (Attest every released file (GitHub artifact attestation)) is {\"env\":{\"T\":\"${{ secrets.R2_SECRET_ACCESS_KEY }}\"},\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}"
+  ],
+  "I10 attest: the token handed to the attest step": [
+    "cli-release.yml: attest step Attest every released file (GitHub artifact attestation): github.token: a credential is read only in an env: value",
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github.token or secrets",
+    "cli-release.yml: attest: step 2 (Attest every released file (GitHub artifact attestation)) is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"github-token\":\"${{ github.token }}\",\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}"
+  ],
+  "I11 attest: a job-level env": [
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: the job sets env:, which the exception does not allow",
+    "cli-release.yml: attest: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: attest: the job's keys are {\"env\":{\"BASH_ENV\":\"x\"},\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"attest ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"attestations\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I12 attest: a forged subject": [
+    "cli-release.yml: attest: step 2 (Attest every released file (GitHub artifact attestation)) is {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"subject-name\":\"confeature-x86_64-unknown-linux-gnu\"}}, ACTION_SURFACE records {\"uses\":\"actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8\",\"with\":{\"subject-path\":\"dist/confeature-*\\ndist/SHA256SUMS\\n\"}}"
+  ],
+  "I13 attest: renamed, its exception names no job": [
+    "cli-release.yml: attest: ACTION_SURFACE records a job the workflow does not have",
+    "cli-release.yml: attest: ID_TOKEN_EXCEPTIONS: records a job the workflow does not have",
+    "cli-release.yml: provenance: a job ACTION_SURFACE does not record",
+    "cli-release.yml: provenance: grants write on [attestations, id-token], WRITE_PERMISSIONS records []",
+    "cli-release.yml: provenance: requests id-token: write outside an environment",
+    "cli-release.yml: upload: the job's keys are {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"provenance\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}, FROZEN_JOB_KEYS records {\"environment\":\"cli-release\",\"name\":\"upload ${{ github.ref_name }} to R2\",\"needs\":[\"build\",\"release\",\"attest\"],\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":15}"
+  ],
+  "I14 build: gains id-token: write": [
+    "cli-release.yml: build step Compile all targets: a credentialed job runs `deno task compile`: deno is not a command a credentialed job runs",
+    "cli-release.yml: build step Generate SHA256SUMS: a credentialed job's run: block has a glob character (* ? [ ])",
+    "cli-release.yml: build step Generate SHA256SUMS: a credentialed job's run: block has an expansion this grammar does not allow ($(, $((, $', $\" or a special parameter)",
+    "cli-release.yml: build step Refuse a tag that is not on main: a credentialed job runs `bash apps/cli/scripts/check-on-main.sh`: bash is not a command a credentialed job runs",
+    "cli-release.yml: build step Release summary: a credentialed job's run: block has a ( ) or { } (subshell, group, function, arithmetic or brace expansion)",
+    "cli-release.yml: build step Verify tag matches the declared CLI version: a credentialed job runs `deno run scripts/release-version-check.ts \"$TAG\"`: deno is not a command a credentialed job runs",
+    "cli-release.yml: build: a credentialed job sets working-directory: (an exception would resolve another script)",
+    "cli-release.yml: build: a credentialed job's env: it sets SHA, which CREDENTIALED_ENV does not allow",
+    "cli-release.yml: build: a credentialed job's outputs: holds an expression",
+    "cli-release.yml: build: grants write on [id-token], WRITE_PERMISSIONS records []",
+    "cli-release.yml: build: requests id-token: write outside an environment",
+    "cli-release.yml: build: the job's keys are {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}, FROZEN_JOB_KEYS records {\"name\":\"build ${{ github.ref_name }}\",\"needs\":\"workflow-rules\",\"outputs\":{\"sums-digest\":\"${{ steps.sums.outputs.digest }}\"},\"permissions\":{\"contents\":\"read\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":20}"
+  ],
+  "I15 release: gains id-token: write": [
+    "cli-release.yml: release: grants write on [contents, id-token], WRITE_PERMISSIONS records [contents]",
+    "cli-release.yml: release: requests id-token: write outside an environment",
+    "cli-release.yml: release: the job's keys are {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\",\"id-token\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}, FROZEN_JOB_KEYS records {\"name\":\"release ${{ github.ref_name }}\",\"needs\":\"build\",\"permissions\":{\"contents\":\"write\"},\"runs-on\":\"ubuntu-latest\",\"timeout-minutes\":10}"
+  ],
+  "I16 sdk-publish setup: gains id-token: write": [
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `elif [ -n \"$VERSION\" ]`: elif is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `git fetch --no-tags origin main`: git is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `if [ \"$EVENT\" = \"push\" ]`: [ is not a command environment sdk-publish.yml#setup's job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --tag \"$TAG\" --commit \"$GITHUB_SHA\" --main-ref FETCH_HEAD`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\" --version \"$VERSION\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs): a credentialed job runs `node tools/sdk-pack/resolve-publish.mjs --unit \"$UNIT\"`: node is not a command a credentialed job runs",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets EVENT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets UNIT, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's env: it sets VERSION, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: setup: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
+    "sdk-publish.yml: setup: a credentialed job's outputs: holds an expression",
+    "sdk-publish.yml: setup: grants write on [id-token], WRITE_PERMISSIONS records []",
+    "sdk-publish.yml: setup: requests id-token: write outside an environment",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_GLOBAL: /dev/null in its own env",
+    "sdk-publish.yml: setup: step Resolve the publish unit (tools/sdk-pack/resolve-publish.mjs) runs git without GIT_CONFIG_NOSYSTEM: 1 in its own env"
+  ],
+  "I17 a new workflow's attest-shaped job, outside the exception": [
+    "new.yml: attest: grants write on [attestations, id-token], WRITE_PERMISSIONS records []",
+    "new.yml: attest: requests id-token: write outside an environment"
   ]
 }

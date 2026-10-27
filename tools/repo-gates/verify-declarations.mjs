@@ -64,6 +64,11 @@ const ROOT = resolve(dirname(HERE), "..", "..");
  * definition satisfy its own home. For a workflow home, `before` names the step
  * the gate must precede — without it, a gate can be moved below the deploy it
  * was placed to block and still be "present".
+ *
+ * A `perJob` home may name `exceptJobs: { <job>: <why> }`: jobs that reach
+ * `before` yet do not run the gate, each with its reason, by name (#903). An
+ * entry naming no job that reaches `before`, or with no reason, is itself a
+ * violation, so an exception cannot outlive its job or hide its why.
  */
 /**
  * A gate's script paths, always as an array.
@@ -226,6 +231,13 @@ export const DECLARED_GATES = {
         before: "Receive the build",
         perJob: true,
         direct: true,
+        // The guard needs a checkout and runs repository code; the attest job
+        // must hold its OIDC token beside neither (#903). It needs build, whose
+        // guard ran, and verify-workflows.mjs holds it to its exact shape.
+        exceptJobs: {
+          attest:
+            "ID_TOKEN_EXCEPTIONS (#903): no checkout, no project code beside the OIDC token; it needs build, whose guard ran",
+        },
       },
     ],
   },
@@ -1058,7 +1070,21 @@ export function verifyGateDeclarations(
           );
           continue;
         }
+        const except = home.exceptJobs ?? {};
+        for (const [job, why] of Object.entries(except)) {
+          if (!named.some((s) => s.job === job))
+            fail(
+              `${gate}: exceptJobs names job "${job}", which reaches no "${home.before}" in ${home.file}`,
+              "drop the stale exception — an exception outliving its job excuses the next one of that name",
+            );
+          if (typeof why !== "string" || why.trim() === "")
+            fail(
+              `${gate}: exceptJobs names job "${job}" with no reason`,
+              "say why that job is outside the gate, in the declaration",
+            );
+        }
         for (const target of named) {
+          if (typeof except[target.job] === "string" && except[target.job].trim() !== "") continue;
           const guard = steps.find(
             (s) =>
               s.job === target.job &&

@@ -1450,6 +1450,29 @@ describe("a direct workflow home runs the script itself, in every job (round 10)
     expect(what(job("a", "bash tools/guard-x.sh || true"))).toMatch(/job "a" reaches/));
   it("rejects a run that only names it", () =>
     expect(what(job("a", "echo bash tools/guard-x.sh"))).toMatch(/job "a" reaches/));
+  // exceptJobs (#903): a named job, with its reason, and nothing wider.
+  const except = (exceptJobs) => {
+    const home = DIRECT["guard-x"].homes[0];
+    home.exceptJobs = exceptJobs;
+    try {
+      return what(job("a", "bash tools/guard-x.sh"), job("b", null));
+    } finally {
+      delete home.exceptJobs;
+    }
+  };
+  it("accepts a job exceptJobs names, with its reason", () =>
+    expect(except({ b: "runs no project code" })).not.toMatch(/guard-x/));
+  it("still rejects a job exceptJobs does not name", () =>
+    expect(except({ a: "runs no project code" })).toMatch(/job "b" reaches/));
+  it("rejects an exception without a reason, and does not apply it", () => {
+    const got = except({ b: " " });
+    expect(got).toMatch(/exceptJobs names job "b" with no reason/);
+    expect(got).toMatch(/job "b" reaches/);
+  });
+  it("rejects a stale exception naming no job that reaches the step", () =>
+    expect(except({ b: "why", gone: "why" })).toMatch(
+      /exceptJobs names job "gone", which reaches no "Pack the release artifact"/,
+    ));
 });
 
 describe("perJob: every job that reaches the guarded step runs the gate first, in that job (#794)", () => {
