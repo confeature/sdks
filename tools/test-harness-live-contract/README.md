@@ -139,7 +139,9 @@ its `runner` natively in the macOS job after its precheck, through
 `tools/repo-gates/run-live-suite.mjs` (#924): the harness starts there on the darwin workerd the
 workspace install brings. Every `runner` goes through the harness wrapper
 (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
-live suite never passes by skipping (#783). An SDK that cannot have one carries `liveExempt:
+live suite never passes by skipping (#783). Nothing outside the wrapped command is a shell
+operator: a runner's `&&` or `||` goes inside a quoted `bash -c '…'`, never after it, where bash and
+not the wrapper would decide the leg (#926). An SDK that cannot have one carries `liveExempt:
 "<reason>"` instead; since #924 every SDK has one or the other, and
 `tests/live-suite-runners.test.ts` fails on an SDK with neither. `scripts/live-coverage-report.mjs`
 lists the roster: live, or exempt with its reason.

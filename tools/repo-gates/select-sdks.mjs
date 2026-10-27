@@ -128,6 +128,62 @@ export const GATE_PREFIXES = [
  */
 export const LIVE_WRAPPER =
   "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
+/**
+ * The shell operators and substitutions in `text` that bash would act on, in
+ * the order they appear, read with bash's quoting: nothing inside single
+ * quotes, only `$(` and backticks inside double quotes, nothing a backslash
+ * escapes. `unterminated` is true when a quote never closes.
+ *
+ * Why (#926 A4): every liveSuite.runner is run as `bash -euo pipefail -c
+ * "<runner>"`, so an operator after the wrapped command runs OUTSIDE the
+ * harness wrapper, and its exit code, not the wrapper's, is the leg's:
+ * `<wrapper> -- cmd || true` is green whatever the suite did. A `bash -c
+ * '… && …'` argument is the wrapped command itself, quoted, so it is never
+ * read here. A substitution is refused too: it runs a command bash starts
+ * before the wrapper, which no check sees. This reads the text, it runs
+ * nothing; anything it cannot judge (an open quote) is reported, never passed.
+ */
+export function shellOperatorsOutsideQuotes(text) {
+  const operators = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") i += 2;
+    else if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      if (end === -1) return { operators, unterminated: true };
+      i = end + 1;
+    } else if (c === '"') {
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\") i += 2;
+        else {
+          if (text[i] === "`") operators.push("`");
+          else if (text.startsWith("$(", i)) operators.push("$(");
+          i++;
+        }
+      }
+      if (i >= text.length) return { operators, unterminated: true };
+      i++;
+    } else if (text.startsWith("$'", i)) {
+      // ANSI-C quoting: a backslash escapes any character, `'` closes.
+      i += 2;
+      while (i < text.length && text[i] !== "'") i += text[i] === "\\" ? 2 : 1;
+      if (i >= text.length) return { operators, unterminated: true };
+      i++;
+    } else if (text.startsWith("$(", i) || c === "`") {
+      operators.push(c === "`" ? "`" : "$(");
+      i += c === "`" ? 1 : 2;
+    } else if ("|&;<>()\n".includes(c)) {
+      const two = text.slice(i, i + 2);
+      const op = ["||", "&&", ";;", ">>", "<<", "&>", ">&", "<&", "|&"].includes(two) ? two : c;
+      operators.push(op === "\n" ? "newline" : op);
+      i += op.length;
+    } else i++;
+  }
+  return { operators, unterminated: false };
+}
+
 /** A path printed as it is: no newline, no `$`, no backtick, no `:`, no segment led by a dash. */
 export const PLAIN_PATH = /^[A-Za-z0-9._][A-Za-z0-9._-]*(?:\/[A-Za-z0-9._][A-Za-z0-9._-]*)*$/;
 /** At most this many gate files are named; the rest are counted. */
@@ -145,7 +201,8 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * (`ci.native`); a known-red waiver needs a Dagger leg to run red in; every
  * ticket is `#<issue>`. A `liveSuite` has a runner and needs a job that runs
  * it: a Dagger leg (#918) or a native kind whose KINDS entry is `live`, the
- * macOS job (#924), and runs through LIVE_WRAPPER; an SDK has a liveSuite or a
+ * macOS job (#924), and runs through LIVE_WRAPPER with no shell operator after
+ * it (shellOperatorsOutsideQuotes, #926 A4); an SDK has a liveSuite or a
  * `liveExempt` reason, never both.
  * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
@@ -189,6 +246,19 @@ export function manifestProblems(manifest) {
         add(
           `liveSuite.runner does not run a command through the harness wrapper (${LIVE_WRAPPER.trim()}): without it the suite skips every case and passes`,
         );
+      else {
+        const { operators, unterminated } = shellOperatorsOutsideQuotes(
+          live.runner.slice(LIVE_WRAPPER.length),
+        );
+        if (unterminated)
+          add(
+            "liveSuite.runner has an unterminated quote: what bash runs after the wrapper cannot be judged",
+          );
+        if (operators.length > 0)
+          add(
+            `liveSuite.runner has a shell operator or substitution outside the wrapped command (${[...new Set(operators)].join(" ")}): bash runs it outside the harness wrapper, so its exit code, not the wrapper's, would be the leg's (quote it inside the command, e.g. bash -c '…')`,
+          );
+      }
       const runsLive = dagger || KINDS.some((k) => k.native === ci?.native && k.live);
       if (!runsLive)
         add(

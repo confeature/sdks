@@ -29,6 +29,7 @@ import {
   manifestProblems,
   routeSelection,
   selectNames,
+  shellOperatorsOutsideQuotes,
   workspaceDependents,
 } from "./select-sdks.mjs";
 
@@ -367,6 +368,72 @@ describe("the manifest's CI shape", () => {
     expect(manifestProblems({}).map((p) => p.why)).toContainEqual(
       expect.stringMatching(/no sdks/),
     ));
+});
+
+// #926 A4: a runner is run as `bash -euo pipefail -c "<runner>"` (Dagger's
+// live-suite and run-live-suite.mjs), so a shell operator after the wrapped
+// command runs OUTSIDE the wrapper: `<wrapper> -- cmd || true` is green
+// whatever the wrapper says. Only the runner's own unquoted text is refused;
+// a `bash -c '… && …'` argument is the wrapped command, and stays legal.
+describe("a liveSuite.runner carries no shell operator outside the wrapped command (#926 A4)", () => {
+  const runner = (tail) => ({
+    sdks: [{ name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}${tail}` } }],
+  });
+  const whys = (tail) => manifestProblems(runner(tail)).map((p) => p.why);
+
+  // MUTATION: drop the operator check from manifestProblems and every one of
+  // these is accepted again, `|| true` first.
+  it.each([
+    ["|| true", "cmd || true"],
+    ["; true", "cmd; true"],
+    ["& (background)", "cmd & true"],
+    ["| (pipe)", "cmd | tee log"],
+    ["&& true", "cmd && true"],
+    ["> (redirect)", "cmd > /dev/null"],
+    ["< (redirect)", "cmd < /dev/null"],
+    ["( (subshell)", "(cmd)"],
+    ["a newline", "cmd\ntrue"],
+    ["$( substitution", "cmd $(true)"],
+    ["a backtick substitution", "cmd `true`"],
+    ["$( inside double quotes", 'cmd "$(true)"'],
+    ["|| true after a quoted argument", "bash -c 'a && b' || true"],
+  ])("refuses %s", (_label, tail) => {
+    expect(whys(tail)).toContainEqual(expect.stringMatching(/shell (operator|substitution)/));
+  });
+
+  it("refuses an unterminated quote: what bash would read cannot be judged", () => {
+    expect(whys("bash -c 'cmd")).toContainEqual(expect.stringMatching(/unterminated/));
+    expect(whys('bash -c "cmd')).toContainEqual(expect.stringMatching(/unterminated/));
+  });
+
+  it.each([
+    [
+      "a bash -c argument with && and || inside its single quotes",
+      "bash -c 'cd a && t || exit 1; done'",
+    ],
+    ["operators inside double quotes", 'node -e "a|b;c&d>e"'],
+    ["escaped operators", "echo \\|\\;\\&"],
+    ["a plain command", "pnpm --filter @confeature/sdk-node exec vp test run t.live.test.ts"],
+    ["a variable", "cmd $HOME"],
+  ])("accepts %s", (_label, tail) => {
+    expect(whys(tail)).toEqual([]);
+  });
+
+  it("names the operators it found, outside quotes only", () => {
+    expect(shellOperatorsOutsideQuotes("bash -c 'a || b' || true; x")).toEqual({
+      operators: ["||", ";"],
+      unterminated: false,
+    });
+    expect(shellOperatorsOutsideQuotes("a 'b")).toEqual({ operators: [], unterminated: true });
+  });
+
+  it("every real runner passes", () => {
+    for (const s of REAL.sdks.filter((x) => x.liveSuite !== undefined))
+      expect(
+        shellOperatorsOutsideQuotes(s.liveSuite.runner.slice(LIVE_WRAPPER.length)),
+        s.name,
+      ).toEqual({ operators: [], unterminated: false });
+  });
 });
 
 describe("the gate files a pull request changes", () => {

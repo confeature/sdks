@@ -120,7 +120,8 @@
  *      produces a required check. Each `requiredChecks` name of
  *      release-settings.json is produced by exactly one job across every
  *      workflow, and every manifest SDK has exactly one of daggerFn or
- *      ci.native (manifestProblems). Each Dagger leg runs its suite, then
+ *      ci.native, and every liveSuite.runner runs through the harness wrapper
+ *      with no shell operator outside the wrapped command (manifestProblems). Each Dagger leg runs its suite, then
  *      its live suite when the leg is `live` (daggerLegProblems); the macOS
  *      job does the same natively, through run-live-suite.mjs (#924,
  *      nativeLegProblems). Rules 2 and 18 already read every
