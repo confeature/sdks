@@ -44,6 +44,7 @@
 #include "confeature/flag_overrides.h"
 #include "confeature/snapshot.h"
 #include "confeature/user.h"
+#include "require_value.h"
 #include "workspace_root.h"
 
 using confeature::ConfigOverrideDataSource;
@@ -238,7 +239,7 @@ TEST_CASE("parity rules corpus is non-empty via full-config override", "[parity_
       INFO("variationId mismatch: expected=" << expectedVid
                                              << " actual=" << actualVid.value_or("<nullopt>"));
       REQUIRE(actualVid.has_value());
-      REQUIRE(*actualVid == expectedVid);
+      REQUIRE(actualVid == expectedVid);
     }
     ++passed;
   }
@@ -264,9 +265,8 @@ TEST_CASE("ConfigOverrideDataSource retains the full config", "[parity_rules]") 
 
   // getOverridesSync exposes the rule-bearing settings map (`f`) so
   // getAllKeys / getAllValues can enumerate the override's flag keys.
-  const auto maybeMap = source.getOverridesSync();
-  REQUIRE(maybeMap.has_value());
+  const auto overrides = confeature::tests::requireValue(source.getOverridesSync(), "the override map");
   for (auto it = cfgJson.at("f").begin(); it != cfgJson.at("f").end(); ++it) {
-    REQUIRE(maybeMap->count(it.key()) == 1);
+    REQUIRE(overrides.count(it.key()) == 1);
   }
 }

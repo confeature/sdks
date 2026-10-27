@@ -312,28 +312,26 @@ NumberConvert attributeAsUnixTimeSeconds(const std::string& attr, const std::str
 ArrayConvert attributeAsStringArray(const std::string& attr, const std::string& value) {
   // A string attribute is JSON-parsed; the result must be a string array
   // (common-js getUserAttributeValueAsStringArray).
+  // A non-JSON string is not an error to log but an expected input that falls
+  // through to the validation error (matches common-js), so it is parsed
+  // without exceptions: a discarded result is not an array.
   ArrayConvert out;
-  try {
-    const auto parsed = nlohmann::json::parse(value);
-    if (parsed.is_array()) {
-      bool allStrings = true;
-      std::vector<std::string> arr;
-      for (const auto& e : parsed) {
-        if (!e.is_string()) {
-          allStrings = false;
-          break;
-        }
-        arr.push_back(e.get<std::string>());
+  const auto parsed = nlohmann::json::parse(value, nullptr, /*allow_exceptions=*/false);
+  if (parsed.is_array()) {
+    bool allStrings = true;
+    std::vector<std::string> arr;
+    for (const auto& e : parsed) {
+      if (!e.is_string()) {
+        allStrings = false;
+        break;
       }
-      if (allStrings) {
-        out.ok = true;
-        out.value = std::move(arr);
-        return out;
-      }
+      arr.push_back(e.get<std::string>());
     }
-  } catch (...) {
-    // Non-JSON string falls through to the validation error (no-op catch,
-    // matches common-js).
+    if (allStrings) {
+      out.ok = true;
+      out.value = std::move(arr);
+      return out;
+    }
   }
   out.ok = false;
   out.error = invalidAttr(attr, "'" + value + "' is not a valid string array");

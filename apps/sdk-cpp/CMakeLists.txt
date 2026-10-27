@@ -82,6 +82,10 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(nlohmann_json)
 if(CONFEATURE_ENABLE_TESTS)
+    # Lets a failed `REQUIRE(opt == value)` print the optional's contents:
+    # the suite compares optionals whole rather than dereferencing them
+    # unchecked (#839, bugprone-unchecked-optional-access).
+    set(CATCH_CONFIG_ENABLE_OPTIONAL_STRINGMAKER ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(Catch2)
     FetchContent_MakeAvailable(configcat-cpp)
 endif()

@@ -38,7 +38,7 @@ TEST_CASE("FilesystemCache round-trips a written value", "[filesystem_cache]") {
   cache.write("cache-key-alpha", R"({"hello":"world"})");
   const auto read = cache.read("cache-key-alpha");
   REQUIRE(read.has_value());
-  REQUIRE(*read == R"({"hello":"world"})");
+  REQUIRE(read == R"({"hello":"world"})");
 }
 
 TEST_CASE("FilesystemCache returns nullopt for missing keys", "[filesystem_cache]") {
@@ -55,7 +55,7 @@ TEST_CASE("FilesystemCache overwrites an existing entry atomically", "[filesyste
   cache.write("k", "v3");
   const auto read = cache.read("k");
   REQUIRE(read.has_value());
-  REQUIRE(*read == "v3");
+  REQUIRE(read == "v3");
   // No leftover tempfiles in the cache directory.
   std::size_t tmpfiles = 0;
   for (const auto& entry : std::filesystem::directory_iterator(dir)) {

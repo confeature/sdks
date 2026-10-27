@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "internal/config_fetcher.h"
+#include "require_value.h"
 #include "workspace_root.h"
 
 namespace confeature::tests::wire {
@@ -164,10 +165,10 @@ inline void assertRequest(const json& wireCase, const std::string& sdkKey,
     const confeature::internal::ConfigFetcher custom(
         sdkKey, "0.0.0-wire-test", given["baseUrl"].get<std::string>(), std::chrono::seconds(1),
         nullptr);
-    REQUIRE(custom.url().has_value());
+    const auto url = confeature::tests::requireValue(custom.url(), "the custom base url");
     const auto prefix = expected["requestUrlPrefix"].get<std::string>();
-    INFO("url=" << *custom.url() << " prefix=" << prefix);
-    CHECK(custom.url()->rfind(prefix, 0) == 0);
+    INFO("url=" << url << " prefix=" << prefix);
+    CHECK(url.rfind(prefix, 0) == 0);
   }
   if (expected.contains("requestHeaderIfNoneMatch")) {
     const auto& want = expected["requestHeaderIfNoneMatch"];
@@ -175,7 +176,7 @@ inline void assertRequest(const json& wireCase, const std::string& sdkKey,
       CHECK_FALSE(sent.ifNoneMatch.has_value());
     } else {
       REQUIRE(sent.ifNoneMatch.has_value());
-      CHECK(*sent.ifNoneMatch == want.get<std::string>());
+      CHECK(sent.ifNoneMatch == want.get<std::string>());
     }
   }
 }
@@ -194,12 +195,12 @@ inline void assertOutcome(const json& wireCase, const confeature::internal::Fetc
     CHECK(result.body.has_value() == fetched);
     if (expected.contains("resultingEtag") && !expected["resultingEtag"].is_null()) {
       REQUIRE(result.etag.has_value());
-      CHECK(result.etag.value() == expected["resultingEtag"].get<std::string>());
+      CHECK(result.etag == expected["resultingEtag"].get<std::string>());
     }
   } else if (outcome == "failed") {
     REQUIRE(result.status == FetchStatus::Failed);
-    REQUIRE(result.error.has_value());
-    CHECK(cppErrorToClass(result.error.value()) == expected.at("errorClass").get<std::string>());
+    CHECK(cppErrorToClass(confeature::tests::requireValue(result.error, "the fetch error")) ==
+          expected.at("errorClass").get<std::string>());
   } else {
     FAIL("unknown outcome in corpus: " << outcome);
   }

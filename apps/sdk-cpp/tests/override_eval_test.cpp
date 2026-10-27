@@ -59,33 +59,33 @@ TEST_CASE("Branch 4: absent key returns the default", "[override_eval]") {
   const auto [ok, value] = evaluateSync(&fo, "missing", json(false));
   REQUIRE(ok);
   REQUIRE(value.has_value());
-  REQUIRE(*value == json(false));
+  REQUIRE(value == json(false));
 }
 
 TEST_CASE("Branch 5: null override returns the default", "[override_eval]") {
   auto fo = makeLocalOnly({{"k", json(nullptr)}});
   const auto [ok, value] = evaluateSync(&fo, "k", json(true));
   REQUIRE(ok);
-  REQUIRE(*value == json(true));
+  REQUIRE(value == json(true));
 }
 
 TEST_CASE("Branch 6: type mismatch returns the default", "[override_eval]") {
   auto fo = makeLocalOnly({{"k", json("string-value")}});
   const auto [ok, value] = evaluateSync(&fo, "k", json(true));
   REQUIRE(ok);
-  REQUIRE(*value == json(true));
+  REQUIRE(value == json(true));
 }
 
 TEST_CASE("Branch 6: null default bypasses the type check", "[override_eval]") {
   auto fo = makeLocalOnly({{"k", json("string-value")}});
   const auto [ok, value] = evaluateSync(&fo, "k", json(nullptr));
   REQUIRE(ok);
-  REQUIRE(*value == json("string-value"));
+  REQUIRE(value == json("string-value"));
 }
 
 TEST_CASE("Branch 7: happy path returns the override", "[override_eval]") {
   auto fo = makeLocalOnly({{"k", json(true)}});
   const auto [ok, value] = evaluateSync(&fo, "k", json(false));
   REQUIRE(ok);
-  REQUIRE(*value == json(true));
+  REQUIRE(value == json(true));
 }

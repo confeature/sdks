@@ -2,6 +2,7 @@
 
 #include "internal/semver.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <optional>
@@ -49,12 +50,8 @@ bool isAllDigits(const std::string& s) {
   if (s.empty()) {
     return false;
   }
-  for (const char c : s) {
-    if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(s.begin(), s.end(),
+                     [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
 // Parse a `0|[1-9]\d*` core component to a uint64, rejecting > MAX_SAFE_INTEGER.

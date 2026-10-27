@@ -43,5 +43,8 @@ Checks: >
   -bugprone-std-namespace-modification
 
 WarningsAsErrors: ""
-HeaderFilterRegex: "include/confeature/.*|src/.*"
+# Anchored on `/sdk-cpp/`: the unanchored `src/.*` it replaced also matched
+# FetchContent's `_deps/<name>-src/` trees, so nlohmann/json, Catch2 and
+# configcat-cpp headers were linted as if they were this SDK's (#839).
+HeaderFilterRegex: "/sdk-cpp/(include/confeature|src|tests)/"
 FormatStyle: file

@@ -51,6 +51,13 @@ struct ConfeatureClient::Impl {
   // the stateMutex critical section.
   std::atomic<std::int64_t> fetchTimeUnixMillis{0};
 
+  /// LocalOnly overrides switch the network off for the client's whole life:
+  /// refresh, setOnline/setOffline and isOffline all key off this one predicate.
+  bool isLocalOnly() const {
+    return flagOverrides.has_value() &&
+           flagOverrides->behaviour() == OverrideBehaviour::LocalOnly;
+  }
+
   static std::int64_t nowUnixMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch())
@@ -305,8 +312,7 @@ bool ConfeatureClient::forceRefresh() {
   if (closed_.load(std::memory_order_seq_cst)) {
     return false;
   }
-  if (impl_->flagOverrides.has_value() &&
-      impl_->flagOverrides->behaviour() == OverrideBehaviour::LocalOnly) {
+  if (impl_->isLocalOnly()) {
     // LocalOnly never fetches — treat refresh as a no-op success.
     return true;
   }
@@ -328,8 +334,7 @@ void ConfeatureClient::setOnline() {
     }
     return;
   }
-  if (impl_->flagOverrides.has_value() &&
-      impl_->flagOverrides->behaviour() == OverrideBehaviour::LocalOnly) {
+  if (impl_->isLocalOnly()) {
     if (impl_->logger) {
       impl_->logger->warning(
           "Client is configured to use the LocalOnly override behaviour, "
@@ -349,8 +354,7 @@ void ConfeatureClient::setOffline() {
     }
     return;
   }
-  if (impl_->flagOverrides.has_value() &&
-      impl_->flagOverrides->behaviour() == OverrideBehaviour::LocalOnly) {
+  if (impl_->isLocalOnly()) {
     // Silent no-op — LocalOnly never polls.
     return;
   }
@@ -361,8 +365,7 @@ bool ConfeatureClient::isOffline() const {
   if (closed_.load(std::memory_order_seq_cst)) {
     return true;
   }
-  if (impl_->flagOverrides.has_value() &&
-      impl_->flagOverrides->behaviour() == OverrideBehaviour::LocalOnly) {
+  if (impl_->isLocalOnly()) {
     return true;
   }
   return offline_.load(std::memory_order_seq_cst);
@@ -433,8 +436,8 @@ EvaluationDetails<T> ConfeatureClient::getValueDetails(const std::string& key,
     closedDetails.error = std::string("CLIENT_CLOSED");
     if (user != nullptr) {
       closedDetails.user = *user;
-    } else if (impl_->defaultUser.has_value()) {
-      closedDetails.user = *impl_->defaultUser;
+    } else {
+      closedDetails.user = impl_->defaultUser;
     }
     // Hook bus (spec 111 / #268) — fire flagEvaluated on closed path too.
     if (impl_->hooks) {

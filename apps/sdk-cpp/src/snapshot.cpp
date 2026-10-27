@@ -28,7 +28,7 @@ Snapshot::Snapshot(std::shared_ptr<const nlohmann::json> config,
 
 nlohmann::json Snapshot::getValueJson(const std::string& key, const nlohmann::json& defaultValue,
                                       const User* user) const {
-  const auto resolvedUser = user != nullptr ? user : defaultUser_.get();
+  const auto* const resolvedUser = user != nullptr ? user : defaultUser_.get();
   // Override branch first. The router dispatches on the source TYPE: a
   // `MapOverrideDataSource` keeps the byte-identical flat-map path
   // (`evaluateSync`), while a `ConfigOverrideDataSource` routes the FULL
@@ -90,13 +90,9 @@ Snapshot::JsonDetails Snapshot::resolveJsonDetails(const std::string& key,
           // We detect the rejection by checking whether the JSON-kind
           // of the raw override differs from the default's kind.
           auto sameKind = [](const nlohmann::json& a, const nlohmann::json& b) {
-            if (a.is_boolean() && b.is_boolean()) return true;
-            if (a.is_string() && b.is_string()) return true;
-            if (a.is_number() && b.is_number()) return true;
-            if (a.is_array() && b.is_array()) return true;
-            if (a.is_object() && b.is_object()) return true;
-            if (a.is_null() && b.is_null()) return true;
-            return false;
+            return (a.is_boolean() && b.is_boolean()) || (a.is_string() && b.is_string()) ||
+                   (a.is_number() && b.is_number()) || (a.is_array() && b.is_array()) ||
+                   (a.is_object() && b.is_object()) || (a.is_null() && b.is_null());
           };
           if (!defaultValue.is_null() && !sameKind(it->second, defaultValue)) {
             return JsonDetails{defaultValue, "TYPE_MISMATCH", std::string()};
@@ -112,7 +108,7 @@ Snapshot::JsonDetails Snapshot::resolveJsonDetails(const std::string& key,
   }
   // Cache branch — the evaluator already returns the error code.
   const auto* cfg = config_ ? config_.get() : nullptr;
-  const auto resolvedUser = user != nullptr ? user : defaultUser_.get();
+  const auto* const resolvedUser = user != nullptr ? user : defaultUser_.get();
   const auto r = internal::evaluate(cfg, key, defaultValue, resolvedUser);
   return JsonDetails{r.value, r.error, r.variationId, r.hasMatchedRule, r.hasMatchedOption};
 }

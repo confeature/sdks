@@ -380,7 +380,10 @@ function cppToolchain(source: Directory): Container {
         "bash",
         "-eu",
         "-c",
-        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*",
+        // clang-tidy-19 / clang-format-19 (bookworm main, 19.1.7): one LLVM
+        // major for both, the SDK's declared lint bar run by `cppTest` (#839).
+        // python3 runs run-clang-tidy-19.
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev clang-tidy-19 clang-format-19 python3 >/dev/null && rm -rf /var/lib/apt/lists/*",
       ])
       .withMountedDirectory("/work", source)
       .withWorkdir("/work/apps/sdk-cpp")
@@ -694,8 +697,8 @@ export class Confeature {
   /** Run apps/sdk-php's composer `test` (phpunit) on PHP 8.3 + composer. */
   @func()
   async phpTest(source: Directory): Promise<string> {
-    // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar
-    // (.claude/agents/sdk-php.md rule 9): zero offenses (#793 FR-007).
+    // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar:
+    // zero offenses (#793 FR-007).
     const result = await phpToolchain(source)
       .withExec([
         "bash",
@@ -736,8 +739,8 @@ export class Confeature {
   @func()
   async rustTest(source: Directory): Promise<string> {
     // MSRV guard (cargo +1.86 build --lib, no dev-deps), then fmt, clippy
-    // with -D warnings (the SDK's declared merge bar, .claude/agents/sdk-rust.md
-    // rule 9; #793 FR-007) and the tests on the image's 1.88 default.
+    // with -D warnings (the SDK's declared merge bar, #793 FR-007) and the
+    // tests on the image's 1.88 default.
     // rustfmt and clippy adds are idempotent.
     const result = await rustToolchain(source)
       .withExec([
@@ -754,8 +757,8 @@ export class Confeature {
   /** Run apps/sdk-dart's `dart analyze && dart test` on the stable Dart SDK. */
   @func()
   async dartTest(source: Directory): Promise<string> {
-    // `dart analyze --fatal-infos` is the SDK's declared bar
-    // (.claude/agents/sdk-dart.md rule 8); `dart format` holds the formatting.
+    // `dart analyze --fatal-infos` is the SDK's declared bar; `dart format`
+    // holds the formatting.
     const result = await dartToolchain(source)
       .withExec([
         "bash",
@@ -789,9 +792,8 @@ export class Confeature {
         "bash",
         "-eu",
         "-c",
-        // `mix credo --strict` is the SDK's declared bar
-        // (.claude/agents/sdk-elixir.md rule 9); `mix format` holds the
-        // formatting. The prod compile is what a customer's `mix deps.compile`
+        // `mix credo --strict` is the SDK's declared bar; `mix format` holds
+        // the formatting. The prod compile is what a customer's `mix deps.compile`
         // does: the suite alone ran under MIX_ENV=test, where a test-only
         // transitive dependency (TypedStruct) hid a missing one (#805).
         "mix local.hex --force && mix local.rebar --force && mix deps.get && mix format --check-formatted && mix credo --strict && mix test && MIX_ENV=prod mix compile --warnings-as-errors",
@@ -801,16 +803,36 @@ export class Confeature {
     return `${lastLine} (Tier 3 elixirTest)`;
   }
 
-  /** Build + run apps/sdk-cpp's Catch2 suite (C++17, libcurl + OpenSSL 3, FetchContent). */
+  /**
+   * Build apps/sdk-cpp (C++17, libcurl + OpenSSL 3, FetchContent), lint it,
+   * then run its Catch2 suite.
+   *
+   * The lint is the SDK's declared bar, its own `.clang-tidy` and
+   * `.clang-format` (#839): clang-tidy over every src/ and tests/ translation unit in the
+   * exported compile_commands.json (headers through `.clang-tidy`'s
+   * HeaderFilterRegex), with `--warnings-as-errors='*'` because the config's
+   * `WarningsAsErrors` is empty and a warning alone exits 0; then
+   * `clang-format --dry-run --Werror` over every .h/.cpp under include/, src/
+   * and tests/ (the source view holds tracked files only). The file list is
+   * refused when empty: clang-format given no file reads stdin and passes.
+   */
   @func()
   async cppTest(source: Directory): Promise<string> {
-    // clang-tidy and clang-format, the SDK's declared bar, are #839.
     const result = await cppToolchain(source)
       .withExec([
         "bash",
-        "-eu",
+        "-euo",
+        "pipefail",
         "-c",
-        "cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON && cmake --build /cache/cpp-build && ctest --test-dir /cache/cpp-build --output-on-failure",
+        [
+          "cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON",
+          "cmake --build /cache/cpp-build",
+          "run-clang-tidy-19 -clang-tidy-binary clang-tidy-19 -p /cache/cpp-build -quiet -warnings-as-errors='*' '/sdk-cpp/(src|tests)/'",
+          "files=$(find include src tests -name '*.h' -o -name '*.cpp')",
+          'test -n "$files"',
+          "clang-format-19 --dry-run --Werror $files",
+          "ctest --test-dir /cache/cpp-build --output-on-failure",
+        ].join(" && "),
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -822,8 +844,8 @@ export class Confeature {
   async androidTest(source: Directory): Promise<string> {
     const result = await androidSdkContainer(source)
       .withWorkdir("/work/apps/sdk-android")
-      // The SDK's declared bar (.claude/agents/sdk-android.md rule 8, #793
-      // FR-007): Android Lint, the unit tests, the release AAR build.
+      // The SDK's declared bar (#793 FR-007): Android Lint, the unit tests,
+      // the release AAR build.
       .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon lint test assembleRelease"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];

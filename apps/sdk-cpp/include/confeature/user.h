@@ -56,7 +56,7 @@ class User {
   // returning string-typed entries unchanged (no regression).
   User& withCustom(std::string key, std::string value) {
     custom_.insert_or_assign(key, value);
-    customAttributes_.insert_or_assign(key, AttributeValue{std::move(value)});
+    customAttributes_.insert_or_assign(std::move(key), AttributeValue{std::move(value)});
     return *this;
   }
   User& withCustom(std::string key, double value) {

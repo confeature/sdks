@@ -30,9 +30,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -142,7 +144,7 @@ std::string numberToCanonicalString(double value) {
     return "0";
   }
 
-  const long long k = static_cast<long long>(raw.size());
+  const auto k = static_cast<long long>(raw.size());
   const long long n = point;
 
   if (n >= k && n <= 21) {
@@ -205,7 +207,7 @@ std::unique_ptr<User> makeUser(const std::string& identifier, const json& custom
   auto user = std::make_unique<User>(identifier);
   if (custom.is_object()) {
     for (auto it = custom.begin(); it != custom.end(); ++it) {
-      const std::string key = it.key();
+      const std::string& key = it.key();
       const json& v = it.value();
       if (key == "Email") {
         user->withEmail(userAttributeValueToString(v));
@@ -297,12 +299,12 @@ json parseCell(const std::string& s) {
       }
     }
     if (allDigits) {
-      try {
-        const long long n = std::stoll(s);
-        if (std::llabs(n) <= 9007199254740991LL && std::to_string(n) == s) {
-          return json(n);
-        }
-      } catch (const std::exception&) {  // overflow → fall through to string
+      // strtoll, not stoll: an overflow (ERANGE) is an expected input that
+      // falls through to the string branch, not an exception to swallow.
+      errno = 0;
+      const long long n = std::strtoll(s.c_str(), nullptr, 10);
+      if (errno == 0 && std::llabs(n) <= 9007199254740991LL && std::to_string(n) == s) {
+        return json(n);
       }
     }
   }
@@ -327,9 +329,13 @@ json parseCell(const std::string& s) {
       }
     }
     if (looksFloat && sawDigit && (sawDot || sawExp)) {
-      try {
-        return json(std::stod(s));
-      } catch (const std::exception&) {
+      // strtod, not stod: no conversion or an out-of-range value falls
+      // through to the string branch exactly where stod would have thrown.
+      errno = 0;
+      char* end = nullptr;
+      const double d = std::strtod(s.c_str(), &end);
+      if (end != s.c_str() && errno != ERANGE) {
+        return json(d);
       }
     }
   }
@@ -364,13 +370,13 @@ bool matrixEntry(const std::string& matrix, MatrixEntry* out) {
       {"testmatrix_unicode.csv", {std::string(kJcp) + "Da6w8dBbmUeMUBhh0iEeQQ", false}},
       {"testmatrix_variationId.csv", {std::string(kPkd) + "spQnkRTIPEWVivZkWM84lQ", true}},
   };
-  for (const auto& kv : map) {
-    if (kv.first == matrix) {
-      *out = kv.second;
-      return true;
-    }
+  const auto it = std::find_if(map.begin(), map.end(),
+                               [&matrix](const auto& kv) { return kv.first == matrix; });
+  if (it == map.end()) {
+    return false;
   }
-  return false;
+  *out = it->second;
+  return true;
 }
 
 // ── config resolution ────────────────────────────────────────────────────────
@@ -717,9 +723,15 @@ std::unique_ptr<User> traceUser(const json& raw) {
     return nullptr;
   }
   json reshaped = json::object();
-  if (raw.contains("identifier")) reshaped["Identifier"] = raw["identifier"];
-  if (raw.contains("email")) reshaped["Email"] = raw["email"];
-  if (raw.contains("country")) reshaped["Country"] = raw["country"];
+  if (raw.contains("identifier")) {
+    reshaped["Identifier"] = raw["identifier"];
+  }
+  if (raw.contains("email")) {
+    reshaped["Email"] = raw["email"];
+  }
+  if (raw.contains("country")) {
+    reshaped["Country"] = raw["country"];
+  }
   if (raw.contains("custom") && raw["custom"].is_object()) {
     for (auto it = raw["custom"].begin(); it != raw["custom"].end(); ++it) {
       reshaped[it.key()] = it.value();
@@ -1321,7 +1333,7 @@ TEST_CASE("evaluationlog — byte-identical trace fidelity (#501)", "[upstream_c
     }
 
     const std::string key = t.value("key", std::string());
-    const json config = t["config"];
+    const json& config = t["config"];
     const int type = settingType(config, key);
     const json def =
         coerceDefault(t.contains("defaultValue") ? t["defaultValue"] : json(nullptr), type);
@@ -1341,8 +1353,11 @@ TEST_CASE("evaluationlog — byte-identical trace fidelity (#501)", "[upstream_c
     seen[scenario]++;
     const std::string expected = t["expectedTrace"].get<std::string>();
     if (actual != expected) {
-      failures.push_back("trace mismatch for " + scenario + "/" + key + "\n--- want ---\n" +
-                         expected + "\n--- got ---\n" + actual);
+      std::ostringstream failure;
+      failure << "trace mismatch for " << scenario << "/" << key << "\n--- want ---\n"
+              << expected << "\n--- got ---\n"
+              << actual;
+      failures.push_back(failure.str());
     }
   }
 

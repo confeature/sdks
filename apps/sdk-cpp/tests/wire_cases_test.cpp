@@ -34,10 +34,13 @@
 #include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -161,7 +164,10 @@ class MockServer {
       addr.sin_family = AF_INET;
       addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
       addr.sin_port = htons(port_);
-      ::connect(wake, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+      if (::connect(wake, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        // Not fatal: a refused wake means the accept loop already exited.
+        std::cerr << "test server: wake connect failed: " << std::strerror(errno) << '\n';
+      }
       ::close(wake);
     }
     thread_.join();
@@ -339,7 +345,7 @@ std::string buildResponse(const json& server, const std::string& body) {
     for (auto it = server["headers"].begin(); it != server["headers"].end(); ++it) {
       // libcurl already strips Content-Length on 304, but be explicit:
       // we set Content-Length explicitly below.
-      const auto name = it.key();
+      const auto& name = it.key();
       if (name == "Content-Length") {
         continue;
       }

@@ -142,86 +142,13 @@ json selectSettingValue(const json* value, int type) {
 
 // ── canonical user-attribute stringification (userAttributeValueToString) ────
 //
-// Ports `packages/sdk-shared/src/comparators.ts::userAttributeValueToString`
-// and `numberToCanonicalString` (the ECMAScript `Number.toString` shape). A
+// Ports `packages/sdk-shared/src/comparators.ts::userAttributeValueToString`;
+// numbers render through eval_log.h's `evalLogNumberToString` (the ECMAScript
+// `Number.toString` shape), the one home of that rule in the SDK. A
 // string attribute is used verbatim; a non-string custom attribute (number /
 // date_time_t / string array) is canonicalised here ConfigCat-exactly so the
 // comparators (which are string-only by contract) see the same text the
 // upstream SDK would produce.
-
-// Render a finite double exactly as ECMAScript `Number.toString`: the shortest
-// round-tripping digit sequence, fixed-point unless the magnitude warrants
-// exponential. nlohmann's dump() yields the shortest round-tripping repr; we
-// reshape it into the ECMAScript [digits, point] form. (The corpus carries no
-// NaN/Inf, but they are handled for completeness / parity with the TS port.)
-std::string numberToCanonicalString(double value) {
-  if (std::isnan(value)) {
-    return "NaN";
-  }
-  if (std::isinf(value)) {
-    return value > 0 ? "Infinity" : "-Infinity";
-  }
-  if (value == 0.0) {
-    return "0";
-  }
-
-  const std::string sign = value < 0 ? "-" : "";
-  const double av = std::fabs(value);
-  const std::string shortest = json(av).dump();
-
-  std::string mant = shortest;
-  long long expVal = 0;
-  const auto ePos = shortest.find_first_of("eE");
-  if (ePos != std::string::npos) {
-    mant = shortest.substr(0, ePos);
-    expVal = std::stoll(shortest.substr(ePos + 1));
-  }
-
-  std::string intPart;
-  std::string fracPart;
-  const auto dotPos = mant.find('.');
-  if (dotPos != std::string::npos) {
-    intPart = mant.substr(0, dotPos);
-    fracPart = mant.substr(dotPos + 1);
-  } else {
-    intPart = mant;
-  }
-
-  std::string raw = intPart + fracPart;
-  long long point = static_cast<long long>(intPart.size()) + expVal;
-
-  // Strip leading zeros (adjusting point), then trailing zeros.
-  std::size_t lead = 0;
-  while (lead + 1 < raw.size() && raw[lead] == '0') {
-    ++lead;
-    --point;
-  }
-  raw = raw.substr(lead);
-  while (raw.size() > 1 && raw.back() == '0') {
-    raw.pop_back();
-  }
-  if (raw == "0") {
-    return "0";
-  }
-
-  const long long k = static_cast<long long>(raw.size());
-  const long long n = point;
-
-  if (n >= k && n <= 21) {
-    return sign + raw + std::string(static_cast<std::size_t>(n - k), '0');
-  }
-  if (n > 0 && n <= 21) {
-    return sign + raw.substr(0, static_cast<std::size_t>(n)) + "." +
-           raw.substr(static_cast<std::size_t>(n));
-  }
-  if (n > -6 && n <= 0) {
-    return sign + "0." + std::string(static_cast<std::size_t>(-n), '0') + raw;
-  }
-  const long long e = n - 1;
-  const std::string expSign = e >= 0 ? "+" : "-";
-  const std::string mantOut = (k == 1) ? raw : raw.substr(0, 1) + "." + raw.substr(1);
-  return sign + mantOut + "e" + expSign + std::to_string(std::llabs(e));
-}
 
 // Stringify a typed `User::AttributeValue`: string verbatim; date_time_t → Unix
 // **seconds** (ConfigCat `getTime()/1000`); string array → compact
@@ -232,14 +159,14 @@ std::string userAttributeValueToString(const User::AttributeValue& value) {
     return std::get<std::string>(value);
   }
   if (std::holds_alternative<double>(value)) {
-    return numberToCanonicalString(std::get<double>(value));
+    return evalLogNumberToString(std::get<double>(value));
   }
   if (std::holds_alternative<User::date_time_t>(value)) {
     const auto tp = std::get<User::date_time_t>(value);
     const double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
                           tp.time_since_epoch())
                           .count();
-    return numberToCanonicalString(ms / 1000.0);
+    return evalLogNumberToString(ms / 1000.0);
   }
   // string array → JSON.stringify (compact, slashes + UTF-8 raw, ensure_ascii
   // off so unicode codepoints stay literal — matching JS).

@@ -5,17 +5,20 @@
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 
+#include "require_value.h"
+
 using confeature::internal::SemVer;
 
 namespace {
 
 int cmp(const std::string& a, const std::string& b) {
-  auto va = SemVer::parse(a);
-  auto vb = SemVer::parse(b);
-  REQUIRE(va.has_value());
-  REQUIRE(vb.has_value());
-  const int c = va->compare(*vb);
-  return c < 0 ? -1 : (c > 0 ? 1 : 0);
+  const auto va = confeature::tests::requireValue(SemVer::parse(a), a.c_str());
+  const auto vb = confeature::tests::requireValue(SemVer::parse(b), b.c_str());
+  const int c = va.compare(vb);
+  if (c == 0) {
+    return 0;
+  }
+  return c < 0 ? -1 : 1;
 }
 
 }  // namespace
