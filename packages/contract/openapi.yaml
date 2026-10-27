@@ -3512,6 +3512,163 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/organizations/{organizationId}/usage-and-quota:
+    get:
+      operationId: getOrganizationUsageAndQuota
+      summary: Get usage and quota
+      description: >
+        ConfigCat's `get-organization-usage-and-quota`: the Organization's
+        usage against its plan, so a client copying settings in bulk reads how
+        many it may still create with the credential that will create them
+        (the pre-flight read). The ConfigCat fields are present and typed, and
+        three of them diverge on purpose, because Confeature does not meter
+        evaluation requests (its plans have unlimited evaluations):
+        `millionRequestLimitPerMonth` and `networkTrafficGigaByteLimitPerMonth`
+        are 2147483647, the int32 maximum, meaning unlimited in a field that
+        cannot be null; `organizationStatistics`, `productStatistics` and
+        `detailedStatistics` are always empty; `hasConnectedApplication` is
+        always false. Plausible numbers would be worse than these. Confeature
+        adds `plan`, `limits` and `usage`: the figures plan enforcement
+        holds the Organization's creates to, with `null` meaning unlimited.
+        For a product, the settings it may still create are
+        `limits.flagsPerProduct` minus that product's `usage.flags` count; a
+        concurrent create can still win the race, so a create past the limit
+        is still refused with a 402. Reading this never counts against a
+        limit and never answers 402. A dashboard session, a cli-token or a
+        Public API credential reads only the organization it acts in; any other
+        `organizationId` is the generic 404, the same as one that does not
+        exist. A management token reads any Organization with the
+        `product:read` scope, ConfigCat's per-product statistics permission;
+        its creates land in the founder Organization, which plan limits do not
+        hold, so the limits it reads for another Organization understate what
+        it may create.
+      tags: [Usage&Quota]
+      parameters:
+        - in: path
+          name: organizationId
+          required: true
+          description: The identifier of the Organization.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: productId
+          required: false
+          description: >
+            The identifier of the Product to filter statistics for: the
+            per-product `usage` arrays then hold that Product only. A Product
+            outside the Organization is the generic 404.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: The Organization's usage and quota.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticsV2Model"
+        "400":
+          description: The `organizationId` or `productId` is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: No valid credential presented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "403":
+          description: The management token lacks the `product:read` scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            The Organization (or the `productId`) does not exist, or the caller
+            does not act in it. Generic envelope: the two cases are
+            indistinguishable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+  /v1/organizations/{organizationId}/organization-limitations:
+    get:
+      operationId: getOrganizationLimitations
+      summary: Get Organization limitations
+      description: >
+        ConfigCat's `get-organization-limitations`: the limits the
+        Organization's feature flag values and targeting are held to. Every
+        field shared with `FeatureFlagLimitations` is the value a v2 setting
+        value read reports for the same Organization, from the one source. A
+        count the plan leaves unlimited reports the technical maximum, the
+        largest a write can hold anyway, because every field is a required
+        integer. `maxPredefinedVariations` is 0: Confeature does not support
+        predefined variations yet. Reading this never answers 402. Credentials
+        and the 404 rule are those of `getOrganizationUsageAndQuota`.
+      tags: [Organizations]
+      parameters:
+        - in: path
+          name: organizationId
+          required: true
+          description: The identifier of the Organization.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: The Organization's limitations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationLimitations"
+        "400":
+          description: The `organizationId` is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: No valid credential presented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "403":
+          description: The management token lacks the `product:read` scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            The Organization does not exist, or the caller does not act in it.
+            Generic envelope: the two cases are indistinguishable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/invitations/{invitationId}:
     get:
       operationId: getInvitation
@@ -7400,6 +7557,297 @@ components:
           items:
             $ref: "#/components/schemas/OrganizationMemberModel"
           description: List of Organization Members.
+    StatisticsV2Model:
+      type: object
+      description: >
+        ConfigCat's `StatisticsV2Model`, the monthly usage and quota of an
+        Organization, plus Confeature's additive `plan`, `limits` and `usage`.
+        Confeature does not meter evaluation requests: the two quota fields
+        are 2147483647 (unlimited), the three statistics arrays are always
+        empty and `hasConnectedApplication` is always false.
+      required:
+        - hasConnectedApplication
+        - millionRequestLimitPerMonth
+        - networkTrafficGigaByteLimitPerMonth
+        - organizationStatistics
+        - productStatistics
+        - detailedStatistics
+        - plan
+        - limits
+        - usage
+      properties:
+        hasConnectedApplication:
+          type: boolean
+          description: >
+            Whether the Organization has a connected application. Always false:
+            Confeature does not record SDK connections.
+        millionRequestLimitPerMonth:
+          type: integer
+          format: int32
+          description: >
+            The monthly request quota in millions. Always 2147483647, the int32
+            maximum: Confeature does not meter evaluation requests.
+        networkTrafficGigaByteLimitPerMonth:
+          type: integer
+          format: int32
+          description: >
+            The monthly network traffic quota in gigabytes. Always 2147483647,
+            the int32 maximum: Confeature does not meter network traffic.
+        organizationStatistics:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationMonthlyStatisticV2Model"
+          description: The Organization's monthly statistics. Always empty.
+        productStatistics:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductMonthlyStatisticV2Model"
+          description: The Products' monthly statistics. Always empty.
+        detailedStatistics:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetailedStatisticV2Model"
+          description: The per-day, per-Config, per-Environment statistics. Always empty.
+        plan:
+          type: string
+          enum: [free, pro, team, enterprise]
+          description: The Organization's plan. Confeature extension.
+        limits:
+          $ref: "#/components/schemas/UsagePlanLimits"
+        usage:
+          $ref: "#/components/schemas/UsageCounts"
+    OrganizationMonthlyStatisticV2Model:
+      type: object
+      description: >
+        ConfigCat's aggregated monthly statistics of an Organization. Declared
+        so a generated client deserialises `organizationStatistics`; Confeature
+        never sends an item.
+      required:
+        - date
+        - millionRequestCount
+        - millionRequestLimitPerMonth
+        - networkTrafficGigaByteLimitPerMonth
+        - overLimit
+        - overNetworkTrafficLimit
+        - publicApiCallCount
+        - responseMegaBytes
+      properties:
+        date:
+          type: string
+          format: date-time
+        millionRequestCount:
+          type: number
+          format: double
+        responseMegaBytes:
+          type: number
+          format: double
+        overLimit:
+          type: boolean
+        overNetworkTrafficLimit:
+          type: boolean
+        millionRequestLimitPerMonth:
+          type: integer
+          format: int32
+        networkTrafficGigaByteLimitPerMonth:
+          type: integer
+          format: int32
+        publicApiCallCount:
+          type: integer
+          format: int64
+    ProductMonthlyStatisticV2Model:
+      type: object
+      description: >
+        ConfigCat's aggregated monthly statistics of a Product. Declared so a
+        generated client deserialises `productStatistics`; Confeature never
+        sends an item.
+      required: [date, millionRequestCount, productId, responseMegaBytes]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date-time
+        millionRequestCount:
+          type: number
+          format: double
+        responseMegaBytes:
+          type: number
+          format: double
+    DetailedStatisticV2Model:
+      type: object
+      description: >
+        ConfigCat's request and traffic usage of one Config / Environment
+        entry. Declared so a generated client deserialises
+        `detailedStatistics`; Confeature never sends an item.
+      required:
+        - configId
+        - configName
+        - date
+        - environmentId
+        - environmentName
+        - productId
+        - productName
+        - requestCount
+        - responseKiloBytes
+        - sdk
+        - sdkKey
+      properties:
+        date:
+          type: string
+          format: date-time
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        configId:
+          type: string
+          format: uuid
+        configName:
+          type: string
+        environmentId:
+          type: string
+          format: uuid
+          nullable: true
+        environmentName:
+          type: string
+        sdk:
+          type: string
+        sdkKey:
+          type: string
+        requestCount:
+          type: integer
+          format: int64
+        responseKiloBytes:
+          type: number
+          format: double
+    UsagePlanLimits:
+      type: object
+      description: >
+        The plan limits the Organization's creates and formula writes are held
+        to, as enforcement applies them: `null` is unlimited, which is every
+        limit when plan limits do not apply to the Organization (billing off on
+        the deployment, or a system Organization). Confeature extension.
+      required:
+        - products
+        - seats
+        - flagsPerProduct
+        - environmentsPerProduct
+        - segmentsPerProduct
+        - targetingRulesPerFlag
+        - percentageOptionsPerFlag
+      properties:
+        products:
+          type: integer
+          nullable: true
+          description: Products per Organization.
+        seats:
+          type: integer
+          nullable: true
+          description: Members plus pending invitations per Organization.
+        flagsPerProduct:
+          type: integer
+          nullable: true
+          description: Feature flags and settings per Product.
+        environmentsPerProduct:
+          type: integer
+          nullable: true
+          description: Environments per Product.
+        segmentsPerProduct:
+          type: integer
+          nullable: true
+          description: Segments per Product.
+        targetingRulesPerFlag:
+          type: integer
+          nullable: true
+          description: Targeting rules in one setting value.
+        percentageOptionsPerFlag:
+          type: integer
+          nullable: true
+          description: Percentage options in one targeting rule.
+    UsageCounts:
+      type: object
+      description: >
+        The live counts the limits are compared with: Organization-wide
+        products and seats, and per Product its feature flags, environments and
+        segments (every Product, with 0 when it has none). Confeature
+        extension.
+      required: [products, seats, flags, environments, segments]
+      properties:
+        products:
+          type: integer
+          minimum: 0
+        seats:
+          type: integer
+          minimum: 0
+        flags:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageProductCount"
+        environments:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageProductCount"
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageProductCount"
+    UsageProductCount:
+      type: object
+      description: One Product's count of one dimension. Confeature extension.
+      required: [productId, name, count]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    OrganizationLimitations:
+      type: object
+      description: >
+        ConfigCat's `OrganizationLimitations`: the limits the Organization's
+        feature flag values and targeting are held to. The fields shared with
+        `FeatureFlagLimitations` are its values for the same Organization.
+        `maxPredefinedVariations` is 0: predefined variations are not supported
+        yet.
+      required:
+        - maxPercentageOptionCount
+        - maxTargetingRuleCount
+        - maxComparisonValueLength
+        - maxComparisonValueListLength
+        - maxComparisonValueListItemLength
+        - maxStringFlagValueLength
+        - maxConditionPerTargetingRuleCount
+        - maxPredefinedVariations
+      properties:
+        maxPercentageOptionCount:
+          type: integer
+          format: int32
+        maxTargetingRuleCount:
+          type: integer
+          format: int32
+        maxComparisonValueLength:
+          type: integer
+          format: int32
+        maxComparisonValueListLength:
+          type: integer
+          format: int32
+        maxComparisonValueListItemLength:
+          type: integer
+          format: int32
+        maxStringFlagValueLength:
+          type: integer
+          format: int32
+        maxConditionPerTargetingRuleCount:
+          type: integer
+          format: int32
+        maxPredefinedVariations:
+          type: integer
+          format: int32
     MeModel:
       type: object
       description: >
@@ -8147,12 +8595,17 @@ tags:
     description: >
       Multi-tenant organization surface (ConfigCat parity). Organizations
       are the canonical unit of ownership across the back-office data plane.
-      v1 ships three endpoints: list orgs the user belongs to, list
-      members of a specific org, and read the active org via `/v1/me`.
+      It lists the orgs the user belongs to, lists the members of one org,
+      reads the active org via `/v1/me`, and reads an org's limitations.
       Cross-org access on `{organizationId}` routes returns 404 generic —
       no existence enumeration. Schema names mirror ConfigCat's
       `OrganizationModel`, `OrganizationAdminModel`,
       `OrganizationMemberModel`, `OrganizationMembersModel` byte-for-byte.
+  - name: Usage&Quota
+    description: >
+      ConfigCat's usage and quota read: an Organization's usage against its
+      plan's limits. Confeature meters capacity (products, seats, flags,
+      environments, segments, targeting counts), never evaluation requests.
   - name: Guardian
     description: >
       Release Guardian — a Confeature differentiator with

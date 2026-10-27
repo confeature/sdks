@@ -951,6 +951,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/organizations/{organizationId}/usage-and-quota": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get usage and quota
+     * @description ConfigCat's `get-organization-usage-and-quota`: the Organization's usage against its plan, so a client copying settings in bulk reads how many it may still create with the credential that will create them (the pre-flight read). The ConfigCat fields are present and typed, and three of them diverge on purpose, because Confeature does not meter evaluation requests (its plans have unlimited evaluations): `millionRequestLimitPerMonth` and `networkTrafficGigaByteLimitPerMonth` are 2147483647, the int32 maximum, meaning unlimited in a field that cannot be null; `organizationStatistics`, `productStatistics` and `detailedStatistics` are always empty; `hasConnectedApplication` is always false. Plausible numbers would be worse than these. Confeature adds `plan`, `limits` and `usage`: the figures plan enforcement holds the Organization's creates to, with `null` meaning unlimited. For a product, the settings it may still create are `limits.flagsPerProduct` minus that product's `usage.flags` count; a concurrent create can still win the race, so a create past the limit is still refused with a 402. Reading this never counts against a limit and never answers 402. A dashboard session, a cli-token or a Public API credential reads only the organization it acts in; any other `organizationId` is the generic 404, the same as one that does not exist. A management token reads any Organization with the `product:read` scope, ConfigCat's per-product statistics permission; its creates land in the founder Organization, which plan limits do not hold, so the limits it reads for another Organization understate what it may create.
+     */
+    get: operations["getOrganizationUsageAndQuota"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/organizations/{organizationId}/organization-limitations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Organization limitations
+     * @description ConfigCat's `get-organization-limitations`: the limits the Organization's feature flag values and targeting are held to. Every field shared with `FeatureFlagLimitations` is the value a v2 setting value read reports for the same Organization, from the one source. A count the plan leaves unlimited reports the technical maximum, the largest a write can hold anyway, because every field is a required integer. `maxPredefinedVariations` is 0: Confeature does not support predefined variations yet. Reading this never answers 402. Credentials and the 404 rule are those of `getOrganizationUsageAndQuota`.
+     */
+    get: operations["getOrganizationLimitations"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/invitations/{invitationId}": {
     parameters: {
       query?: never;
@@ -2403,6 +2443,133 @@ export interface components {
       billingManagers: components["schemas"]["OrganizationAdminModel"][];
       /** @description List of Organization Members. */
       members: components["schemas"]["OrganizationMemberModel"][];
+    };
+    /** @description ConfigCat's `StatisticsV2Model`, the monthly usage and quota of an Organization, plus Confeature's additive `plan`, `limits` and `usage`. Confeature does not meter evaluation requests: the two quota fields are 2147483647 (unlimited), the three statistics arrays are always empty and `hasConnectedApplication` is always false. */
+    StatisticsV2Model: {
+      /** @description Whether the Organization has a connected application. Always false: Confeature does not record SDK connections. */
+      hasConnectedApplication: boolean;
+      /**
+       * Format: int32
+       * @description The monthly request quota in millions. Always 2147483647, the int32 maximum: Confeature does not meter evaluation requests.
+       */
+      millionRequestLimitPerMonth: number;
+      /**
+       * Format: int32
+       * @description The monthly network traffic quota in gigabytes. Always 2147483647, the int32 maximum: Confeature does not meter network traffic.
+       */
+      networkTrafficGigaByteLimitPerMonth: number;
+      /** @description The Organization's monthly statistics. Always empty. */
+      organizationStatistics: components["schemas"]["OrganizationMonthlyStatisticV2Model"][];
+      /** @description The Products' monthly statistics. Always empty. */
+      productStatistics: components["schemas"]["ProductMonthlyStatisticV2Model"][];
+      /** @description The per-day, per-Config, per-Environment statistics. Always empty. */
+      detailedStatistics: components["schemas"]["DetailedStatisticV2Model"][];
+      /**
+       * @description The Organization's plan. Confeature extension.
+       * @enum {string}
+       */
+      plan: "free" | "pro" | "team" | "enterprise";
+      limits: components["schemas"]["UsagePlanLimits"];
+      usage: components["schemas"]["UsageCounts"];
+    };
+    /** @description ConfigCat's aggregated monthly statistics of an Organization. Declared so a generated client deserialises `organizationStatistics`; Confeature never sends an item. */
+    OrganizationMonthlyStatisticV2Model: {
+      /** Format: date-time */
+      date: string;
+      /** Format: double */
+      millionRequestCount: number;
+      /** Format: double */
+      responseMegaBytes: number;
+      overLimit: boolean;
+      overNetworkTrafficLimit: boolean;
+      /** Format: int32 */
+      millionRequestLimitPerMonth: number;
+      /** Format: int32 */
+      networkTrafficGigaByteLimitPerMonth: number;
+      /** Format: int64 */
+      publicApiCallCount: number;
+    };
+    /** @description ConfigCat's aggregated monthly statistics of a Product. Declared so a generated client deserialises `productStatistics`; Confeature never sends an item. */
+    ProductMonthlyStatisticV2Model: {
+      /** Format: uuid */
+      productId: string;
+      /** Format: date-time */
+      date: string;
+      /** Format: double */
+      millionRequestCount: number;
+      /** Format: double */
+      responseMegaBytes: number;
+    };
+    /** @description ConfigCat's request and traffic usage of one Config / Environment entry. Declared so a generated client deserialises `detailedStatistics`; Confeature never sends an item. */
+    DetailedStatisticV2Model: {
+      /** Format: date-time */
+      date: string;
+      /** Format: uuid */
+      productId: string;
+      productName: string;
+      /** Format: uuid */
+      configId: string;
+      configName: string;
+      /** Format: uuid */
+      environmentId: string | null;
+      environmentName: string;
+      sdk: string;
+      sdkKey: string;
+      /** Format: int64 */
+      requestCount: number;
+      /** Format: double */
+      responseKiloBytes: number;
+    };
+    /** @description The plan limits the Organization's creates and formula writes are held to, as enforcement applies them: `null` is unlimited, which is every limit when plan limits do not apply to the Organization (billing off on the deployment, or a system Organization). Confeature extension. */
+    UsagePlanLimits: {
+      /** @description Products per Organization. */
+      products: number | null;
+      /** @description Members plus pending invitations per Organization. */
+      seats: number | null;
+      /** @description Feature flags and settings per Product. */
+      flagsPerProduct: number | null;
+      /** @description Environments per Product. */
+      environmentsPerProduct: number | null;
+      /** @description Segments per Product. */
+      segmentsPerProduct: number | null;
+      /** @description Targeting rules in one setting value. */
+      targetingRulesPerFlag: number | null;
+      /** @description Percentage options in one targeting rule. */
+      percentageOptionsPerFlag: number | null;
+    };
+    /** @description The live counts the limits are compared with: Organization-wide products and seats, and per Product its feature flags, environments and segments (every Product, with 0 when it has none). Confeature extension. */
+    UsageCounts: {
+      products: number;
+      seats: number;
+      flags: components["schemas"]["UsageProductCount"][];
+      environments: components["schemas"]["UsageProductCount"][];
+      segments: components["schemas"]["UsageProductCount"][];
+    };
+    /** @description One Product's count of one dimension. Confeature extension. */
+    UsageProductCount: {
+      /** Format: uuid */
+      productId: string;
+      name: string;
+      count: number;
+    };
+    /** @description ConfigCat's `OrganizationLimitations`: the limits the Organization's feature flag values and targeting are held to. The fields shared with `FeatureFlagLimitations` are its values for the same Organization. `maxPredefinedVariations` is 0: predefined variations are not supported yet. */
+    OrganizationLimitations: {
+      /** Format: int32 */
+      maxPercentageOptionCount: number;
+      /** Format: int32 */
+      maxTargetingRuleCount: number;
+      /** Format: int32 */
+      maxComparisonValueLength: number;
+      /** Format: int32 */
+      maxComparisonValueListLength: number;
+      /** Format: int32 */
+      maxComparisonValueListItemLength: number;
+      /** Format: int32 */
+      maxStringFlagValueLength: number;
+      /** Format: int32 */
+      maxConditionPerTargetingRuleCount: number;
+      /** Format: int32 */
+      maxPredefinedVariations: number;
     };
     /** @description Response shape for GET /v1/me. ConfigCat parity (me-model.ts). Returns ONLY identity — org membership is discovered via GET /v1/organizations. Confeature v1 derives `fullName` from the user's email local part until a profile-editing feature lands. */
     MeModel: {
@@ -6190,6 +6357,131 @@ export interface operations {
         };
       };
       /** @description Organization not found OR the authenticated user is not a member. Generic envelope — no enumeration of which case triggered the 404. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  getOrganizationUsageAndQuota: {
+    parameters: {
+      query?: {
+        /** @description The identifier of the Product to filter statistics for: the per-product `usage` arrays then hold that Product only. A Product outside the Organization is the generic 404. */
+        productId?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The identifier of the Organization. */
+        organizationId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Organization's usage and quota. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatisticsV2Model"];
+        };
+      };
+      /** @description The `organizationId` or `productId` is not a UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid credential presented. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthError"];
+        };
+      };
+      /** @description The management token lacks the `product:read` scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The Organization (or the `productId`) does not exist, or the caller does not act in it. Generic envelope: the two cases are indistinguishable. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  getOrganizationLimitations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Organization. */
+        organizationId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Organization's limitations. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OrganizationLimitations"];
+        };
+      };
+      /** @description The `organizationId` is not a UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid credential presented. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthError"];
+        };
+      };
+      /** @description The management token lacks the `product:read` scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The Organization does not exist, or the caller does not act in it. Generic envelope: the two cases are indistinguishable. */
       404: {
         headers: {
           [name: string]: unknown;
