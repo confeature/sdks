@@ -91,7 +91,14 @@ export async function startHarness(config: HarnessConfig): Promise<HarnessHandle
     await Promise.race([teardown, deadline]);
   };
 
-  return { url: proxy.url, stop, served: () => state.served };
+  // What the boot seed declares a suite must exercise: every key it seeds.
+  const declared = (config.initialSeed?.keys ?? []).map((k) => k.sdkKey);
+  return {
+    url: proxy.url,
+    stop,
+    served: () => state.served,
+    unserved: () => state.unserved(declared),
+  };
 }
 
 /**

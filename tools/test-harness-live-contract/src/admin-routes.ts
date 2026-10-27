@@ -58,16 +58,29 @@ export class AdminState {
    * that exited 0 without asking the harness anything (#793 review).
    */
   served = 0;
+  /**
+   * The same count per seeded key, never reset either: exec mode refuses a
+   * suite that left a key its seed declares unasked (#926 A1), which the
+   * request log cannot tell, since a replacing seed clears it and it is
+   * capped per key.
+   */
+  readonly servedByKey = new Map<string, number>();
 
   recordRequest(sdkKey: string, request: RecordedRequest): void {
     if (!this.keys.has(sdkKey)) return;
     this.served++;
+    this.servedByKey.set(sdkKey, (this.servedByKey.get(sdkKey) ?? 0) + 1);
     const log = this.requests.get(sdkKey) ?? [];
     log.push(request);
     // Bounded: a long-lived CLI session must not grow without limit. A runner
     // reads the most recent requests, so the oldest are the ones dropped.
     if (log.length > MAX_REQUESTS_PER_KEY) log.splice(0, log.length - MAX_REQUESTS_PER_KEY);
     this.requests.set(sdkKey, log);
+  }
+
+  /** The keys of `declared` no config request has asked for since boot, in order. */
+  unserved(declared: readonly string[]): string[] {
+    return declared.filter((k) => (this.servedByKey.get(k) ?? 0) === 0);
   }
 
   getFault(sdkKey: string): FaultMarker | undefined {
