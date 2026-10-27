@@ -3052,11 +3052,13 @@ paths:
               $ref: "#/components/schemas/CreateSettingRequest"
       responses:
         "201":
-          description: Setting created.
+          description: >
+            Setting created, as ConfigCat's `SettingModel` (#937): the same
+            body the settings list carries for it.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Setting"
+                $ref: "#/components/schemas/SettingModel"
         "400":
           description: >
             Invalid request body: `settingType` and `type` disagree, an initial
@@ -3195,11 +3197,13 @@ paths:
           description: Setting key.
       responses:
         "200":
-          description: Setting.
+          description: >
+            The setting, as ConfigCat's `SettingModel` (#937): the same body
+            the settings list carries for it.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Setting"
+                $ref: "#/components/schemas/SettingModel"
         "401":
           headers:
             WWW-Authenticate:
@@ -3259,11 +3263,13 @@ paths:
               $ref: "#/components/schemas/UpdateSettingRequest"
       responses:
         "200":
-          description: Setting updated.
+          description: >
+            The updated setting, as ConfigCat's `SettingModel` (#937): the
+            same body the settings list carries for it.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Setting"
+                $ref: "#/components/schemas/SettingModel"
         "400":
           description: Invalid request body.
           content:
@@ -6272,66 +6278,6 @@ components:
         `SettingType` enum (configcat-publicapi-node-client/model/setting-type.ts)
         — exactly the four members `boolean`, `string`, `int`, `double`, in that
         order, serialised as a lowercase string.
-    Setting:
-      type: object
-      description: >
-        A Setting describes a feature flag's identity and shape only — it
-        carries NO value. Aligned 1:1 with ConfigCat's `SettingModel` /
-        `SettingDataV2Model`, which have no value field; a setting's value is
-        per-environment, read and written via the per-environment value
-        endpoint (`SettingValue`).
-        Carries the human-readable `name` (required) and optional `hint`
-        (ConfigCat `SettingModel.name`/`SettingModel.hint`); both are
-        management-plane only and NOT part of the SDK config delivery payload.
-      required:
-        - settingId
-        - config_id
-        - key
-        - name
-        - type
-        - created_at
-        - updated_at
-      properties:
-        settingId:
-          type: integer
-          format: int64
-          minimum: 1
-          description: >
-            The stable numeric identity of the Setting. Server-assigned,
-            monotonically allocated, never reused. Aligned 1:1 with ConfigCat's
-            `SettingModel.settingId`
-            (configcat-publicapi-node-client/model/setting-model.ts).
-            Output-only — the server assigns it; it is NOT accepted
-            on `CreateSettingRequest`.
-        config_id:
-          type: string
-          format: uuid
-        key:
-          $ref: "#/components/schemas/SettingKey"
-        name:
-          type: string
-          minLength: 1
-          maxLength: 255
-          description: >
-            Human-readable display label for the feature flag. Aligned 1:1 with
-            ConfigCat's `SettingModel.name`. Management-plane only — NOT part of
-            the SDK config delivery (`config_v6`) payload. For settings created
-            before this field existed, the value is backfilled to the setting's
-            `key`.
-        hint:
-          type: string
-          maxLength: 1000
-          nullable: true
-          description: >
-            Optional operator-facing description/hint. Aligned 1:1 with
-            ConfigCat's `SettingModel.hint`. Management-plane only; null when
-            unset.
-        type:
-          $ref: "#/components/schemas/SettingType"
-        created_at:
-          type: number
-        updated_at:
-          type: number
     CreateSettingRequest:
       type: object
       description: >
@@ -6459,8 +6405,9 @@ components:
     SettingModel:
       type: object
       description: >
-        A Feature Flag or Setting in a config list. Aligned 1:1 with
-        ConfigCat's `SettingModel` (get-settings). It carries no value: a
+        A Feature Flag or Setting, as the config's settings list and the
+        per-key routes (get one, create, update) answer it (#937). Aligned 1:1
+        with ConfigCat's `SettingModel` (get-settings). It carries no value: a
         value is per-environment (`SettingFormulaModel`). `tags` and
         `predefinedVariations` are always empty in Confeature.
       required:

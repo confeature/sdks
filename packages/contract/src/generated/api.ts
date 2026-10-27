@@ -1887,24 +1887,6 @@ export interface components {
      * @enum {string}
      */
     SettingType: "boolean" | "string" | "int" | "double";
-    /** @description A Setting describes a feature flag's identity and shape only — it carries NO value. Aligned 1:1 with ConfigCat's `SettingModel` / `SettingDataV2Model`, which have no value field; a setting's value is per-environment, read and written via the per-environment value endpoint (`SettingValue`). Carries the human-readable `name` (required) and optional `hint` (ConfigCat `SettingModel.name`/`SettingModel.hint`); both are management-plane only and NOT part of the SDK config delivery payload. */
-    Setting: {
-      /**
-       * Format: int64
-       * @description The stable numeric identity of the Setting. Server-assigned, monotonically allocated, never reused. Aligned 1:1 with ConfigCat's `SettingModel.settingId` (configcat-publicapi-node-client/model/setting-model.ts). Output-only — the server assigns it; it is NOT accepted on `CreateSettingRequest`.
-       */
-      settingId: number;
-      /** Format: uuid */
-      config_id: string;
-      key: components["schemas"]["SettingKey"];
-      /** @description Human-readable display label for the feature flag. Aligned 1:1 with ConfigCat's `SettingModel.name`. Management-plane only — NOT part of the SDK config delivery (`config_v6`) payload. For settings created before this field existed, the value is backfilled to the setting's `key`. */
-      name: string;
-      /** @description Optional operator-facing description/hint. Aligned 1:1 with ConfigCat's `SettingModel.hint`. Management-plane only; null when unset. */
-      hint?: string | null;
-      type: components["schemas"]["SettingType"];
-      created_at: number;
-      updated_at: number;
-    };
     /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags`, `predefinedVariations`, `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
     CreateSettingRequest: {
       key: components["schemas"]["SettingKey"];
@@ -1950,7 +1932,7 @@ export interface components {
       /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
       reason?: string;
     };
-    /** @description A Feature Flag or Setting in a config list. Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` and `predefinedVariations` are always empty in Confeature. */
+    /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` and `predefinedVariations` are always empty in Confeature. */
     SettingModel: {
       /**
        * Format: int32
@@ -6191,13 +6173,13 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Setting created. */
+      /** @description Setting created, as ConfigCat's `SettingModel` (#937): the same body the settings list carries for it. */
       201: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Setting"];
+          "application/json": components["schemas"]["SettingModel"];
         };
       };
       /** @description Invalid request body: `settingType` and `type` disagree, an initial value does not fit the setting type, an environment is named twice, a field Confeature does not support yet is not empty, or a change note is required. */
@@ -6274,13 +6256,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Setting. */
+      /** @description The setting, as ConfigCat's `SettingModel` (#937): the same body the settings list carries for it. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Setting"];
+          "application/json": components["schemas"]["SettingModel"];
         };
       };
       /** @description Missing or invalid bearer token. */
@@ -6397,13 +6379,13 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Setting updated. */
+      /** @description The updated setting, as ConfigCat's `SettingModel` (#937): the same body the settings list carries for it. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Setting"];
+          "application/json": components["schemas"]["SettingModel"];
         };
       };
       /** @description Invalid request body. */
