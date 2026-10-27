@@ -44,6 +44,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/auth/signup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create an account and sign in
+     * @description Confeature-original endpoint: ConfigCat's public API has no account creation (its sign-up is a dashboard flow), so no parity drift exists to violate. Creates the user in a new private organization and, on success, issues the same session cookie as /v1/auth/login. Rate limited per client IP. Every failure (an email already registered, the rate limit, a storage error) answers the SAME 409 body, and a malformed body answers that body with a 400, so the response never reveals whether an account exists.
+     */
+    post: operations["authSignup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/auth/logout": {
     parameters: {
       query?: never;
@@ -1383,6 +1403,11 @@ export interface components {
     ConfigV6: {
       [key: string]: unknown;
     };
+    /** @description Optional body of a write that otherwise takes none (publish, and the environment, config and setting deletes): it carries only the change note. A request with no body, or a body that is not JSON, carries no note. */
+    ChangeNoteRequest: {
+      /** @description The change note for the audit log. Required (400 reason_required) when the product, or for an environment-scoped change the environment, requires a reason for changes. */
+      reason?: string;
+    };
     /** @description Uniform error envelope returned by 4xx responses on /v1/* routes. `error` is a stable machine-readable token (e.g., `not_found`, `conflict`, `forbidden`, `unauthorized`); `message` is a human-readable explanation. */
     Error: {
       error: string;
@@ -1416,6 +1441,20 @@ export interface components {
       invite_token: string;
       /** @description New user's password. Same minimum-strength rule as /v1/auth/bootstrap and /v1/auth/login. Hashed with argon2id server-side; never logged in plaintext. */
       password: string;
+    };
+    /** @description Request body for POST /v1/auth/signup. */
+    SignupRequest: {
+      /** Format: email */
+      email: string;
+      /** @description The new account's password. Same rule as /v1/auth/login. Hashed with argon2id server-side; never logged in plaintext. */
+      password: string;
+    };
+    /** @description The one body every POST /v1/auth/signup failure answers, whatever its cause. */
+    SignupError: {
+      /** @enum {string} */
+      error: "signup_unavailable";
+      /** @description One constant, user-facing message for every failure. */
+      message: string;
     };
     /** @description Request body for POST /v1/auth/sso/{provider}/start. All fields are optional in v0.1. */
     SsoStartRequest: {
@@ -1603,7 +1642,7 @@ export interface components {
       description: string | null;
       /** @description The order of the Product represented on the dashboard. Determined from an ascending sequence of integers. */
       order: number;
-      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings within a Product are saved. Always false in Confeature v1 — carried for wire parity; populated when the product-preferences surface ships. */
+      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings within a Product are saved. Set with PATCH /v1/products/{productId} (a Confeature addition; ConfigCat sets it through POST /v1/products/{productId}/preferences). */
       reasonRequired: boolean;
       /** @description Whether changes need an approval. Always false: Confeature has no approval flow. Carried for wire parity with ConfigCat. */
       approveRequired: boolean;
@@ -1623,6 +1662,10 @@ export interface components {
       description?: string | null;
       /** @description The order of the Product represented on the dashboard. */
       order?: number | null;
+      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings within the Product are saved. A Confeature addition: ConfigCat sets this flag through POST /v1/products/{productId}/preferences (reasonRequired), not on the product update body. */
+      reasonRequired?: boolean;
+      /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     /**
      * @description The evaluation version of a Config. Aligned 1:1 with ConfigCat's `EvaluationVersion` (configcat-publicapi-node-client/model/ evaluation-version.ts). Confeature only ever produces `v2`; `v1` is carried for wire parity.
@@ -1659,6 +1702,8 @@ export interface components {
       order?: number | null;
       /** @description The evaluation version of the Config. When omitted, defaults to `v2`. */
       evaluationVersion?: components["schemas"]["EvaluationVersion"];
+      /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     UpdateConfigRequest: {
       /** @description The name of the Config. */
@@ -1667,6 +1712,8 @@ export interface components {
       description?: string | null;
       /** @description The order of the Config represented on the dashboard. */
       order?: number | null;
+      /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     /** @description Stable lookup key for a setting inside a config. */
     SettingKey: string;
@@ -1720,6 +1767,8 @@ export interface components {
        * @description Not supported yet (#818); send `initialValues`. Accepted only when null.
        */
       settingIdToInitFrom?: number | null;
+      /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     /** @description ConfigCat's `InitialValue` (#938): a new setting's value in one environment of the config's product. `value` must fit the setting type. Unlike ConfigCat's schema, `environmentId` is required: a value with no environment names nowhere to write it. */
     InitialValue: {
@@ -1733,6 +1782,8 @@ export interface components {
       name?: string;
       /** @description Optional operator-facing hint (ConfigCat SettingModel.hint). */
       hint?: string | null;
+      /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     /** @description A Feature Flag or Setting in a config list. Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` and `predefinedVariations` are always empty in Confeature. */
     SettingModel: {
@@ -2177,7 +2228,7 @@ export interface components {
       description: string | null;
       /** @description The order of the Environment represented on the dashboard. Determined from an ascending sequence of integers. */
       order: number;
-      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings are saved within this Environment. Always false in Confeature v1 — carried for wire parity. */
+      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings are saved within this Environment. Set with PATCH /v1/environments/{environmentId} (a Confeature addition; ConfigCat sets it through POST /v1/products/{productId}/preferences). */
       reasonRequired: boolean;
       /** @description Whether changes need an approval. Always false: Confeature has no approval flow. Carried for wire parity with ConfigCat. */
       approveRequired: boolean;
@@ -2191,6 +2242,8 @@ export interface components {
       description?: string | null;
       /** @description The order of the Environment represented on the dashboard. When omitted, the next integer in the product's sequence is assigned. */
       order?: number | null;
+      /** @description The change note for the audit log. Required (400 reason_required) when the owning product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     UpdateEnvironmentModel: {
       /** @description The name of the Environment. */
@@ -2201,6 +2254,10 @@ export interface components {
       description?: string | null;
       /** @description The order of the Environment represented on the dashboard. */
       order?: number | null;
+      /** @description Determines whether a mandatory reason must be given every time the Feature Flags or Settings are saved within this Environment. A Confeature addition: ConfigCat sets this flag through POST /v1/products/{productId}/preferences (reasonRequiredEnvironments), not on the environment update body. */
+      reasonRequired?: boolean;
+      /** @description The change note for the audit log. Required (400 reason_required) when the environment or its product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     /** @description Details of an Invitation. Schema aligned 1:1 with ConfigCat's `InvitationModel` (configcat-publicapi-node-client/model/ invitation-model.ts). */
     InvitationModel: {
@@ -2241,6 +2298,8 @@ export interface components {
       /** @description Reserved for percentage rollouts. MUST be an empty array in phase 1; non-empty values return 400 (segments / targeting are not yet supported). */
       rolloutPercentageItems: Record<string, never>[];
       settingType: components["schemas"]["SettingType"];
+      /** @description The change note for the audit log. Required (400 reason_required) when the environment or its product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string;
     };
     PublishResponse: {
       /** Format: uuid */
@@ -2857,6 +2916,49 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
+        };
+      };
+    };
+  };
+  authSignup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignupRequest"];
+      };
+    };
+    responses: {
+      /** @description Account created; session cookie set in headers. */
+      201: {
+        headers: {
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["User"];
+        };
+      };
+      /** @description Malformed request body. Same body as the 409. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignupError"];
+        };
+      };
+      /** @description Sign-up could not complete: a duplicate email, the rate limit, or a transient failure, indistinguishable on purpose. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignupError"];
         };
       };
     };
@@ -4080,7 +4182,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ChangeNoteRequest"];
+      };
+    };
     responses: {
       /** @description Environment deleted (cascades to setting_values and sdk_keys). */
       204: {
@@ -4088,6 +4194,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description A change note (reason) is required for this change. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
       };
       /** @description Missing or invalid bearer token. */
       401: {
@@ -5102,7 +5217,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ChangeNoteRequest"];
+      };
+    };
     responses: {
       /** @description Config deleted (cascades to settings and sdk-keys). */
       204: {
@@ -5110,6 +5229,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description A change note (reason) is required for this change. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
       };
       /** @description Missing or invalid bearer token. */
       401: {
@@ -5403,7 +5531,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ChangeNoteRequest"];
+      };
+    };
     responses: {
       /** @description Setting deleted. */
       204: {
@@ -5714,7 +5846,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ChangeNoteRequest"];
+      };
+    };
     responses: {
       /** @description Config state projected to KV. */
       200: {
@@ -5723,6 +5859,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PublishResponse"];
+        };
+      };
+      /** @description A change note (reason) is required for this change. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
       /** @description Missing or invalid bearer token. */

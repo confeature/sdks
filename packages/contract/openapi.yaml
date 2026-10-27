@@ -132,6 +132,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+  /v1/auth/signup:
+    post:
+      operationId: authSignup
+      summary: Create an account and sign in
+      description: >
+        Confeature-original endpoint: ConfigCat's public API has no account
+        creation (its sign-up is a dashboard flow), so no parity drift exists
+        to violate. Creates the user in a new private organization and, on
+        success, issues the same session cookie as /v1/auth/login. Rate
+        limited per client IP. Every failure (an email already registered,
+        the rate limit, a storage error) answers the SAME 409 body, and a
+        malformed body answers that body with a 400, so the response never
+        reveals whether an account exists.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupRequest"
+      responses:
+        "201":
+          description: Account created; session cookie set in headers.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Malformed request body. Same body as the 409.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignupError"
+        "409":
+          description: >
+            Sign-up could not complete: a duplicate email, the rate limit, or
+            a transient failure, indistinguishable on purpose.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignupError"
   /v1/auth/logout:
     post:
       operationId: authLogout
@@ -1477,9 +1523,21 @@ paths:
             type: string
             format: uuid
           description: Environment id (UUID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNoteRequest"
       responses:
         "204":
           description: Environment deleted (cascades to setting_values and sdk_keys).
+        "400":
+          description: A change note (reason) is required for this change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid bearer token.
           content:
@@ -2412,9 +2470,21 @@ paths:
             type: string
             format: uuid
           description: Config id (UUID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNoteRequest"
       responses:
         "204":
           description: Config deleted (cascades to settings and sdk-keys).
+        "400":
+          description: A change note (reason) is required for this change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid bearer token.
           content:
@@ -2725,6 +2795,12 @@ paths:
           schema:
             $ref: "#/components/schemas/SettingKey"
           description: Setting key.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNoteRequest"
       responses:
         "204":
           description: Setting deleted.
@@ -3001,6 +3077,12 @@ paths:
             type: string
             format: uuid
           description: Config id (UUID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNoteRequest"
       responses:
         "200":
           description: Config state projected to KV.
@@ -3008,6 +3090,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublishResponse"
+        "400":
+          description: A change note (reason) is required for this change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid bearer token.
           content:
@@ -4404,6 +4492,21 @@ components:
         object to preserve byte-for-byte forwarding from KV. SDKs are
         responsible for parsing per ConfigCat's documented format.
       additionalProperties: true
+    ChangeNoteRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product, or for an environment-scoped change the
+            environment, requires a reason for changes.
+      description: >
+        Optional body of a write that otherwise takes none (publish, and the
+        environment, config and setting deletes): it carries only the change
+        note. A request with no body, or a body that is not JSON, carries no
+        note.
     Error:
       type: object
       description: >
@@ -4506,6 +4609,37 @@ components:
         observed on the wire exactly twice in its lifetime (here and in
         the matching 201 from /v1/users/invite); the password is
         observed once (here) and is hashed before persistence.
+    SignupRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 5
+          maxLength: 254
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          writeOnly: true
+          description: >
+            The new account's password. Same rule as /v1/auth/login. Hashed
+            with argon2id server-side; never logged in plaintext.
+      description: Request body for POST /v1/auth/signup.
+    SignupError:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: ["signup_unavailable"]
+        message:
+          type: string
+          description: One constant, user-facing message for every failure.
+      description: >
+        The one body every POST /v1/auth/signup failure answers, whatever
+        its cause.
     SsoStartRequest:
       type: object
       properties:
@@ -4958,9 +5092,9 @@ components:
           type: boolean
           description: >
             Determines whether a mandatory reason must be given every time the
-            Feature Flags or Settings within a Product are saved. Always false
-            in Confeature v1 — carried for wire parity; populated when the
-            product-preferences surface ships.
+            Feature Flags or Settings within a Product are saved. Set with
+            PATCH /v1/products/{productId} (a Confeature addition; ConfigCat
+            sets it through POST /v1/products/{productId}/preferences).
         approveRequired:
           type: boolean
           description: >
@@ -5004,6 +5138,21 @@ components:
           type: integer
           nullable: true
           description: The order of the Product represented on the dashboard.
+        reasonRequired:
+          type: boolean
+          description: >
+            Determines whether a mandatory reason must be given every time the
+            Feature Flags or Settings within the Product are saved. A
+            Confeature addition: ConfigCat sets this flag through
+            POST /v1/products/{productId}/preferences (reasonRequired), not
+            on the product update body.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product requires a reason for changes. A Confeature
+            addition: a ConfigCat client omits it.
     EvaluationVersion:
       type: string
       description: >
@@ -5083,6 +5232,13 @@ components:
           description: >
             The evaluation version of the Config. When omitted, defaults to
             `v2`.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product requires a reason for changes. A Confeature
+            addition: a ConfigCat client omits it.
     UpdateConfigRequest:
       type: object
       properties:
@@ -5100,6 +5256,13 @@ components:
           type: integer
           nullable: true
           description: The order of the Config represented on the dashboard.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product requires a reason for changes. A Confeature
+            addition: a ConfigCat client omits it.
     SettingKey:
       type: string
       pattern: "^[A-Za-z0-9_-]{1,255}$"
@@ -5242,6 +5405,13 @@ components:
           format: int32
           nullable: true
           description: Not supported yet (#818); send `initialValues`. Accepted only when null.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product requires a reason for changes. A Confeature
+            addition: a ConfigCat client omits it.
     InitialValue:
       type: object
       description: >
@@ -5282,6 +5452,13 @@ components:
           maxLength: 1000
           nullable: true
           description: Optional operator-facing hint (ConfigCat SettingModel.hint).
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the product requires a reason for changes. A Confeature
+            addition: a ConfigCat client omits it.
     SettingModel:
       type: object
       description: >
@@ -6384,7 +6561,9 @@ components:
           description: >
             Determines whether a mandatory reason must be given every time
             the Feature Flags or Settings are saved within this Environment.
-            Always false in Confeature v1 — carried for wire parity.
+            Set with PATCH /v1/environments/{environmentId} (a Confeature
+            addition; ConfigCat sets it through
+            POST /v1/products/{productId}/preferences).
         approveRequired:
           type: boolean
           description: >
@@ -6414,6 +6593,13 @@ components:
           description: >
             The order of the Environment represented on the dashboard. When
             omitted, the next integer in the product's sequence is assigned.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the owning product requires a reason for changes. A
+            Confeature addition: a ConfigCat client omits it.
     UpdateEnvironmentModel:
       type: object
       properties:
@@ -6435,6 +6621,21 @@ components:
           type: integer
           nullable: true
           description: The order of the Environment represented on the dashboard.
+        reasonRequired:
+          type: boolean
+          description: >
+            Determines whether a mandatory reason must be given every time the
+            Feature Flags or Settings are saved within this Environment. A
+            Confeature addition: ConfigCat sets this flag through
+            POST /v1/products/{productId}/preferences
+            (reasonRequiredEnvironments), not on the environment update body.
+        reason:
+          type: string
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the environment or its product requires a reason for
+            changes. A Confeature addition: a ConfigCat client omits it.
     InvitationModel:
       type: object
       description: >
@@ -6546,6 +6747,14 @@ components:
             type: object
         settingType:
           $ref: "#/components/schemas/SettingType"
+        reason:
+          type: string
+          maxLength: 1000
+          writeOnly: true
+          description: >
+            The change note for the audit log. Required (400 reason_required)
+            when the environment or its product requires a reason for
+            changes. A Confeature addition: a ConfigCat client omits it.
     PublishResponse:
       type: object
       required:
