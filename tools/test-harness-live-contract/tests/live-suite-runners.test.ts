@@ -14,14 +14,29 @@
  * manifest's structure (a runner present, a liveSuite only where a Dagger leg
  * runs it, never beside a liveExempt) is tools/repo-gates/select-sdks.mjs's
  * manifestProblems, checked on every verify; it is not restated here.
+ *
+ * A test runner exits 0 when it skips a case, so most runners read their own
+ * report after the suite and refuse a run in which a case was skipped or none
+ * ran. Each of those count checks is run here against a fake toolchain
+ * (live-runner-fakes.ts), so deleting or weakening one goes red (#926 A3).
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { resolve as pathResolve } from "node:path";
+import { dirname, join, resolve as pathResolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain .mjs report script, no type declarations
 import { buildReport } from "../scripts/live-coverage-report.mjs";
+import { OUTCOMES, RUNNER_COUNT_FAKES, type Fake, type Outcome } from "./live-runner-fakes.js";
 
 const repoRoot = pathResolve(fileURLToPath(import.meta.url), "../../../..");
 const manifestPath = pathResolve(repoRoot, "dagger/sdk-manifest.json");
@@ -93,5 +108,79 @@ describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
     expect(neither, "SDKs with neither a liveSuite nor a liveExempt").toEqual([]);
     const report = buildReport(manifest) as { pending: string[] };
     expect(report.pending).toEqual([]);
+  });
+});
+
+/**
+ * Run one live runner's `<cmd>` — the runner minus the wrapper, which only
+ * boots the harness — the way Dagger's `live-suite` and run-live-suite.mjs
+ * run a runner (`bash -euo pipefail -c`), in a sandbox laid out like the
+ * repository, with `fake` standing in for the SDK's toolchain. The runner's
+ * absolute scratch paths (`/tmp/…`, `/cache/…`) are moved into the sandbox so
+ * nothing outside it is written; nothing else in the string is touched.
+ */
+function runWithFake(
+  sdk: Sdk,
+  fake: Fake,
+  outcome: Outcome,
+): { status: number | null; out: string } {
+  const box = mkdtempSync(join(tmpdir(), `live-runner-${sdk.name}-`));
+  const bin = join(box, ".fake-bin");
+  mkdirSync(bin);
+  for (const [name, body] of Object.entries(fake.bins ?? {})) {
+    writeFileSync(join(bin, name), body);
+    chmodSync(join(bin, name), 0o755);
+  }
+  const files = { [sdk.liveSuite!.path!]: "", ...fake.files };
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(box, rel)), { recursive: true });
+    writeFileSync(join(box, rel), body);
+  }
+  mkdirSync(join(box, "tmp"));
+  mkdirSync(join(box, "cache"));
+  const cmd = sdk
+    .liveSuite!.runner.slice(WRAPPER.length)
+    .replaceAll("/tmp/", `${box}/tmp/`)
+    .replaceAll("/cache/", `${box}/cache/`);
+  const r = spawnSync("bash", ["-euo", "pipefail", "-c", cmd], {
+    cwd: box,
+    encoding: "utf-8",
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box, STUB_OUTCOME: outcome },
+  });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+/**
+ * The SDKs whose runner has no count check yet: their test runner's exit code
+ * is all the leg reads (#926 A2).
+ */
+const NO_COUNT_CHECK_YET = [
+  "node",
+  "browser-js",
+  "deno",
+  "bun",
+  "python",
+  "go",
+  "php",
+  "ruby",
+  "rust",
+];
+
+describe("each runner's count check refuses a skipped case and an empty run (#926 A3)", () => {
+  it("every live SDK's runner count check is driven by a fake here, or is listed as missing", () => {
+    const covered = [...Object.keys(RUNNER_COUNT_FAKES), ...NO_COUNT_CHECK_YET].sort();
+    expect(covered).toEqual(live.map((s) => s.name).sort());
+  });
+
+  // MUTATION: delete one SDK's count check from its runner in
+  // dagger/sdk-manifest.json (the trailing grep of its report) and its `skip`
+  // and `none` rows go green, so these go red.
+  const rows = live
+    .filter((s) => s.name in RUNNER_COUNT_FAKES)
+    .flatMap((s) => OUTCOMES.map((o) => [s.name, o, s] as const));
+  it.each(rows)("%s, %s", (_name, outcome, sdk) => {
+    const { status, out } = runWithFake(sdk, RUNNER_COUNT_FAKES[sdk.name]!, outcome);
+    if (outcome === "pass") expect(status, out).toBe(0);
+    else expect(status, `${outcome} passed:\n${out}`).not.toBe(0);
   });
 });
