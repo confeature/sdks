@@ -243,7 +243,16 @@ Deno.test("flag ls: --json emits the SettingModel[] the api sent (#880)", async 
   assertEquals(JSON.parse(out.join("\n")), list);
 });
 
-for (const [label, body] of [["{}", {}], ["null", null], ["a string", "flags"]] as const) {
+for (
+  const [label, body] of [
+    ["{}", {}],
+    ["null", null],
+    ["a string", "flags"],
+    // #937: an item is read like a per-key answer; one it cannot read is an
+    // error, never a row of `undefined`s.
+    ["an item with no key", [{ settingId: 1, name: "Dark mode", settingType: "boolean" }]],
+  ] as const
+) {
   Deno.test(`flag ls: a list body of ${label} is a runtime error, not an empty list (#880)`, async () => {
     const { io } = captureIo();
     let thrown: unknown;

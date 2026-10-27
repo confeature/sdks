@@ -35,11 +35,48 @@ import { coerceValue, type TypedValue } from "../value.ts";
  * ConfigCat's CLI (#933).
  */
 
-/** A row of `flag ls`: the fields both list shapes carry (#880 D-14). */
+/**
+ * A flag as this CLI reads it, from the list or a per-key answer: only the
+ * fields both wire shapes carry. The list answers ConfigCat's `SettingModel[]`
+ * since #880; the per-key routes (get one, create, update) answer
+ * `SettingModel` since #937, and the older `Setting` (`type`, `config_id`,
+ * epoch-ms dates) before it.
+ */
 interface FlagRow {
   key: string;
   name: string;
+  hint: string | null;
   type: string;
+}
+
+/**
+ * One setting in either shape → `FlagRow`, or `null` for a body that is neither:
+ * a malformed answer is an error, never a row of `undefined`s. The one place a
+ * setting's wire shape is read (the list reads each item through it), so the
+ * CLI reads both sides of the api release (#937).
+ */
+export function readSetting(body: unknown): FlagRow | null {
+  // An array or a scalar has none of the fields below, so it reads as null too.
+  if (body === null || typeof body !== "object") return null;
+  const s = body as Record<string, unknown>;
+  // `settingType` is ConfigCat's name; `type` is the pre-#880/#937 one.
+  const type = s.settingType ?? s.type;
+  if (typeof s.key !== "string" || typeof s.name !== "string" || typeof type !== "string") {
+    return null;
+  }
+  return { key: s.key, name: s.name, hint: typeof s.hint === "string" ? s.hint : null, type };
+}
+
+/** `readSetting`, or a RUNTIME error naming the command whose answer it could not read. */
+function requireSetting(body: unknown, command: string): FlagRow {
+  const row = readSetting(body);
+  if (row === null) {
+    throw new CliError(
+      `${command}: the api answered a setting this CLI cannot read.`,
+      ExitCode.RUNTIME,
+    );
+  }
+  return row;
 }
 
 /**
@@ -53,19 +90,16 @@ export function readSettingList(body: unknown): { items: unknown[]; rows: FlagRo
     : Array.isArray((body as { settings?: unknown } | null)?.settings)
     ? (body as { settings: unknown[] }).settings
     : null;
-  // A body that is neither shape is an error, never an empty list.
-  if (items === null) {
+  const rows = items?.map(readSetting) ?? null;
+  // A body that is neither shape, or holds an unreadable item, is an error,
+  // never an empty or partial list.
+  if (items === null || rows === null || rows.some((r) => r === null)) {
     throw new CliError(
       "flag ls: the api answered a settings list this CLI cannot read.",
       ExitCode.RUNTIME,
     );
   }
-  const rows = items.map((raw) => {
-    const s = raw as Record<string, unknown>;
-    // `settingType` is ConfigCat's name; `type` is the pre-#880 one.
-    return { key: String(s.key), name: String(s.name), type: String(s.settingType ?? s.type) };
-  });
-  return { items, rows };
+  return { items, rows: rows as FlagRow[] };
 }
 
 // The create / metadata-update bodies, threaded from the generated `operations`
@@ -73,11 +107,9 @@ export function readSettingList(body: unknown): { items: unknown[]; rows: FlagRo
 type CreateSettingBody =
   & operations["createSetting"]["requestBody"]["content"]["application/json"]
   & { reason?: string };
-type CreatedSetting = operations["createSetting"]["responses"][201]["content"]["application/json"];
 type UpdateSettingBody =
   & operations["updateSetting"]["requestBody"]["content"]["application/json"]
   & { reason?: string };
-type UpdatedSetting = operations["updateSetting"]["responses"][200]["content"]["application/json"];
 
 /**
  * ConfigCat's four-member `SettingType` — threaded from the contract (same
@@ -190,7 +222,11 @@ function valuePath(environmentId: string, configId: string, key: string): string
 // The reads the route choice makes, and the v2 value API's read and patch
 // shapes, threaded from the generated `operations` types (#817).
 type ConfigModel = operations["getConfig"]["responses"][200]["content"]["application/json"];
-type SettingRead = operations["getSetting"]["responses"][200]["content"]["application/json"];
+/**
+ * The per-key setting answer as the value route reads it: only its id, which
+ * both shapes carry (ConfigCat's `SettingModel` since #937, `Setting` before).
+ */
+type SettingRead = { settingId?: unknown };
 type SettingFormula =
   operations["getSettingValueV2"]["responses"][200]["content"]["application/json"];
 type FormulaPatch =
@@ -238,7 +274,8 @@ async function valueRouteOf(
   );
   // The id becomes a path segment: anything but a positive integer is an api
   // answer this CLI cannot address a value with.
-  if (!Number.isSafeInteger(setting.settingId) || setting.settingId < 1) {
+  const settingId = setting.settingId;
+  if (typeof settingId !== "number" || !Number.isSafeInteger(settingId) || settingId < 1) {
     throw new CliError(
       `flag value: the api answered a setting id this CLI cannot read for '${key}'.`,
       ExitCode.RUNTIME,
@@ -247,7 +284,7 @@ async function valueRouteOf(
   return {
     kind: "v2",
     path: `/v2/environments/${encodeURIComponent(environmentId)}` +
-      `/settings/${setting.settingId}/value`,
+      `/settings/${settingId}/value`,
   };
 }
 
@@ -491,8 +528,8 @@ export async function runFlagValueUpdate(ctx: RunContext, deps: ReadDeps = {}): 
  * Calls `POST /v1/configs/{configId}/settings` (the SAME endpoint the MCP
  * `create_flag` tool uses). `--type` is validated against the four ConfigCat
  * `SettingType` members BEFORE any write (a bad type is a USAGE error with no
- * network call). `--json` prints the created `Setting`; the human surface is a
- * confirmation + (key, name, type). A missing required option is a USAGE error
+ * network call). `--json` prints the created setting as the api sent it; the
+ * human surface is a confirmation + (key, name, type). A missing required option is a USAGE error
  * naming it (R9); logged-out short-circuits with NO network call (R8).
  *
  * The new flag is seeded with its type's zero value in every environment; set a
@@ -519,7 +556,7 @@ export async function runFlagCreate(ctx: RunContext, deps: ReadDeps = {}): Promi
   const created = await withSession(
     session,
     (client) =>
-      client.post<CreatedSetting>(
+      client.post<unknown>(
         `/v1/configs/${encodeURIComponent(configId)}/settings`,
         body,
       ),
@@ -530,12 +567,13 @@ export async function runFlagCreate(ctx: RunContext, deps: ReadDeps = {}): Promi
     return ExitCode.OK;
   }
 
-  ctx.io.out(`Created flag '${created.key}'.`);
+  const row = requireSetting(created, "flag create");
+  ctx.io.out(`Created flag '${row.key}'.`);
   ctx.io.out(
     renderPairs([
-      ["KEY", created.key],
-      ["NAME", created.name],
-      ["TYPE", created.type],
+      ["KEY", row.key],
+      ["NAME", row.name],
+      ["TYPE", row.type],
     ]),
   );
   return ExitCode.OK;
@@ -549,7 +587,8 @@ export async function runFlagCreate(ctx: RunContext, deps: ReadDeps = {}): Promi
  * This is DISTINCT from `flag value update`: this command edits the flag's
  * name/hint via `PATCH /v1/configs/{configId}/settings/{key}`; to change the
  * served VALUE use `flag value update`. At least one of `--name` / `--hint` is
- * required (else a USAGE error). `--json` prints the updated `Setting`. A
+ * required (else a USAGE error). `--json` prints the updated setting as the api
+ * sent it. A
  * missing required option is a USAGE error naming it (R9); logged-out
  * short-circuits with NO network call (R8).
  */
@@ -595,7 +634,7 @@ export async function runFlagUpdate(ctx: RunContext, deps: ReadDeps = {}): Promi
   const updated = await withSession(
     session,
     (client) =>
-      client.patch<UpdatedSetting>(
+      client.patch<unknown>(
         `/v1/configs/${encodeURIComponent(configId)}/settings/${encodeURIComponent(key)}`,
         body,
       ),
@@ -606,13 +645,14 @@ export async function runFlagUpdate(ctx: RunContext, deps: ReadDeps = {}): Promi
     return ExitCode.OK;
   }
 
-  ctx.io.out(`Updated flag '${updated.key}'.`);
+  const row = requireSetting(updated, "flag update");
+  ctx.io.out(`Updated flag '${row.key}'.`);
   ctx.io.out(
     renderPairs([
-      ["KEY", updated.key],
-      ["NAME", updated.name],
-      ["HINT", updated.hint ?? ""],
-      ["TYPE", updated.type],
+      ["KEY", row.key],
+      ["NAME", row.name],
+      ["HINT", row.hint ?? ""],
+      ["TYPE", row.type],
     ]),
   );
   return ExitCode.OK;

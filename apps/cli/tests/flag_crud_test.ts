@@ -65,6 +65,40 @@ function setting(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+/**
+ * The same setting as ConfigCat's `SettingModel`, what the per-key routes answer
+ * since #937. The CLI reads both shapes, so it ships before the api.
+ */
+function settingModel(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    settingId: 1,
+    key: "darkMode",
+    name: "Dark mode",
+    hint: null,
+    order: 0,
+    settingType: "boolean",
+    isJson: false,
+    configId: "cfg-1",
+    configName: "Main",
+    createdAt: "2026-10-27T00:00:00.000Z",
+    tags: [],
+    predefinedVariations: [],
+    ...overrides,
+  };
+}
+
+const CREATE_ARGS = [
+  "--config-id",
+  "cfg-1",
+  "--key",
+  "darkMode",
+  "--name",
+  "Dark mode",
+  "--type",
+  "int",
+];
+const UPDATE_ARGS = ["--config-id", "cfg-1", "--key", "darkMode", "--name", "Renamed"];
+
 /** Record every request a command issues: method + URL + body + auth header. */
 interface Call {
   method: string;
@@ -550,3 +584,76 @@ Deno.test("flag delete: never prints the bearer token", async () => {
   );
   assertEquals([...out, ...err].join("\n").includes("SECRET-BEARER"), false);
 });
+
+// ── #937: the per-key answers move to ConfigCat's SettingModel ─────────────────
+
+for (
+  const [shape, body] of [
+    ["SettingModel", settingModel({ settingType: "int", name: "Renamed", hint: "h" })],
+    ["pre-#937 Setting", setting({ type: "int", name: "Renamed", hint: "h" })],
+  ] as const
+) {
+  Deno.test(`flag create: reads the 201 in the ${shape} shape`, async () => {
+    const { io, out } = captureIo();
+    const { fetch } = recordingFetch(() => jsonResponse(201, body));
+    const code = await runFlagCreate(ctx(io, CREATE_ARGS), {
+      readToken: () => Promise.resolve("tok"),
+      fetch,
+    });
+    assertEquals(code, ExitCode.OK);
+    assertEquals(out[0], "Created flag 'darkMode'.");
+    assertEquals(/^TYPE\s+int$/m.test(out.join("\n")), true, out.join("\n"));
+  });
+
+  Deno.test(`flag update: reads the 200 in the ${shape} shape`, async () => {
+    const { io, out } = captureIo();
+    const { fetch } = recordingFetch(() => jsonResponse(200, body));
+    const code = await runFlagUpdate(ctx(io, UPDATE_ARGS), {
+      readToken: () => Promise.resolve("tok"),
+      fetch,
+    });
+    assertEquals(code, ExitCode.OK);
+    const text = out.join("\n");
+    assertEquals(/^NAME\s+Renamed$/m.test(text), true, text);
+    assertEquals(/^HINT\s+h$/m.test(text), true, text);
+    assertEquals(/^TYPE\s+int$/m.test(text), true, text);
+  });
+
+  Deno.test(`flag create / update --json print the ${shape} body as the api sent it`, async () => {
+    for (const run of [runFlagCreate, runFlagUpdate]) {
+      const { io, out } = captureIo();
+      const { fetch } = recordingFetch(() => jsonResponse(run === runFlagCreate ? 201 : 200, body));
+      const args = run === runFlagCreate ? CREATE_ARGS : UPDATE_ARGS;
+      await run(ctx(io, args, { outputJson: true }), {
+        readToken: () => Promise.resolve("tok"),
+        fetch,
+      });
+      assertEquals(JSON.parse(out.join("\n")), body);
+    }
+  });
+}
+
+for (
+  const [what, body] of [
+    ["no type under either name", settingModel({ settingType: undefined })],
+    ["no key", settingModel({ key: undefined })],
+    ["no name", settingModel({ name: undefined })],
+    ["an array", [settingModel()]],
+  ] as const
+) {
+  Deno.test(`flag create / update: a body with ${what} is a RUNTIME error`, async () => {
+    for (const run of [runFlagCreate, runFlagUpdate]) {
+      const { io } = captureIo();
+      const { fetch } = recordingFetch(() => jsonResponse(run === runFlagCreate ? 201 : 200, body));
+      const args = run === runFlagCreate ? CREATE_ARGS : UPDATE_ARGS;
+      let caught: unknown;
+      try {
+        await run(ctx(io, args), { readToken: () => Promise.resolve("tok"), fetch });
+      } catch (err) {
+        caught = err;
+      }
+      assertEquals(caught instanceof CliError, true, String(caught));
+      assertEquals((caught as CliError).exitCode, ExitCode.RUNTIME);
+    }
+  });
+}
