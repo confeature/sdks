@@ -135,6 +135,7 @@ function runWithFake(
   for (const [rel, body] of Object.entries(files)) {
     mkdirSync(dirname(join(box, rel)), { recursive: true });
     writeFileSync(join(box, rel), body);
+    chmodSync(join(box, rel), 0o755); // a fake such as vendor/bin/phpunit is run directly
   }
   mkdirSync(join(box, "tmp"));
   mkdirSync(join(box, "cache"));
@@ -151,25 +152,27 @@ function runWithFake(
 }
 
 /**
- * The SDKs whose runner has no count check yet: their test runner's exit code
- * is all the leg reads (#926 A2).
+ * The SDKs whose count check is not in their runner but in the suite itself:
+ * their live suite is `defineLiveWireSuite()` (#925), which fails a run in
+ * which any of its tests did not run, once for all three (#926 A2). That
+ * check's own red run is packages/test-fixtures-sdk-parity's
+ * live-wire-suite-count.test.ts.
  */
-const NO_COUNT_CHECK_YET = [
-  "node",
-  "browser-js",
-  "deno",
-  "bun",
-  "python",
-  "go",
-  "php",
-  "ruby",
-  "rust",
-];
+const COUNT_CHECKED_IN_HELPER = ["browser-js", "deno", "bun"];
 
 describe("each runner's count check refuses a skipped case and an empty run (#926 A3)", () => {
-  it("every live SDK's runner count check is driven by a fake here, or is listed as missing", () => {
-    const covered = [...Object.keys(RUNNER_COUNT_FAKES), ...NO_COUNT_CHECK_YET].sort();
+  // MUTATION: drop an SDK's fake (or add a live SDK with no count check) and
+  // this goes red: no live SDK is left trusting its test runner's exit code.
+  it("every live SDK has a count check: in its runner, driven by a fake here, or in the shared helper", () => {
+    const covered = [...Object.keys(RUNNER_COUNT_FAKES), ...COUNT_CHECKED_IN_HELPER].sort();
     expect(covered).toEqual(live.map((s) => s.name).sort());
+  });
+
+  it.each(
+    live.filter((s) => COUNT_CHECKED_IN_HELPER.includes(s.name)).map((s) => [s.name, s] as const),
+  )("%s's live suite is defineLiveWireSuite(), so the helper's count check is its", (_name, s) => {
+    const src = readFileSync(pathResolve(repoRoot, s.liveSuite!.path!), "utf-8");
+    expect(src).toMatch(/^await defineLiveWireSuite\(/m);
   });
 
   // MUTATION: delete one SDK's count check from its runner in

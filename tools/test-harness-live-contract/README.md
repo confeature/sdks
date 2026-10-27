@@ -141,7 +141,10 @@ workspace install brings. Every `runner` goes through the harness wrapper
 (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
 live suite never passes by skipping (#783). Nothing outside the wrapped command is a shell
 operator: a runner's `&&` or `||` goes inside a quoted `bash -c '…'`, never after it, where bash and
-not the wrapper would decide the leg (#926). An SDK that cannot have one carries `liveExempt:
+not the wrapper would decide the leg (#926). A test runner exits 0 when it skips a test, so every
+live suite also refuses a run in which a test was skipped or none ran: its runner reads the test
+report, or, for the suites built on `defineLiveWireSuite()`, the helper counts its own tests
+(#926; `tests/live-suite-runners.test.ts` runs each runner's check against a fake toolchain). An SDK that cannot have one carries `liveExempt:
 "<reason>"` instead; since #924 every SDK has one or the other, and
 `tests/live-suite-runners.test.ts` fails on an SDK with neither. `scripts/live-coverage-report.mjs`
 lists the roster: live, or exempt with its reason.

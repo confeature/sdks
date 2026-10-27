@@ -160,7 +160,108 @@ ${byOutcome({
 `;
 
 /**
- * The SDKs whose runner reads its own report (#926 A3), by name, and the
+ * `pnpm --filter … exec vp test run … --reporter=json --outputFile.json=<path>`:
+ * vitest's JSON report, whose counts lead the object (a `test.fails` that
+ * fails as expected counts as passed).
+ */
+const PNPM = (() => {
+  const report = (total: number, passed: number, pending: number) =>
+    `printf '{"numTotalTestSuites":2,"numPassedTestSuites":2,"numFailedTestSuites":0,"numPendingTestSuites":0,"numTotalTests":${total},"numPassedTests":${passed},"numFailedTests":0,"numPendingTests":${pending},"numTodoTests":0,"snapshot":{},"startTime":0,"success":true,"testResults":[]}' > "$out"`;
+  return `#!/bin/bash
+set -eu
+out=""
+for a in "$@"; do
+  case "$a" in --outputFile.json=*) out="\${a#--outputFile.json=}" ;; esac
+done
+${byOutcome({ pass: report(3, 3, 0), skip: report(3, 2, 1), none: report(0, 0, 0) })}
+`;
+})();
+
+/** `uv run … pytest … --junitxml=<path>`: pytest's JUnit XML, one testsuite. */
+const UV = (() => {
+  const xml = (tests: number, skipped: number) =>
+    `printf '<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="${skipped}" tests="${tests}" time="0.1" timestamp="2026-10-27T00:00:00+00:00" hostname="fake"></testsuite></testsuites>' > "$out"`;
+  return `#!/bin/bash
+set -eu
+out=""
+for a in "$@"; do
+  case "$a" in --junitxml=*) out="\${a#--junitxml=}" ;; esac
+done
+${byOutcome({ pass: xml(3, 0), skip: xml(3, 1), none: xml(0, 0) })}
+`;
+})();
+
+/** `go test -count=1 -v …`: the verbose run's result lines, a subtest per case. */
+const GO = `#!/bin/bash
+set -eu
+${byOutcome({
+  pass: `printf '=== RUN   TestWireCasesLive\\n--- PASS: TestWireCasesLive (0.10s)\\n    --- PASS: TestWireCasesLive/seeded-set (0.00s)\\n    --- PASS: TestWireCasesLive/fresh-fetch-200 (0.01s)\\n    --- PASS: TestWireCasesLive/unseeded-key (0.01s)\\nPASS\\nok  \\tcommand-line-arguments\\t0.2s\\n'`,
+  skip: `printf '=== RUN   TestWireCasesLive\\n--- PASS: TestWireCasesLive (0.10s)\\n    --- PASS: TestWireCasesLive/seeded-set (0.00s)\\n    --- SKIP: TestWireCasesLive/fresh-fetch-200 (0.00s)\\n    --- PASS: TestWireCasesLive/unseeded-key (0.01s)\\nPASS\\nok  \\tcommand-line-arguments\\t0.2s\\n'`,
+  none: `printf 'testing: warning: no tests to run\\nPASS\\nok  \\tcommand-line-arguments\\t0.1s [no tests to run]\\n'`,
+})}
+`;
+
+/**
+ * PHPUnit 10's `--log-junit <path>`: the file's suite first, carrying the
+ * totals, then a nested suite per data provider with its own. A test outside
+ * the provider (here the skipped one) counts only in the file's suite, so a
+ * check that read any suite but the first would miss it.
+ */
+const PHPUNIT = (() => {
+  const xml = (rootTests: number, rootSkipped: number, providerTests: number) =>
+    `printf '<?xml version="1.0" encoding="UTF-8"?>\\n<testsuites>\\n  <testsuite name="WireCasesLiveTest" file="tests/WireCasesLiveTest.php" tests="${rootTests}" assertions="${providerTests}" errors="0" failures="0" skipped="${rootSkipped}" time="0.1">\\n    <testsuite name="WireCasesLiveTest::testWireCase" tests="${providerTests}" assertions="${providerTests}" errors="0" failures="0" skipped="0" time="0.1">\\n    </testsuite>\\n  </testsuite>\\n</testsuites>\\n' > "$out"`;
+  return `#!/bin/bash
+set -eu
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-junit) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+${byOutcome({
+  pass: xml(3, 0, 2),
+  skip: xml(3, 1, 2),
+  none: `printf '<?xml version="1.0" encoding="UTF-8"?>\\n<testsuites/>\\n' > "$out"`,
+})}
+`;
+})();
+
+/** `bundle exec rspec … --format json --out <path>`: RSpec's JSON summary; `bundle install` is a no-op. */
+const BUNDLE = (() => {
+  const json = (examples: number, pending: number) =>
+    `printf '{"version":"3.13.6","examples":[],"summary":{"duration":0.1,"example_count":${examples},"failure_count":0,"pending_count":${pending},"errors_outside_of_examples_count":0},"summary_line":"${examples} examples, 0 failures"}' > "$out"`;
+  return `#!/bin/bash
+set -eu
+[ "$1" = "exec" ] || exit 0
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) out="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+${byOutcome({ pass: json(3, 0), skip: json(3, 1), none: json(0, 0) })}
+`;
+})();
+
+/**
+ * `cargo test --test wire_cases_live -- --nocapture`: one test that runs every
+ * case itself and prints a line per case. Its skip is the hermetic early
+ * return, which libtest still counts as passed.
+ */
+const CARGO = `#!/bin/bash
+set -eu
+echo "running 1 test"
+${byOutcome({
+  pass: `echo "wire_cases_live: fresh-fetch-200 ok" >&2; echo "wire_cases_live: timeout ok" >&2; echo "test wire_cases_live ... ok"; echo; echo "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s"`,
+  skip: `echo "wire_cases_live: skipped — hermetic run, CONFEATURE_LIVE is not set" >&2; echo "test wire_cases_live ... ok"; echo; echo "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"`,
+  none: `echo; echo "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"`,
+})}
+`;
+
+/**
+ * The SDKs whose runner reads its own report (#926 A3, A2), by name, and the
  * fake toolchain that drives it. The liveSuite.path file of each is created
  * in the sandbox too, so a runner's `test -f` holds.
  */
@@ -173,4 +274,13 @@ export const RUNNER_COUNT_FAKES: Record<string, Fake> = {
   elixir: { bins: { mix: MIX } },
   cpp: { bins: { cmake: CMAKE } },
   swift: { bins: { swift: SWIFT } },
+  node: { bins: { pnpm: PNPM } },
+  python: { bins: { uv: UV } },
+  go: { bins: { go: GO } },
+  php: {
+    bins: { composer: "#!/bin/bash\nexit 0\n" },
+    files: { "apps/sdk-php/vendor/bin/phpunit": PHPUNIT },
+  },
+  ruby: { bins: { bundle: BUNDLE } },
+  rust: { bins: { cargo: CARGO } },
 };

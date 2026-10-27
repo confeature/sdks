@@ -19,7 +19,7 @@
  */
 
 import { SdkErrorCode } from "@confeature/sdk-shared";
-import { describe, expect, type Mock, test, vi } from "vitest";
+import { afterAll, describe, expect, type Mock, test, vi } from "vitest";
 
 import configBooleanBody from "../fixtures/config-v6.boolean.json" with { type: "json" };
 import wireCasesCorpus from "../fixtures/wire-cases.json" with { type: "json" };
@@ -470,6 +470,48 @@ export interface LiveWireSuiteOptions {
   env?: Readonly<Record<string, string | undefined>>;
 }
 
+/** A vitest task as the afterAll hook sees it: a test, or a suite of tasks. */
+interface RanTask {
+  type: string;
+  name: string;
+  result?: { state?: string };
+  tasks?: readonly RanTask[];
+}
+
+/**
+ * Fail the enclosing `describe` when it does not hold exactly `expected`
+ * tests, or when any of them did not run (#926 A2).
+ *
+ * Why: vitest exits 0 when it skips a test — a `-t` filter, a `.skip`, a
+ * `ctx.skip()` — so a live suite that ran one case and skipped the rest was
+ * green on its exit code alone. A test ran when it ended `pass` or `fail`
+ * (a `test.fails` that fails as expected ends `pass`). Call it inside the
+ * describe it judges. vitest runs no hook of a describe whose every test is
+ * skipped; that run sends the harness nothing, and `--exec` refuses it.
+ */
+export function failUnlessEveryTestRan(expected: number): void {
+  // vitest parses a hook's first parameter as fixtures and refuses anything
+  // but a destructuring; the suite is the second.
+  // eslint-disable-next-line no-empty-pattern
+  afterAll(({}, suite) => {
+    const tests: RanTask[] = [];
+    const walk = (t: RanTask): void => {
+      if (t.type === "test") tests.push(t);
+      for (const c of t.tasks ?? []) walk(c);
+    };
+    walk(suite as unknown as RanTask);
+    const notRun = tests
+      .filter((t) => t.result?.state !== "pass" && t.result?.state !== "fail")
+      .map((t) => t.name);
+    if (tests.length !== expected || notRun.length > 0)
+      throw new Error(
+        `${suite.name}: ${expected} test(s) must run, ${tests.length - notRun.length} ran` +
+          (notRun.length > 0 ? `; not run: ${notRun.join(", ")}` : "") +
+          " — a live suite must never pass by skipping",
+      );
+  });
+}
+
 /**
  * Register an SDK's live wire-cases suite (#919, shared since #925): every
  * case the RUNNING live-contract harness seeds is replayed over real HTTP with
@@ -483,6 +525,7 @@ export interface LiveWireSuiteOptions {
  *   - A timeout case is ended by the SDK's OWN deadline (a quarter of the
  *     harness's hold), never by an abort the test fires.
  *   - US4: one unseeded key reaches the Worker's own unknown-key answer.
+ *   - Every test must run: a skipped one fails the suite (#926 A2).
  *
  * GATING (fail closed): skipped only when `CONFEATURE_LIVE` is unset. When it
  * is set without `LIVE_HARNESS_URL`, or the harness does not answer, this
@@ -522,6 +565,9 @@ export async function defineLiveWireSuite(options: LiveWireSuiteOptions): Promis
   }
 
   describe.skipIf(!live)(`${options.sdkName} live wire-cases against the harness (#919)`, () => {
+    // Every case, plus the seeded-set and US4 tests (#926 A2).
+    failUnlessEveryTestRan(caseIds.length + 2);
+
     test("the harness serves a non-empty seeded set, all of it in the corpus", () => {
       expect(caseIds.length).toBeGreaterThan(0);
       expect(caseIds.filter((id) => !corpusById.has(id))).toEqual([]);

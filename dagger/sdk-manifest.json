@@ -6,7 +6,7 @@
       "daggerFn": "js-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-node exec vp test run tests/wire/wire-cases.live.test.ts tests/wire/configcat-stock.live.test.ts",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'r=/tmp/confeature-live-node.json && rm -f \"$r\" && pnpm --filter @confeature/sdk-node exec vp test run tests/wire/wire-cases.live.test.ts tests/wire/configcat-stock.live.test.ts --reporter=default --reporter=json --outputFile.json=\"$r\" && grep -Eq \"\\\"numTotalTests\\\":([1-9][0-9]*),\\\"numPassedTests\\\":\\1,\\\"numFailedTests\\\":0,\\\"numPendingTests\\\":0,\\\"numTodoTests\\\":0\" \"$r\"'",
         "path": "apps/sdk-node/tests/wire/wire-cases.live.test.ts"
       }
     },
@@ -24,7 +24,7 @@
       "daggerFn": "python-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run --frozen --extra dev pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && r=/tmp/confeature-live-python.xml && rm -f \"$r\" && uv run --frozen --extra dev pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q --junitxml=\"$r\" && grep -Eq \"<testsuite name=\\\"pytest\\\" errors=\\\"0\\\" failures=\\\"0\\\" skipped=\\\"0\\\" tests=\\\"[1-9][0-9]*\\\"\" \"$r\"'",
         "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py"
       }
     },
@@ -33,7 +33,7 @@
       "daggerFn": "go-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-go && go test -count=1 -v wire_cases_live_test.go wire_case_assertions_test.go'",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'set -o pipefail && cd apps/sdk-go && r=/tmp/confeature-live-go.txt && rm -f \"$r\" && go test -count=1 -v wire_cases_live_test.go wire_case_assertions_test.go 2>&1 | tee \"$r\" && ! grep -q -- \"--- SKIP:\" \"$r\" && grep -Eq -- \"^--- PASS: TestWireCasesLive \" \"$r\" && grep -Eq -- \"^ +--- PASS: TestWireCasesLive/\" \"$r\"'",
         "path": "apps/sdk-go/wire_cases_live_test.go"
       }
     },
@@ -101,7 +101,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-php && composer install --no-interaction --no-progress && vendor/bin/phpunit --no-coverage tests/WireCasesLiveTest.php'",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-php && r=/tmp/confeature-live-php.xml && rm -f \"$r\" && composer install --no-interaction --no-progress && vendor/bin/phpunit --no-coverage --log-junit \"$r\" tests/WireCasesLiveTest.php && grep -m1 \"<testsuite \" \"$r\" | grep -Eq \"tests=\\\"[1-9][0-9]*\\\" assertions=\\\"[0-9]+\\\" errors=\\\"0\\\" failures=\\\"0\\\" skipped=\\\"0\\\"\"'",
         "path": "apps/sdk-php/tests/WireCasesLiveTest.php"
       }
     },
@@ -111,7 +111,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-ruby && bundle install && bundle exec rspec spec/wire/wire_cases_live_spec.rb'",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-ruby && r=/tmp/confeature-live-ruby.json && rm -f \"$r\" && bundle install && bundle exec rspec spec/wire/wire_cases_live_spec.rb --format documentation --format json --out \"$r\" && grep -Eq \"\\\"example_count\\\":[1-9][0-9]*,\\\"failure_count\\\":0,\\\"pending_count\\\":0,\\\"errors_outside_of_examples_count\\\":0\" \"$r\"'",
         "path": "apps/sdk-ruby/spec/wire/wire_cases_live_spec.rb"
       }
     },
@@ -121,7 +121,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-rust && cargo test --test \"$(basename tests/wire_cases_live.rs .rs)\" -- --nocapture'",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'set -o pipefail && cd apps/sdk-rust && r=/tmp/confeature-live-rust.txt && rm -f \"$r\" && cargo test --test \"$(basename tests/wire_cases_live.rs .rs)\" -- --nocapture 2>&1 | tee \"$r\" && grep -Eq \"^test result: ok\\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\" \"$r\" && ! grep -q \"^wire_cases_live: skipped\" \"$r\" && grep -Eq \"^wire_cases_live: .+ ok$\" \"$r\"'",
         "path": "apps/sdk-rust/tests/wire_cases_live.rs"
       }
     },
