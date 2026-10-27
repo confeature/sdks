@@ -893,6 +893,32 @@
         },
         "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
       }
+    },
+    {
+      "name": "a legacy confeature-sdk-1 key is served on its one-segment path",
+      "kv": {
+        "key": "sdk:confeature-sdk-1-FAKEtranscriptLegacyKeyA00000000-FAKEtranscriptLegacyKeyB00000000:config_v6",
+        "value": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}",
+        "metadata": {
+          "etag": "\"transcript-v1\"",
+          "lastModified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/configuration-files/confeature-sdk-1-FAKEtranscriptLegacyKeyA00000000-FAKEtranscriptLegacyKeyB00000000/config_v6.json",
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "cache-control": "max-age=0, must-revalidate",
+          "content-type": "application/json",
+          "etag": "\"transcript-v1\"",
+          "last-modified": "Mon, 05 Oct 2026 10:00:00 GMT"
+        },
+        "body": "{\"p\":{\"r\":0,\"s\":\"transcript-salt\"},\"f\":{\"reference\":{\"t\":0,\"v\":{\"b\":true}},\"café\":{\"t\":1,\"v\":{\"s\":\"crème brûlée ✓\"}}}}"
+      }
     }
   ],
   "runtime": {
