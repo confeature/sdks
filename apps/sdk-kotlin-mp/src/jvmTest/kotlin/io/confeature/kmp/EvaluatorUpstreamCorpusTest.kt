@@ -981,7 +981,7 @@ class EvaluatorUpstreamCorpusTest {
 
         override fun level(): EvalTraceLog.Level = EvalTraceLog.Level.INFO
 
-        override fun log(level: EvalTraceLog.Level, eventId: String, message: String) {
+        override fun log(level: EvalTraceLog.Level, eventId: String, message: String, exception: Throwable?) {
             lines.add(traceLabel(level) + ": [" + eventId + "] " + message)
         }
 

@@ -44,8 +44,11 @@ internal class EvalTraceLog(private val inner: Sink?) {
         /** Reports the configured threshold ([Level.INFO] enables tracing). */
         fun level(): Level
 
-        /** Records one emitted line. */
-        fun log(level: Level, eventId: String, message: String)
+        /**
+         * Records one emitted line. [exception] is the throwable the line reports, or `null`: the
+         * fail-closed ERROR 1002 carries what the engine caught (upstream logs it, #928).
+         */
+        fun log(level: Level, eventId: String, message: String, exception: Throwable?)
     }
 
     fun enabled(level: Level): Boolean {
@@ -143,13 +146,38 @@ internal class EvalTraceLog(private val inner: Sink?) {
         )
     }
 
+    /**
+     * ERROR 1002 for an evaluation the engine could not finish, with [exception] attached (#928).
+     *
+     * Verbatim from `configcat/kotlin-sdk` 5.1.0, the KMP SDK's upstream:
+     * `ConfigCatLogMessages.getSettingEvaluationErrorWithDefaultValue(methodName, key,
+     * "defaultValue", defaultValue ?: "null")` plus the `" " + exception.message` suffix
+     * `FlagEvaluator.handleEvaluationError` appends. String concatenation renders a null default
+     * and a message-less exception as `null`, as upstream's template does.
+     */
+    fun settingEvaluationFailed(methodName: String, key: String, defaultValue: Any?, exception: Throwable) {
+        emit(
+            Level.ERROR,
+            "1002",
+            "Error occurred in the `" +
+                methodName +
+                "` method while evaluating setting '" +
+                key +
+                "'. Returning the `defaultValue` parameter that you specified in your application: '" +
+                defaultValue +
+                "'. " +
+                exception.message,
+            exception,
+        )
+    }
+
     /** INFO line (the 5000 trace). Mirrors logger.ts `LoggerWrapper.info`. */
     fun info(eventId: String, message: String) {
         emit(Level.INFO, eventId, message)
     }
 
-    private fun emit(level: Level, eventId: String, message: String) {
+    private fun emit(level: Level, eventId: String, message: String, exception: Throwable? = null) {
         if (!enabled(level)) return
-        inner?.log(level, eventId, message)
+        inner?.log(level, eventId, message, exception)
     }
 }

@@ -161,7 +161,7 @@ public object Evaluator {
         val scope = EvalScope(located.settings, segments, configSalt, user, log, logBuilder)
         val ctx = EvalContext(key, located.setting, scope)
 
-        val sr = resolveFailClosed(ctx) ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
+        val sr = resolveFailClosed(ctx, defaultValue) ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
         val raw = selectSettingValue(sr.value, located.type)
         val typed = coerceTyped(raw, located.type) ?: return Result(defaultValue, Error.MALFORMED_VALUE)
 
@@ -237,8 +237,16 @@ public object Evaluator {
         return logBuilder
     }
 
-    /** Walk the setting; any failure is fail-closed to null (MALFORMED_CONFIG for the caller). */
-    private fun resolveFailClosed(ctx: EvalContext): SettingResult? =
+    /**
+     * Walk the setting; any failure is fail-closed to null (MALFORMED_CONFIG for the caller).
+     *
+     * Every failure is logged as ERROR 1002 with the exception it raised, as upstream's
+     * `FlagEvaluator` does (#928): a [MalformedConfigException] is upstream's
+     * `InvalidConfigModelException`, any other [RuntimeException] its unexpected error, and both
+     * take the same log line. The method name is `getValue`: [evaluate] is what the client's
+     * `getValue` calls.
+     */
+    private fun resolveFailClosed(ctx: EvalContext, defaultValue: Any?): SettingResult? =
         try {
             SettingEvaluator.evaluateSetting(ctx)
         } catch (e: CircularDependencyException) {
@@ -246,9 +254,11 @@ public object Evaluator {
             // setting + the chain), not the generic evaluation path.
             ctx.log.circularDependency(ctx.key, e.cycle)
             null
-        } catch (_: MalformedConfigException) {
-            null
-        } catch (_: RuntimeException) {
+        } catch (e: RuntimeException) {
+            ctx.log.settingEvaluationFailed(GET_VALUE_METHOD, ctx.key, defaultValue, e)
             null
         }
+
+    /** The public method upstream's 1002 message names. */
+    private const val GET_VALUE_METHOD = "getValue"
 }
