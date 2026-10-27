@@ -697,3 +697,27 @@ TEST_CASE("a cache entry with an out-of-range number is ignored, never thrown (#
 TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)", "[client][cache]") {
   constructsAndFetchesOver(std::make_shared<FixedCache>(std::nullopt, /*throws=*/true));
 }
+
+// #826 — ConfigCat reserves no setting key, so the api serves `__proto__` as an
+// ordinary key of config_v6 `f`. A JS SDK once dropped it by copying settings
+// into a plain object; the C++ SDK must keep it from the served bytes on.
+TEST_CASE("a served config_v6 flag keyed __proto__ returns its served value (#826)",
+          "[client][proto-key]") {
+  const std::string body =
+      R"({"p":{"u":"","r":0,"s":"salt"},)"
+      R"("f":{"__proto__":{"t":0,"v":{"b":true},"i":"v-proto","r":[]}},"s":[]})";
+  MockServer server;
+  server.enqueue("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                 std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+  server.start();
+  auto client = confeature::ConfeatureClient::builder(kConfigCatKey)
+                    .pollingMode(confeature::PollingMode::manualPoll())
+                    .baseUrl(baseUrlFor(server))
+                    .cacheDirectory(":memory:")
+                    .logger(std::make_shared<CapturingLogger>())
+                    .build();
+  REQUIRE(client->forceRefresh());
+  REQUIRE(client->getValue<bool>("__proto__", false) == true);
+  client->close();
+  server.stop();
+}

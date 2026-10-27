@@ -41,6 +41,7 @@ import {
 import { sha1 } from "./hash.ts";
 import { EVAL_LOG_EVENT_ID, EvaluateLogBuilder, settingValueToString } from "./eval-log.ts";
 import { LogLevel, type LoggerWrapper } from "./logger.ts";
+import { ownValue } from "./own-key.ts";
 import { CircularDependencyError, evaluatePrerequisiteFlagCondition } from "./prerequisites.ts";
 import type { ProjectConfig } from "./project-config.ts";
 import { getUserAttribute, type User } from "./user.ts";
@@ -250,7 +251,7 @@ export class RolloutEvaluator {
     const fetchTime = config.fetchTime > 0 ? new Date(config.fetchTime) : undefined;
     try {
       const settings = config.settings;
-      const setting = settings[key];
+      const setting = ownValue(settings, key);
 
       if (!setting) {
         this.logger.keyNotFound(key);
@@ -808,14 +809,14 @@ export class RolloutEvaluator {
       condition,
       ctx.key,
       ctx.visitedFlags,
-      (key) => ctx.settings[key]?.t,
+      (key) => ownValue(ctx.settings, key)?.t,
       (key) => {
         // Re-evaluate the prerequisite flag in a child context sharing the
         // same settings / segments / salt / user and the SAME visitedFlags
         // stack (so a cycle across levels is detected). The trace re-enters the
         // full evaluation nested in `( … )` (go-sdk oracle structure), so the
         // child appends its own "Evaluating '<key>' …" header + "Returning …".
-        const prereqSetting = ctx.settings[key];
+        const prereqSetting = ownValue(ctx.settings, key);
         if (!prereqSetting) throw new Error("Prerequisite flag is missing or invalid.");
         const childCtx: EvaluateContext = {
           key,

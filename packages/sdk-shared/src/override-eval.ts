@@ -35,6 +35,7 @@ import {
   type FlagOverrides,
   OverrideBehaviour,
 } from "./flag-overrides.ts";
+import { ownValue } from "./own-key.ts";
 import { ProjectConfig } from "./project-config.ts";
 import type { User } from "./user.ts";
 
@@ -63,7 +64,7 @@ export function evaluateOverrideSync<T>(
   // supplied default.
 
   // Branch 4: key absent → return default (don't consult the cache).
-  const setting = map[key];
+  const setting = ownValue(map, key);
   if (setting === undefined) return defaultValue as SettingTypeOf<T>;
 
   // Branch 5: override slot empty → return default.
@@ -240,7 +241,7 @@ export function evaluateOverrideDetails<T>(
   const dataSource = flagOverrides?.dataSource;
   if (dataSource && typeof dataSource.getOverridesSync === "function") {
     const map = dataSource.getOverridesSync();
-    variationId = map?.[key]?.i;
+    variationId = ownValue(map, key)?.i;
   }
 
   // `isDefaultValue` is false: an override DID resolve to a concrete value

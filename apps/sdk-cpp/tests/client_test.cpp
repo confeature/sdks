@@ -74,3 +74,16 @@ TEST_CASE("ConfeatureClient::forceRefresh is a no-op under LocalOnly", "[client]
   REQUIRE(client->forceRefresh() == true);
   REQUIRE(client->getValue<bool>("flag.bool", false) == true);
 }
+
+// #826 — a local override keyed `__proto__` is an ordinary key: ConfigCat
+// reserves no setting key, and a JS SDK once dropped exactly this one.
+TEST_CASE("ConfeatureClient honours a LocalOnly override keyed __proto__ (#826)",
+          "[client][proto-key]") {
+  std::unordered_map<std::string, json> overrideMap{{"__proto__", true}};
+  auto fo = FlagOverrides::localOnly(std::make_shared<MapOverrideDataSource>(overrideMap));
+  auto client = ConfeatureClient::builder("confeature-sdk-1-key-A-key-B")
+                    .cacheDirectory(":memory:")
+                    .flagOverrides(std::move(fo))
+                    .build();
+  REQUIRE(client->getValue<bool>("__proto__", false) == true);
+}
