@@ -2448,6 +2448,15 @@ paths:
         publish. If the edge cannot be updated at that moment, the setting is
         still created and the 201 stands; the edge update is retried
         automatically.
+
+
+        The body is ConfigCat's `CreateSettingInitialValues` (#938).
+        `initialValues` sets the setting's value in the environments it names;
+        every other environment starts at the type's zero value (`false`, `""`,
+        `0`). The setting and all of its initial values are written together
+        or not at all. Initial values are value writes: a management token
+        needs `setting-value:write` as well, and an initial value that cannot
+        reach the edge answers 503 with everything saved.
       tags: [Settings]
       security:
         - bearerAuth: []
@@ -2473,7 +2482,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/Setting"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body: `settingType` and `type` disagree, an initial
+            value does not fit the setting type, an environment is named twice,
+            a field Confeature does not support yet is not empty, or a change
+            note is required.
           content:
             application/json:
               schema:
@@ -2487,13 +2500,16 @@ paths:
         "403":
           description: >
             The token lacks setting:write, or it is a management token
-            without config:publish.
+            without config:publish. With initial values, it also needs
+            setting-value:write.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
-          description: Config not found.
+          description: >
+            Config not found, or an `initialValues` environment is not one of
+            the config's product. Both answer the same body.
           content:
             application/json:
               schema:
@@ -2506,6 +2522,20 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: >
+            The setting and its initial values are saved, but an initial value
+            is not live yet. The edge update is retried automatically; a PUT of
+            the value makes it live at once. Retrying this POST answers 409.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueNotLive"
     get:
       operationId: listSettings
       summary: List settings in a config
@@ -5145,17 +5175,19 @@ components:
     CreateSettingRequest:
       type: object
       description: >
-        The create-setting request body accepts `key`, `name` (required), `type`
-        and an optional `hint`. A new setting carries no value — its
-        per-environment value rows are seeded server-side with the setting type's
-        zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`),
-        then edited via the per-environment value endpoint. `name`/`hint`
-        mirror ConfigCat's `SettingModel`; the
-        value-seeding behaviour is unchanged by their addition.
+        ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`,
+        `settingType` and an optional `hint` and `initialValues`. `settingType`
+        is the canonical field; `type` is its alias, kept for clients written
+        before it. One of the two is required, and a body with both must give
+        the same type. An environment not named in `initialValues` is seeded
+        with the type's zero value (`boolean → false`, `string → ""`,
+        `int → 0`, `double → 0`). `tags`, `predefinedVariations`, `order`,
+        `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature
+        does not support yet: each is accepted when empty or null and refused
+        with a 400 naming its ticket otherwise.
       required:
         - key
         - name
-        - type
       properties:
         key:
           $ref: "#/components/schemas/SettingKey"
@@ -5169,8 +5201,67 @@ components:
           maxLength: 1000
           nullable: true
           description: Optional operator-facing hint (ConfigCat SettingModel.hint).
+        settingType:
+          $ref: "#/components/schemas/SettingType"
         type:
           $ref: "#/components/schemas/SettingType"
+        initialValues:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/InitialValue"
+          description: >
+            The setting's value in each environment named, one entry per
+            environment. Written with the setting, or not at all.
+        tags:
+          type: array
+          nullable: true
+          items:
+            type: integer
+            format: int64
+          description: Not supported yet (#821); accepted only when empty.
+        predefinedVariations:
+          type: array
+          nullable: true
+          items:
+            type: object
+          description: Not supported yet (#821); accepted only when empty.
+        order:
+          type: integer
+          format: int32
+          nullable: true
+          description: >
+            Not supported yet (#818): settings are ordered by creation.
+            Accepted only when null.
+        isJson:
+          type: boolean
+          nullable: true
+          description: Not supported yet (#818); accepted only when false or null.
+        settingIdToInitFrom:
+          type: integer
+          format: int32
+          nullable: true
+          description: Not supported yet (#818); send `initialValues`. Accepted only when null.
+    InitialValue:
+      type: object
+      description: >
+        ConfigCat's `InitialValue` (#938): a new setting's value in one
+        environment of the config's product. `value` must fit the setting
+        type. Unlike ConfigCat's schema, `environmentId` is required: a value
+        with no environment names nowhere to write it.
+      required:
+        - environmentId
+        - value
+      properties:
+        environmentId:
+          type: string
+          format: uuid
+        value:
+          oneOf:
+            - type: boolean
+            - type: string
+            - type: number
+              format: double
     UpdateSettingRequest:
       type: object
       description: >

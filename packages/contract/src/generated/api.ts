@@ -736,6 +736,8 @@ export interface paths {
     /**
      * Create a setting within a config
      * @description The new setting goes live with no publish call: when the 201 arrives it is served, with its initial value, in every published environment of the config. An environment never published receives it at its first publish. If the edge cannot be updated at that moment, the setting is still created and the 201 stands; the edge update is retried automatically.
+     *
+     *     The body is ConfigCat's `CreateSettingInitialValues` (#938). `initialValues` sets the setting's value in the environments it names; every other environment starts at the type's zero value (`false`, `""`, `0`). The setting and all of its initial values are written together or not at all. Initial values are value writes: a management token needs `setting-value:write` as well, and an initial value that cannot reach the edge answers 503 with everything saved.
      */
     post: operations["createSetting"];
     delete?: never;
@@ -1691,14 +1693,39 @@ export interface components {
       created_at: number;
       updated_at: number;
     };
-    /** @description The create-setting request body accepts `key`, `name` (required), `type` and an optional `hint`. A new setting carries no value — its per-environment value rows are seeded server-side with the setting type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`), then edited via the per-environment value endpoint. `name`/`hint` mirror ConfigCat's `SettingModel`; the value-seeding behaviour is unchanged by their addition. */
+    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags`, `predefinedVariations`, `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
     CreateSettingRequest: {
       key: components["schemas"]["SettingKey"];
       /** @description Human-readable display label (ConfigCat SettingModel.name). */
       name: string;
       /** @description Optional operator-facing hint (ConfigCat SettingModel.hint). */
       hint?: string | null;
-      type: components["schemas"]["SettingType"];
+      settingType?: components["schemas"]["SettingType"];
+      type?: components["schemas"]["SettingType"];
+      /** @description The setting's value in each environment named, one entry per environment. Written with the setting, or not at all. */
+      initialValues?: components["schemas"]["InitialValue"][] | null;
+      /** @description Not supported yet (#821); accepted only when empty. */
+      tags?: number[] | null;
+      /** @description Not supported yet (#821); accepted only when empty. */
+      predefinedVariations?: Record<string, never>[] | null;
+      /**
+       * Format: int32
+       * @description Not supported yet (#818): settings are ordered by creation. Accepted only when null.
+       */
+      order?: number | null;
+      /** @description Not supported yet (#818); accepted only when false or null. */
+      isJson?: boolean | null;
+      /**
+       * Format: int32
+       * @description Not supported yet (#818); send `initialValues`. Accepted only when null.
+       */
+      settingIdToInitFrom?: number | null;
+    };
+    /** @description ConfigCat's `InitialValue` (#938): a new setting's value in one environment of the config's product. `value` must fit the setting type. Unlike ConfigCat's schema, `environmentId` is required: a value with no environment names nowhere to write it. */
+    InitialValue: {
+      /** Format: uuid */
+      environmentId: string;
+      value: boolean | string | number;
     };
     /** @description Partial update of a Setting's mutable METADATA only. Every field is optional and only the fields present in the body are written (mirrors `UpdateConfigRequest`). `name`/`hint` map 1:1 to ConfigCat's `SettingModel.name`/`SettingModel.hint`. The setting's `key` and `type` are IMMUTABLE — they are NOT on this body; its per-environment VALUE is edited via the per-environment value endpoint, not here. */
     UpdateSettingRequest: {
@@ -5253,7 +5280,7 @@ export interface operations {
           "application/json": components["schemas"]["Setting"];
         };
       };
-      /** @description Invalid request body. */
+      /** @description Invalid request body: `settingType` and `type` disagree, an initial value does not fit the setting type, an environment is named twice, a field Confeature does not support yet is not empty, or a change note is required. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -5271,7 +5298,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description The token lacks setting:write, or it is a management token without config:publish. */
+      /** @description The token lacks setting:write, or it is a management token without config:publish. With initial values, it also needs setting-value:write. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -5280,7 +5307,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Config not found. */
+      /** @description Config not found, or an `initialValues` environment is not one of the config's product. Both answer the same body. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -5299,6 +5326,17 @@ export interface operations {
         };
       };
       429: components["responses"]["RateLimited"];
+      /** @description The setting and its initial values are saved, but an initial value is not live yet. The edge update is retried automatically; a PUT of the value makes it live at once. Retrying this POST answers 409. */
+      503: {
+        headers: {
+          /** @description Seconds to wait before retrying. */
+          "Retry-After"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ValueNotLive"];
+        };
+      };
     };
   };
   getSetting: {
