@@ -13,6 +13,7 @@ import { parse as parseYaml } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ACTION_SURFACE,
+  DAGGER_SETUP,
   CREDENTIAL_ACTION_OUTPUTS,
   ACTION_OUTPUTS,
   CREDENTIAL_ENV,
@@ -30,6 +31,7 @@ import {
   SETTINGS,
   WORKFLOWS,
   allFindings,
+  readLocalActions,
   readScriptOutputs,
   referenceFindings,
   surfaceFindings,
@@ -47,10 +49,11 @@ for (const f of readdirSync(join(ROOT, WORKFLOWS)).filter((n) => /\.ya?ml$/.test
   BASE[f] = parseYaml(readFileSync(join(ROOT, WORKFLOWS, f), "utf8"));
 const P = "sdk-publish.yml";
 const SCRIPTS = readScriptOutputs(ROOT);
+const ACTIONS = readLocalActions(ROOT);
 const C = "cli-release.yml";
 
 const all = (w) =>
-  allFindings({ settings, manifest, workflows: w, scriptOutputs: SCRIPTS }).map(
+  allFindings({ settings, manifest, workflows: w, scriptOutputs: SCRIPTS, actions: ACTIONS }).map(
     (f) => `${f.file}: ${f.job}: ${f.why}`,
   );
 /** The findings `mutate` adds to the real tree, which itself has none. */
@@ -1467,6 +1470,23 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  // #868: a local action is frozen by its action.yml's bytes.
+  it.each([
+    ["changed", (y) => `${y}# one more line\n`],
+    ["missing", () => undefined],
+  ])("refuses the frozen jobs' Dagger setup action when its action.yml is %s", (_n, edit) => {
+    const actions = { ...ACTIONS, [DAGGER_SETUP.uses]: edit(ACTIONS[DAGGER_SETUP.uses]) };
+    const got = surfaceFindings(BASE, ACTION_SURFACE, actions).map(
+      (f) => `${f.file}: ${f.job}: ${f.why}`,
+    );
+    for (const where of ["release-gate.yml: test: step 2", "sdk-publish.yml: gate: action 2"])
+      expect(
+        got.some((g) => g.startsWith(where) && g.includes("./.github/actions/dagger-setup")),
+        got.join("\n"),
+      ).toBe(true);
+  });
+  it("records the setup action's real bytes", () =>
+    expect(surfaceFindings(BASE, ACTION_SURFACE, ACTIONS)).toEqual([]));
   it("refuses a recorded job the workflow no longer has", () =>
     expect(
       surfaceFindings({
@@ -2070,6 +2090,26 @@ describe("the write-token exemption skips rules 3 and 15 only (round 10, MED-2)"
       got.join("\n") || "no finding",
     ).toBe(true);
   });
+  // #868: the frozen job's local action is code its token reaches.
+  it.each([
+    [
+      "names github.token",
+      (y) => y.replace('version="$(jq', 't="${{ github.token }}"; version="$(jq'),
+    ],
+    [
+      "names a secret",
+      (y) => y.replace("shell: bash", "shell: bash\n      env: { X: '${{ secrets.X }}' }"),
+    ],
+    ["does not parse", () => "runs: [\n"],
+  ])("refuses a WRITE_TOKEN_EXEMPT job whose local action %s", (_n, edit) => {
+    const actions = { ...ACTIONS };
+    actions[DAGGER_SETUP.uses] = edit(actions[DAGGER_SETUP.uses]);
+    expect(exemptTokenFindings(BASE, actions).map((f) => f.why)).toContainEqual(
+      expect.stringMatching(/names github\.token or secrets in a WRITE_TOKEN_EXEMPT job/),
+    );
+  });
+  it("the real exempt job's local action names neither", () =>
+    expect(exemptTokenFindings(BASE, ACTIONS)).toEqual([]));
   it("refuses an exemption for a job the workflow no longer has", () => {
     const w = structuredClone(BASE);
     delete w[G].jobs.test;
@@ -2159,9 +2199,13 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
   it.each(ROWS.rows(fnRows))("refuses %s", (label, fn) => {
     const m = structuredClone(manifest);
     m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = fn;
-    const got = allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
-      (f) => `${f.file}: ${f.job}: ${f.why}`,
-    );
+    const got = allFindings({
+      settings,
+      manifest: m,
+      workflows: BASE,
+      scriptOutputs: SCRIPTS,
+      actions: ACTIONS,
+    }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
     expectFindings(label, got);
     expect(daggerFnFindings(m).map((f) => f.why)).toEqual([
       `daggerFn ${JSON.stringify(fn)} is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)`,
@@ -2175,9 +2219,13 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
     const m = structuredClone(manifest);
     m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = "x;y";
     expect(
-      allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
-        (f) => f.why,
-      ),
+      allFindings({
+        settings,
+        manifest: m,
+        workflows: BASE,
+        scriptOutputs: SCRIPTS,
+        actions: ACTIONS,
+      }).map((f) => f.why),
     ).toContainEqual(expect.stringMatching(/daggerFn "x;y" is not one Dagger function name/));
   });
 });

@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: MIT
+#
+# The one home of how a CI job sets Dagger up (#865, #868): every job that runs
+# Dagger uses this action, with `id: pin`, before its dagger-for-github step.
+# It reads the engine version from dagger/dagger.json, installs a CLI verified
+# against dagger/cli-checksums.txt, and points that CLI at the engine image by
+# the digest dagger/engine-digest.txt records, so neither the CLI nor the
+# container that executes the suites is trusted from a tag or a download host.
+# tools/dagger-call/engine-pin.test.mjs follows every `uses:` of this action
+# into this file and holds each step to that; tools/repo-gates/verify-workflows.mjs
+# freezes this file's bytes for the release jobs (DAGGER_SETUP).
+name: Set up the pinned Dagger
+description: >-
+  Reads dagger/dagger.json engineVersion, installs the CLI verified against
+  dagger/cli-checksums.txt onto PATH, and selects the engine image by the
+  digest in dagger/engine-digest.txt.
+outputs:
+  version:
+    description: The engine version, dagger/dagger.json engineVersion.
+    value: ${{ steps.pin.outputs.version }}
+runs:
+  using: composite
+  steps:
+    # The engine version has one home, dagger/dagger.json `engineVersion`.
+    # This step reads it, so no workflow writes the number out.
+    - name: Read the Dagger engine version (dagger/dagger.json)
+      id: pin
+      shell: bash
+      run: |
+        version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
+        if [ -z "${version}" ]; then
+          echo "::error::dagger/dagger.json has no engineVersion"
+          exit 1
+        fi
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+    # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
+    # this repository, never from a checksum served by the download host. With
+    # this CLI first on PATH at the pinned version, dagger-for-github finds it
+    # and skips its own install.sh.
+    - name: Install the checksum-verified Dagger CLI
+      shell: bash
+      env:
+        DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+      run: |
+        tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
+        dir="${RUNNER_TEMP}/dagger-cli"
+        mkdir -p "${dir}/bin"
+        cd "${dir}"
+        curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
+          "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
+        awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
+        if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
+          echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
+          exit 1
+        fi
+        sha256sum -c --strict expected.sha256
+        tar -xzf "${tarball}" -C bin dagger
+        got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
+        if [ "${got}" != "${DAGGER_VERSION}" ]; then
+          echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
+          exit 1
+        fi
+        echo "${dir}/bin" >> "$GITHUB_PATH"
+
+    # Left alone, the CLI starts the engine image by its version TAG, which the
+    # registry can move. The runner host names the same image by the index
+    # digest committed in dagger/engine-digest.txt instead: Dagger v0.21's
+    # image driver pulls and runs exactly that reference, and the pull fails on
+    # any other content. Every later step of the job inherits it through
+    # $GITHUB_ENV.
+    - name: Pin the Dagger engine image by digest (dagger/engine-digest.txt)
+      shell: bash
+      env:
+        DAGGER_VERSION: ${{ steps.pin.outputs.version }}
+      run: |
+        awk -v v="${DAGGER_VERSION}" '$1 == v { print $2 }' "${GITHUB_WORKSPACE}/dagger/engine-digest.txt" > "${RUNNER_TEMP}/engine.digest"
+        if [ "$(wc -l < "${RUNNER_TEMP}/engine.digest")" -ne 1 ]; then
+          echo "::error::dagger/engine-digest.txt has no single entry for ${DAGGER_VERSION}"
+          exit 1
+        fi
+        digest="$(cat "${RUNNER_TEMP}/engine.digest")"
+        if ! printf '%s\n' "${digest}" | grep -Eqx 'sha256:[0-9a-f]{64}'; then
+          echo "::error::dagger/engine-digest.txt pins '${digest}' for ${DAGGER_VERSION}, not a sha256 digest"
+          exit 1
+        fi
+        echo "_EXPERIMENTAL_DAGGER_RUNNER_HOST=image://registry.dagger.io/engine@${digest}" >> "$GITHUB_ENV"

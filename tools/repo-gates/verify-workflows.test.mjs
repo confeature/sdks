@@ -21,6 +21,7 @@ import {
   gateTriggerProblems,
   globMatches,
   publicGateFindings,
+  readLocalActions,
   readScriptOutputs,
   releaseGateFindings,
   verifyWorkflows,
@@ -1807,7 +1808,7 @@ describe("19 the SDK gates' own shape (#793)", () => {
   const after = (mutate) => {
     const t = structuredClone(REAL);
     mutate({ ...t, doc: t.workflows[G], jobs: t.workflows[G].jobs });
-    return allFindings({ ...t, scriptOutputs: SCRIPTS }).map(
+    return allFindings({ ...t, scriptOutputs: SCRIPTS, actions: readLocalActions(ROOT) }).map(
       (f) => `${f.file}: ${f.job}: ${f.why}`,
     );
   };

@@ -128,7 +128,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -320,6 +320,22 @@ export const PIN = {
 
 /** One recorded step: its action, and its id, if:, env:, with: when it has them. */
 const step = (uses, extra = {}) => ({ uses, ...extra });
+/** Where this repository's local (composite) actions live (#868). */
+export const ACTIONS = ".github/actions";
+/**
+ * The one local action a frozen job runs (#868): how every job sets Dagger up
+ * (tools/dagger-call/engine-pin.test.mjs holds its content). A local action
+ * is repository code the job's token reaches, so rule 17 freezes its
+ * action.yml bytes by sha256 like a frozen run: step's text. To record a
+ * reviewed change, copy the `got` surface its finding prints.
+ */
+export const DAGGER_SETUP = {
+  uses: "./.github/actions/dagger-setup",
+  sha256: "43e0247bfb1e404d599526f11666a09f02181f16507c14ff1664c734786be008",
+};
+/** The setup step every Dagger job of the frozen workflows runs, as `id: pin`. */
+const daggerSetup = () =>
+  step(DAGGER_SETUP.uses, { id: "pin", action: { sha256: DAGGER_SETUP.sha256 } });
 /** A checkout of this commit only, keeping no credential: the common case. */
 const shallowCheckout = () =>
   step(PIN.checkout, { with: { "fetch-depth": 1, "persist-credentials": false } });
@@ -431,6 +447,7 @@ export const ACTION_SURFACE = {
     setup: [fullCheckout()],
     gate: [
       shallowCheckout(),
+      daggerSetup(),
       step(PIN.dagger, {
         with: {
           version: "${{ steps.pin.outputs.version }}",
@@ -619,16 +636,7 @@ export const ACTION_SURFACE = {
     // FROZEN_JOBS: every step (WRITE_TOKEN_EXEMPT holds it to this instead of rule 3).
     test: [
       shallowCheckout(),
-      runStep(
-        "Read the Dagger engine version (dagger/dagger.json)",
-        "bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8",
-        { id: "pin" },
-      ),
-      runStep(
-        "Install the checksum-verified Dagger CLI",
-        "c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86",
-        { env: { DAGGER_VERSION: "${{ steps.pin.outputs.version }}" } },
-      ),
+      daggerSetup(),
       step(PIN.dagger, {
         with: {
           version: "${{ steps.pin.outputs.version }}",
@@ -652,9 +660,10 @@ export const ACTION_SURFACE = {
 
 /**
  * A step's surface: its action, and its id, if:, env:, continue-on-error and
- * with: (a github-script `script:` by its sha256, so the table stays short).
+ * with: (a github-script `script:` by its sha256, so the table stays short);
+ * a local action also by its action.yml's sha256 (null when it has none).
  */
-const surfaceOf = (s) => {
+const surfaceOf = (s, actions = {}) => {
   if (typeof s?.uses !== "string") {
     const o = {
       name: s?.name,
@@ -666,6 +675,12 @@ const surfaceOf = (s) => {
   }
   const o = { uses: s.uses };
   for (const k of ["id", "if", "env", "continue-on-error"]) if (s[k] !== undefined) o[k] = s[k];
+  if (s.uses.startsWith("./")) {
+    const raw = actions[s.uses.replace(/\/+$/, "")];
+    o.action = {
+      sha256: raw === undefined ? null : createHash("sha256").update(raw).digest("hex"),
+    };
+  }
   if (s.with !== undefined) {
     o.with = { ...s.with };
     if (typeof o.with.script === "string")
@@ -688,7 +703,7 @@ const canonical = (v) =>
 export const SURFACE_WORKFLOWS = [PUBLISH_WORKFLOW, CLI_WORKFLOW, "release-gate.yml"];
 
 /** Rule 17 over every job of SURFACE_WORKFLOWS (round 9: not only the credentialed ones). */
-export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
+export function surfaceFindings(workflows, surface = ACTION_SURFACE, actions = {}) {
   const out = [];
   for (const file of SURFACE_WORKFLOWS) {
     const jobs = workflows[file]?.jobs ?? {};
@@ -705,7 +720,7 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
           ? [call(job.uses, job.with ?? {})]
           : (Array.isArray(job?.steps) ? job.steps : [])
               .filter((s) => FROZEN_JOBS.has(`${file}#${jobId}`) || typeof s?.uses === "string")
-              .map(surfaceOf);
+              .map((s) => surfaceOf(s, actions));
       // A whole-frozen job counts and names its steps; any other, its actions.
       const frozen = FROZEN_JOBS.has(`${file}#${jobId}`);
       const unit = frozen ? "steps" : "actions";
@@ -1917,7 +1932,7 @@ export function readsCredentialContext(expr) {
  * github.token or secrets (round 10): the exemption returned before that
  * test, so `env: T: ${{ github.token }}` at step or job level passed.
  */
-export function exemptTokenFindings(workflows) {
+export function exemptTokenFindings(workflows, actions = {}) {
   const out = [];
   for (const key of Object.keys(WRITE_TOKEN_EXEMPT)) {
     const [file, jobId] = key.split("#");
@@ -1932,8 +1947,19 @@ export function exemptTokenFindings(workflows) {
       continue;
     }
     const workflowLevel = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== "jobs"));
+    // A local action the job runs reaches its token as well (#868).
+    const local = (Array.isArray(job.steps) ? job.steps : [])
+      .map((st) => (typeof st?.uses === "string" ? st.uses.replace(/\/+$/, "") : ""))
+      .filter((u) => u.startsWith("./"))
+      .map((u) => {
+        try {
+          return parseYaml(actions[u] ?? "");
+        } catch {
+          return `\${{ secrets.unparsable }}`;
+        }
+      });
     for (const [where, node] of [
-      [jobId, job],
+      [jobId, [job, ...local]],
       ["-", workflowLevel],
     ])
       if (allExpressions(node).some(readsCredentialContext))
@@ -2670,7 +2696,7 @@ export const CREDENTIAL_ACTION_OUTPUTS = {
  * other is a typo or a renamed output, and resolves to "" at run time. Every
  * credential output is one of them.
  */
-export const ACTION_OUTPUTS = { ...CREDENTIAL_ACTION_OUTPUTS };
+export const ACTION_OUTPUTS = { ...CREDENTIAL_ACTION_OUTPUTS, [DAGGER_SETUP.uses]: ["version"] };
 /** The repository scripts whose outputs a step reference may name, by their exported list. */
 export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
 const SCRIPT_OUTPUT_KEYS = { "tools/sdk-pack/resolve-publish.mjs": RESOLVER_OUTPUT_KEYS };
@@ -2867,6 +2893,23 @@ export function readScriptOutputs() {
   return Object.fromEntries(OUTPUT_SCRIPTS.map((f) => [f, [...SCRIPT_OUTPUT_KEYS[f]]]));
 }
 
+/**
+ * Every local action of the repository at `root`, by the `uses:` that names
+ * it (`./.github/actions/<name>`): its action.yml (or action.yaml) text.
+ */
+export function readLocalActions(root) {
+  const dir = join(root, ACTIONS);
+  if (!existsSync(dir)) return {};
+  const out = {};
+  for (const name of readdirSync(dir)) {
+    const file = ["action.yml", "action.yaml"]
+      .map((n) => join(dir, name, n))
+      .find((p) => existsSync(p));
+    if (file !== undefined) out[`./${ACTIONS}/${name}`] = readFileSync(file, "utf8");
+  }
+  return out;
+}
+
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
 export function verifyWorkflows(root) {
   const settings = JSON.parse(readFileSync(join(root, SETTINGS), "utf8"));
@@ -2874,7 +2917,13 @@ export function verifyWorkflows(root) {
   const workflows = {};
   for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
     workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
-  return allFindings({ settings, manifest, workflows, scriptOutputs: readScriptOutputs() });
+  return allFindings({
+    settings,
+    manifest,
+    workflows,
+    scriptOutputs: readScriptOutputs(),
+    actions: readLocalActions(root),
+  });
 }
 
 /**
@@ -2882,16 +2931,16 @@ export function verifyWorkflows(root) {
  * share (round 10: the tests listed the rule functions themselves, so a rule
  * the gate forgot to run still passed its rows).
  */
-export function allFindings({ settings, manifest, workflows, scriptOutputs }) {
+export function allFindings({ settings, manifest, workflows, scriptOutputs, actions = {} }) {
   return [
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
     ...referenceFindings(workflows, scriptOutputs, settings),
-    ...surfaceFindings(workflows),
+    ...surfaceFindings(workflows, ACTION_SURFACE, actions),
     ...writePermissionFindings(workflows),
     ...continueOnErrorFindings(workflows),
-    ...exemptTokenFindings(workflows),
+    ...exemptTokenFindings(workflows, actions),
     ...daggerFnFindings(manifest),
     ...sdkGateFindings({ settings, manifest, workflows }),
   ];

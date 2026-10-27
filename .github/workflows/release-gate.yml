@@ -125,45 +125,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      # The engine version has one home, dagger/dagger.json `engineVersion`
-      # (#865). This step reads it, so no workflow writes the number out.
-      - name: Read the Dagger engine version (dagger/dagger.json)
+      # Dagger as every job sets it up (.github/actions/dagger-setup, #868):
+      # the engine version from dagger/dagger.json, the CLI verified against
+      # dagger/cli-checksums.txt, and the engine image by the digest in
+      # dagger/engine-digest.txt. tools/dagger-call/engine-pin.test.mjs
+      # follows the action into its action.yml and fails on any drift.
+      - name: Set up the pinned Dagger (.github/actions/dagger-setup)
         id: pin
-        run: |
-          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
-          if [ -z "${version}" ]; then
-            echo "::error::dagger/dagger.json has no engineVersion"
-            exit 1
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
-      # this repository, never from a checksum served by the download host. With
-      # this CLI first on PATH at the pinned version, the action below finds it
-      # and skips its own install.sh.
-      - name: Install the checksum-verified Dagger CLI
-        env:
-          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
-        run: |
-          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
-          dir="${RUNNER_TEMP}/dagger-cli"
-          mkdir -p "${dir}/bin"
-          cd "${dir}"
-          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
-            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
-          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
-          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
-            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
-            exit 1
-          fi
-          sha256sum -c --strict expected.sha256
-          tar -xzf "${tarball}" -C bin dagger
-          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
-          if [ "${got}" != "${DAGGER_VERSION}" ]; then
-            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
-            exit 1
-          fi
-          echo "${dir}/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/dagger-setup
 
       # The action is pinned by commit SHA (v8.4.1, the contract that supports
       # verb/module/args/enable-github-summary) and the engine by `version:`,
