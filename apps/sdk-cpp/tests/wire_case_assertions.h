@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <sstream>
@@ -103,12 +104,51 @@ inline std::string pathOf(const std::string& target) {
 
 // Loads the wire-cases corpus from the shared fixtures package (see
 // wire-cases.json's $schema for the authoritative shape).
+//
+// A case pending for sdk-cpp (wire-cases-pending.json, 1.4, #994) is left
+// out BY NAME, under a proof that the entry is still true: this reader
+// still cannot read it. The day it can, loading fails and the entry must go.
 inline json loadCorpus() {
   std::ifstream stream(fixturesPath() / "wire-cases.json");
   REQUIRE(stream.is_open());
   std::ostringstream buf;
   buf << stream.rdbuf();
-  return json::parse(buf.str());
+  json corpus = json::parse(buf.str());
+
+  std::ifstream pendingStream(fixturesPath() / "wire-cases-pending.json");
+  REQUIRE(pendingStream.is_open());
+  std::ostringstream pendingBuf;
+  pendingBuf << pendingStream.rdbuf();
+  const json manifest = json::parse(pendingBuf.str());
+  std::map<std::string, std::string> pending;
+  if (manifest.at("pending").contains("sdk-cpp")) {
+    const auto& entry = manifest.at("pending").at("sdk-cpp");
+    for (const auto& id : entry.at("cases")) {
+      pending[id.get<std::string>()] = entry.at("ticket").get<std::string>();
+    }
+  }
+
+  json runnable = json::array();
+  for (const auto& wireCase : corpus.at("cases")) {
+    const auto id = wireCase.at("id").get<std::string>();
+    const auto held = pending.find(id);
+    if (held == pending.end()) {
+      runnable.push_back(wireCase);
+      continue;
+    }
+    const bool unread =
+        firstUnknownField(wireCase.at("given"), kKnownGivenFields).has_value() ||
+        firstUnknownField(wireCase.at("expected"), kKnownExpectedFields).has_value();
+    INFO(id << " is pending for sdk-cpp (" << held->second
+            << ") but this reader reads every field of it — remove it from "
+               "wire-cases-pending.json and run it");
+    REQUIRE(unread);
+    pending.erase(held);
+  }
+  INFO("wire-cases-pending.json lists a case for sdk-cpp that is not in the corpus");
+  REQUIRE(pending.empty());
+  corpus["cases"] = runnable;
+  return corpus;
 }
 
 // The key a suite configures its fetcher with: the corpus's given.sdkKey

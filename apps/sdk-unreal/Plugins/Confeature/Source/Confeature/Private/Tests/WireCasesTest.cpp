@@ -791,10 +791,43 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 		AddError(TEXT("wire-cases.json missing 'cases' array"));
 		return false;
 	}
-	// FROZEN at 17 — #491 grew 7→12, #590 grew 12→14 (timeout +
+	// FROZEN at 19 — #491 grew 7→12, #590 grew 12→14 (timeout +
 	// network-reset behaviour cases), #803 grew 14→17 (request-path
-	// cases: legacy, ConfigCat-shaped, malformed). Any drift = spec change.
-	TestEqual(TEXT("wire-cases corpus size"), Cases->Num(), 17);
+	// cases: legacy, ConfigCat-shaped, malformed), #994 grew 17→19
+	// (redirect cases). Any drift = spec change.
+	TestEqual(TEXT("wire-cases corpus size"), Cases->Num(), 19);
+
+	// Cases pending for sdk-unreal (wire-cases-pending.json, 1.4, #994) are
+	// left out BY NAME, under a proof that the entry is still true: this
+	// reader still cannot read them. The day it can, the entry must go.
+	TMap<FString, FString> Pending;
+	{
+		const FString PendingPath = FPaths::Combine(FixturesDir, TEXT("wire-cases-pending.json"));
+		FString PendingRaw;
+		TSharedPtr<FJsonObject> Manifest;
+		const TSharedPtr<FJsonObject>* PendingObj = nullptr;
+		if (!FFileHelper::LoadFileToString(PendingRaw, *PendingPath)
+			|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(PendingRaw), Manifest)
+			|| !Manifest.IsValid()
+			|| !Manifest->TryGetObjectField(TEXT("pending"), PendingObj))
+		{
+			AddError(FString::Printf(TEXT("Failed to read %s"), *PendingPath));
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* Entry = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Ids = nullptr;
+		FString Ticket;
+		if ((*PendingObj)->TryGetObjectField(TEXT("sdk-unreal"), Entry)
+			&& (*Entry)->TryGetStringField(TEXT("ticket"), Ticket)
+			&& (*Entry)->TryGetArrayField(TEXT("cases"), Ids))
+		{
+			for (const TSharedPtr<FJsonValue>& IdVal : *Ids)
+			{
+				Pending.Add(IdVal->AsString(), Ticket);
+			}
+		}
+	}
+	const int32 PendingCount = Pending.Num();
 
 	int32 Passed = 0;
 	for (const TSharedPtr<FJsonValue>& CaseVal : *Cases)
@@ -820,6 +853,32 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 			continue;
 		}
 		const FString TestId = FString::Printf(TEXT("wire-case '%s'"), *Id);
+
+		if (const FString* Ticket = Pending.Find(Id))
+		{
+			int32 Unread = 0;
+			for (const auto& Pair : (*GivenObj)->Values)
+			{
+				Unread += KnownGivenFields().Contains(Pair.Key) ? 0 : 1;
+			}
+			for (const auto& Pair : (*ExpectedObj)->Values)
+			{
+				Unread += KnownExpectedFields().Contains(Pair.Key) ? 0 : 1;
+			}
+			if (Unread == 0)
+			{
+				AddError(FString::Printf(
+					TEXT("%s is pending for sdk-unreal (%s) but this reader reads every field of it — "
+						 "remove it from wire-cases-pending.json and run it"),
+					*TestId, **Ticket));
+			}
+			else
+			{
+				AddInfo(FString::Printf(TEXT("%s pending (%s): this reader cannot read it yet"), *TestId, **Ticket));
+			}
+			Pending.Remove(Id);
+			continue;
+		}
 
 		// FR-003: a field nobody reads fails the case, never passes it.
 		bool bUnknownField = false;
@@ -1026,8 +1085,14 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 		++Passed;
 	}
 
-	TestEqual(TEXT("wire-cases passed"), Passed, Cases->Num());
-	return Passed == Cases->Num();
+	for (const TPair<FString, FString>& Stale : Pending)
+	{
+		AddError(FString::Printf(
+			TEXT("wire-cases-pending.json lists %s for sdk-unreal, not in the corpus"), *Stale.Key));
+	}
+	const int32 Runnable = Cases->Num() - PendingCount;
+	TestEqual(TEXT("wire-cases passed"), Passed, Runnable);
+	return Pending.Num() == 0 && Passed == Runnable;
 }
 
 // #803 FR-004 — the URL now holds the SDK key, so every transport failure

@@ -37,6 +37,7 @@ from ._wire_case_assertions import (
     assert_wire_case,
     load_corpus,
     mark_for,
+    pending_cases,
     sdk_key_for,
 )
 
@@ -108,6 +109,13 @@ def _install_mock(httpx_mock: HTTPXMock, server: dict[str, Any]) -> None:
             f"wire-cases: unsupported server.behavior {behavior!r} — no Python adapter; "
             "refusing to fall through to the respond path"
         )
+
+
+@pytest.mark.parametrize("case_id", sorted(pending_cases()))
+def test_wire_case_pending(case_id: str) -> None:
+    """A pending case is reported by name, never dropped (1.4, #994); its
+    proof (this reader still cannot read it) runs in ``load_corpus``."""
+    pytest.skip(f"pending ({pending_cases()[case_id]}): this reader cannot read it yet")
 
 
 @pytest.mark.parametrize(

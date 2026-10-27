@@ -41,13 +41,55 @@ defmodule Confeature.Test.WireCaseAssertions do
   @spec corpus_path() :: String.t()
   def corpus_path, do: Path.join(fixtures_dir(), "wire-cases.json")
 
-  @doc "The corpus's cases, in file order. Raises when it carries none."
+  @doc """
+  The corpus's cases this reader runs, in file order. Raises when it
+  carries none. A case pending for sdk-elixir (`wire-cases-pending.json`,
+  1.4, #994) is left out BY NAME, under a proof that the entry is still
+  true: this reader still cannot read it. The day it can, loading raises
+  and the entry must go.
+  """
   @spec load_cases() :: [map()]
   def load_cases do
-    case corpus_path() |> File.read!() |> Jason.decode!() |> Map.fetch!("cases") do
-      [] -> raise "wire-cases.json carries no cases"
-      cases -> cases
+    cases = corpus_path() |> File.read!() |> Jason.decode!() |> Map.fetch!("cases")
+    pending = pending_cases()
+
+    case Map.keys(pending) -- Enum.map(cases, & &1["id"]) do
+      [] ->
+        :ok
+
+      missing ->
+        raise "wire-cases-pending.json lists #{inspect(missing)} for sdk-elixir, not in the corpus"
     end
+
+    {held, runnable} = Enum.split_with(cases, &Map.has_key?(pending, &1["id"]))
+
+    for c <- held, unread_fields(c) == [] do
+      raise "#{c["id"]} is pending for sdk-elixir (#{pending[c["id"]]}) but this reader reads " <>
+              "every field of it — remove it from wire-cases-pending.json and run it"
+    end
+
+    case runnable do
+      [] -> raise "wire-cases.json carries no cases"
+      runnable -> runnable
+    end
+  end
+
+  @doc "sdk-elixir's entry of `wire-cases-pending.json`: case id -> ticket."
+  @spec pending_cases() :: %{String.t() => String.t()}
+  def pending_cases do
+    path = Path.join(fixtures_dir(), "wire-cases-pending.json")
+
+    case path |> File.read!() |> Jason.decode!() |> get_in(["pending", "sdk-elixir"]) do
+      nil -> %{}
+      %{"ticket" => ticket, "cases" => ids} -> Map.new(ids, &{&1, ticket})
+    end
+  end
+
+  @doc "The `given` / `expected` fields of a case this reader does not read."
+  @spec unread_fields(map()) :: [String.t()]
+  def unread_fields(wire_case) do
+    (Map.keys(wire_case["given"]) -- @known_given_fields) ++
+      (Map.keys(wire_case["expected"]) -- @known_expected_fields)
   end
 
   @doc """

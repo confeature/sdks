@@ -16,6 +16,12 @@
  * `sdk-key-shapes.json` (one named malformed-key case excepted), and every
  * `expected.requestPath` is FR-001's path for that key.
  *
+ * Then the redirect rules (1.4, #994) and the pending list
+ * (`fixtures/wire-cases-pending.json`): every entry names a consumer found BY
+ * CONTENT (an `apps/<name>` whose tracked files read `wire-cases.json`), that
+ * consumer reads the pending file, and every pending case is a real redirect
+ * case.
+ *
  * Exits 0 on success, 1 on any validation error (with the ajv error
  * list printed for diagnosis). See spec 112 / #148 / epic #146.
  */
@@ -31,9 +37,16 @@ import { dirname, resolve } from "node:path";
 // `ajv-formats` is intentionally not pulled in.
 import { Ajv2020 } from "ajv/dist/2020.js";
 
+import { execFileSync } from "node:child_process";
+
 import {
   crossFileErrors as crossFileRuleErrors,
+  pendingErrors,
+  type PendingManifest,
+  type RedirectCaseLike,
+  redirectErrors,
   type WireCaseLike,
+  type WireConsumer,
 } from "../src/wire-case-rules.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -73,11 +86,52 @@ const keyShapes = JSON.parse(
 };
 const validKeys = new Set(keyShapes.valid.map((entry) => entry.key));
 const cases = (fixture as { cases: WireCaseLike[] }).cases;
-const crossFileErrors = crossFileRuleErrors(cases, validKeys);
+// ---- Consumers, by content (1.4, #994) --------------------------------------
+// `git grep` over tracked files, never a path glob (#490 missed eleven
+// consumers that way). A failing `git` throws: the gate never guesses.
+const repoRoot = resolve(here, "..", "..", "..");
+const gitGrep = (pattern: string): string[] => {
+  try {
+    return execFileSync("git", ["grep", "-l", "-F", pattern, "--", "apps"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+    })
+      .split("\n")
+      .filter(Boolean);
+  } catch (error) {
+    // git grep exits 1 when nothing matches; anything else is a real failure.
+    if ((error as { status?: number }).status === 1) return [];
+    throw error;
+  }
+};
+const appOf = (path: string): string => path.split("/")[1]!;
+const readers = new Set(gitGrep("wire-cases.json").map(appOf));
+const pendingReaders = new Set(gitGrep("wire-cases-pending.json").map(appOf));
+if (readers.size === 0) {
+  console.error("✗ found no wire-case consumer under apps/ — refusing to check an empty set");
+  process.exit(1);
+}
+const consumers: WireConsumer[] = [...readers].map((name) => ({
+  name,
+  readsPending: pendingReaders.has(name),
+}));
+const pending = JSON.parse(
+  readFileSync(resolve(fixturesDir, "wire-cases-pending.json"), "utf-8"),
+) as PendingManifest;
+
+const crossFileErrors = [
+  ...crossFileRuleErrors(cases, validKeys),
+  ...redirectErrors(cases as unknown as RedirectCaseLike[]),
+  ...pendingErrors(pending, cases as unknown as RedirectCaseLike[], consumers),
+];
 if (crossFileErrors.length > 0) {
   console.error(`✗ wire-cases.json failed the cross-file checks:`);
   for (const error of crossFileErrors) console.error(`  ${error}`);
   process.exit(1);
 }
 
-console.log(`✓ wire-cases.json — ${cases.length} cases validated against wire-cases.schema.json`);
+const pendingCount = Object.keys(pending.pending).length;
+console.log(
+  `✓ wire-cases.json — ${cases.length} cases validated against wire-cases.schema.json; ` +
+    `${consumers.length} consumers, ${pendingCount} with pending cases`,
+);

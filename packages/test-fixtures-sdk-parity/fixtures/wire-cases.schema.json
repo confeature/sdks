@@ -10,8 +10,8 @@
     "$schema": { "type": "string", "minLength": 1 },
     "schemaVersion": {
       "type": "string",
-      "const": "1.3",
-      "description": "Forced-touch gate for fixture format changes. Bump alongside every consumer. 1.1 (#336) adds optional given.baseUrl + expected.requestUrlPrefix for the custom-baseUrl case. 1.2 (#490) adds optional server.behavior (respond|timeout|close-mid-response) for transport-failure cases. 1.3 (#803) adds optional given.sdkKey + expected.requestPath — the exact parsed request path for a given key — and the rule that a consumer FAILS on an expected field it does not read."
+      "const": "1.4",
+      "description": "Forced-touch gate for fixture format changes. Bump alongside every consumer. 1.1 (#336) adds optional given.baseUrl + expected.requestUrlPrefix for the custom-baseUrl case. 1.2 (#490) adds optional server.behavior (respond|timeout|close-mid-response) for transport-failure cases. 1.3 (#803) adds optional given.sdkKey + expected.requestPath — the exact parsed request path for a given key — and the rule that a consumer FAILS on an expected field it does not read. 1.4 (#994, epic #834) adds optional given.originScheme, server.redirect, expected.downgradeTargetRequests and expected.failureReason — an https origin that answers 30x — and the gated pending list (wire-cases-pending.json) through which a consumer that cannot yet serve a case skips it by name, under a proof that it still cannot read it."
     },
     "description": { "type": "string", "minLength": 1 },
     "errorClasses": {
@@ -45,8 +45,17 @@
       "type": "object",
       "required": ["id", "description", "given", "server", "expected"],
       "additionalProperties": false,
-      "if": { "properties": { "expected": { "required": ["requestPath"] } } },
-      "then": { "properties": { "given": { "required": ["sdkKey"] } } },
+      "allOf": [
+        {
+          "if": { "properties": { "expected": { "required": ["requestPath"] } } },
+          "then": { "properties": { "given": { "required": ["sdkKey"] } } }
+        },
+        {
+          "comment": "1.4: a redirect case states its origin scheme (the rule is about what follows an https request); the remaining redirect rules live in src/wire-case-rules.ts.",
+          "if": { "properties": { "server": { "required": ["redirect"] } } },
+          "then": { "properties": { "given": { "required": ["originScheme"] } } }
+        }
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -69,6 +78,11 @@
               "type": "string",
               "minLength": 1,
               "description": "Optional SDK key the SDK MUST be configured with for this case (1.3, #803). A `valid` key from sdk-key-shapes.json (enforced by scripts/validate-wire-cases.ts) — the one key list, never a per-SDK literal — except the one case the validator names (request-path-malformed-key), whose inline malformed key pins FR-001's one-segment url.PathEscape. When absent the consumer uses its own default test key. A consumer that ignores it while the case is present is a defect: the TS reader fails when the key it is handed differs."
+            },
+            "originScheme": {
+              "type": "string",
+              "enum": ["https"],
+              "description": "The scheme of the origin the SDK is configured against for this case (1.4, #994). Required on every case with server.redirect: the redirect rule is a rule about what follows an https request. The consumer MUST serve that scheme for real at the layer the SDK's redirect decision sits above — a TLS loopback with a test certificate the test-built client trusts, or an in-process transport placed BELOW the HTTP library's redirect layer (a mock that replaces the redirect layer cannot see the hop). The JS family and the SDKs that run their own hop loop may keep a fetch-level mock, because their own code reads the 30x."
             }
           }
         },
@@ -95,6 +109,19 @@
             "body": {
               "type": "string",
               "description": "Inline body bytes for cases that need malformed/non-JSON payloads. Mutually exclusive with `bodyRef`."
+            },
+            "redirect": {
+              "type": "object",
+              "required": ["status", "location"],
+              "additionalProperties": false,
+              "description": "The origin's FIRST response is this redirect (1.4, #994); status/headers/body above are what the redirect TARGET answers, should the SDK request it. `location` is a template the consumer resolves: `{origin}` is the authority (host[:port]) of the target it serves for that scheme — for `http`, the downgrade target, a second listener or route that COUNTS its hits (expected.downgradeTargetRequests); for `https`, a second https listener, or the origin itself when every request after the first gets the target answer — and `{samePath}` is the path and query of the origin request exactly as sent. Requires given.originScheme. A consumer that does not read this field serves the target answer directly and must still fail the case: every redirect case carries given.originScheme for that reason.",
+              "properties": {
+                "status": { "type": "integer", "enum": [301, 302, 307, 308] },
+                "location": {
+                  "type": "string",
+                  "enum": ["http://{origin}{samePath}", "https://{origin}{samePath}"]
+                }
+              }
             }
           },
           "not": { "required": ["bodyRef", "body"] }
@@ -118,6 +145,16 @@
               "type": "string",
               "pattern": "^/[^?#]*$",
               "description": "Optional exact request path (1.3, #803). The consumer parses the recorded request URL, takes its path — still percent-encoded as sent, query string and fragment EXCLUDED — and compares it to this value with string equality (not a prefix, not a substring, not decoded). Requires given.sdkKey: the path is that key's path. FR-001: a well-shaped key travels raw, so for every valid corpus key this is /configuration-files/<sdkKey>/config_v6.json with the key's exact bytes — a ConfigCat-shaped key keeps its '/' as three segments, exactly a stock ConfigCat SDK's request; a malformed key is ONE segment escaped with Go's url.PathEscape. The query is excluded so the version carrier (#807) can add one without re-pinning."
+            },
+            "downgradeTargetRequests": {
+              "type": "integer",
+              "const": 0,
+              "description": "The number of requests the http downgrade target received (1.4, #994): ZERO. The keyed config URL is never sent in clear after an https request. Present exactly when server.redirect.location is http; the consumer counts what reached the target listener (or route), never what the SDK says it did."
+            },
+            "failureReason": {
+              "type": "string",
+              "const": "insecure_redirect",
+              "description": "The fixed, key-free reason the SDK reports for the failure (1.4, #994; #834 shape ruling): the SDK's failure reason or message, compared case-insensitively (python's INSECURE_REDIRECT is the same token), contains `insecure_redirect`, and contains neither the configured SDK key nor any URL (no `://`) — so neither the key nor the Location leaves the SDK in a reason. Present exactly when server.redirect.location is http."
             }
           },
           "allOf": [

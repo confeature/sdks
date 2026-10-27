@@ -31,9 +31,16 @@ import { fr001Path } from "./fr001-path.ts";
 export interface WireCase {
   id: string;
   description: string;
-  given: { previousEtag: string | null; baseUrl?: string; sdkKey?: string };
+  given: {
+    previousEtag: string | null;
+    baseUrl?: string;
+    sdkKey?: string;
+    originScheme?: "https";
+  };
   server: {
     behavior?: "respond" | "timeout" | "close-mid-response";
+    /** The origin's FIRST answer (1.4, #994); the fields below are the target's. */
+    redirect?: { status: number; location: string };
     status: number;
     headers: Record<string, string>;
     bodyRef?: string | null;
@@ -47,17 +54,24 @@ export interface WireCase {
     hasConfig: boolean;
     requestUrlPrefix?: string;
     requestPath?: string;
+    downgradeTargetRequests?: number;
+    failureReason?: string;
   };
 }
 
 /**
- * Every `given` / `expected` field this reader understands (schema 1.3). A
+ * Every `given` / `expected` field this reader understands (schema 1.4). A
  * corpus field outside these sets FAILS the case (#803, FR-003): the next
  * expectation added to the corpus cannot be skipped silently by a reader that
  * predates it — which is how 12 native suites ignored `requestUrlPrefix` and
  * #803 went unseen. Add a field here only together with the code that reads it.
  */
-const KNOWN_GIVEN_FIELDS: ReadonlySet<string> = new Set(["previousEtag", "baseUrl", "sdkKey"]);
+const KNOWN_GIVEN_FIELDS: ReadonlySet<string> = new Set([
+  "previousEtag",
+  "baseUrl",
+  "sdkKey",
+  "originScheme",
+]);
 const KNOWN_EXPECTED_FIELDS: ReadonlySet<string> = new Set([
   "requestHeaderIfNoneMatch",
   "outcome",
@@ -66,7 +80,28 @@ const KNOWN_EXPECTED_FIELDS: ReadonlySet<string> = new Set([
   "hasConfig",
   "requestUrlPrefix",
   "requestPath",
+  "downgradeTargetRequests",
+  "failureReason",
 ]);
+
+/** The pending list (`fixtures/wire-cases-pending.json`, 1.4, #994). */
+export interface WirePendingManifest {
+  pending: Record<string, { ticket: string; cases: string[] }>;
+}
+
+/**
+ * The cases `sdkName` may not pass yet, as `wireTestFor` takes them (case id →
+ * ticket). The TS reader READS every 1.4 field, so its proof that an entry is
+ * still true is the strongest one: the case runs as a STRICT expected failure,
+ * and turns the suite red the day the SDK passes it — the entry must then go.
+ */
+export function pendingCasesFor(
+  manifest: WirePendingManifest,
+  sdkName: string,
+): Record<string, string> {
+  const entry = manifest.pending[sdkName];
+  return Object.fromEntries((entry?.cases ?? []).map((id) => [id, entry!.ticket]));
+}
 
 /**
  * The SDK key a suite must configure its SDK with for a case: the corpus's
@@ -122,7 +157,8 @@ function resolveBody(server: WireCase["server"]): string | null {
  * An unrecognised behaviour FAILS LOUDLY — it MUST NEVER fall through to
  * the respond path and silently mis-pass (FR-008 anti-false-green guard).
  */
-export function buildFetchSpy(server: WireCase["server"]): Mock {
+export function buildFetchSpy(server: WireCase["server"]): WireFetchSpy {
+  if (server.redirect !== undefined) return buildRedirectSpy(server, server.redirect);
   switch (server.behavior ?? "respond") {
     case "respond": {
       const response = new Response(resolveBody(server), {
@@ -158,6 +194,55 @@ export function buildFetchSpy(server: WireCase["server"]): Mock {
   }
 }
 
+/** A fetch spy, plus — for a redirect case — every URL that reached the wire. */
+export type WireFetchSpy = Mock & { wireLog?: string[] };
+
+/**
+ * The transport of a redirect case (1.4, #994): the origin's FIRST request
+ * gets `server.redirect` (status + the resolved `Location`), every later
+ * request gets the target answer (`server`). `{origin}` resolves to the
+ * request's own authority and `{samePath}` to its path and query, so the
+ * downgrade target is the same host on `http:` — told apart by scheme.
+ *
+ * It honours the fetch `redirect` mode the way a SERVER runtime's fetch does
+ * (undici, bun, deno, workerd — none refuses a downgrade): `"manual"` hands
+ * the 30x to the SDK, `"error"` rejects, and `"follow"` (the default) follows
+ * the Location itself — so an SDK that leaves following to the runtime sends
+ * the keyed URL to the http target, and `wireLog` records it. A mock that
+ * never followed would let such an SDK pass the refused case unseen.
+ */
+function buildRedirectSpy(
+  server: WireCase["server"],
+  redirect: NonNullable<WireCase["server"]["redirect"]>,
+): WireFetchSpy {
+  if ((server.behavior ?? "respond") !== "respond") {
+    throw new Error("wire-cases: server.redirect is defined only with behavior respond");
+  }
+  const wireLog: string[] = [];
+  const target = (): Response =>
+    new Response(resolveBody(server), { status: server.status, headers: server.headers });
+  const spy = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input);
+    wireLog.push(url);
+    if (wireLog.length > 1) return target();
+    const origin = new URL(url);
+    const location = redirect.location
+      .replace("{origin}", origin.host)
+      .replace("{samePath}", origin.pathname + origin.search);
+    switch (init?.redirect ?? (input instanceof Request ? input.redirect : "follow")) {
+      case "manual":
+        return new Response(null, { status: redirect.status, headers: { Location: location } });
+      case "error":
+        throw new TypeError("fetch failed: redirect mode is 'error'");
+      default:
+        // What the runtime does on its own: send the Location. No scheme check.
+        wireLog.push(location);
+        return target();
+    }
+  });
+  return Object.assign(spy, { wireLog });
+}
+
 // ---------------------------------------------------------------------------
 // assertWireCase — what a corpus `expected` block means, for the JS family
 // (#783, decision row 5). ONE implementation, called by the four hermetic
@@ -169,7 +254,7 @@ export function buildFetchSpy(server: WireCase["server"]): Mock {
 export type WireFetchOutcome =
   | { status: "fetched"; configJson: unknown; eTag: string | null }
   | { status: "notModified"; eTag: string | null }
-  | { status: "failed"; errorCode: string };
+  | { status: "failed"; errorCode: string; errorMessage?: string };
 
 /**
  * The request the SDK sent, SDK-neutral: a hermetic suite builds it from its
@@ -180,6 +265,12 @@ export interface CapturedRequest {
   url: string;
   /** The `If-None-Match` sent, or null when the request carried none. */
   ifNoneMatch: string | null;
+  /**
+   * Requests that reached the http downgrade target (redirect cases, 1.4) —
+   * counted by the transport, never reported by the SDK. Undefined when the
+   * transport served no redirect: a redirect case then FAILS.
+   */
+  downgradeTargetRequests?: number;
 }
 
 export function assertWireCase(
@@ -219,6 +310,22 @@ export function assertWireCase(
   if (expected.requestHeaderIfNoneMatch !== undefined) {
     expect(request.ifNoneMatch, `${id}: If-None-Match`).toBe(expected.requestHeaderIfNoneMatch);
   }
+  // ---- Redirects (1.4, #994) --------------------------------------------
+  if (given.originScheme !== undefined) {
+    // An absolute URL is required: a path-only one cannot show its scheme.
+    expect(new URL(request.url).protocol, `${id}: origin scheme`).toBe(`${given.originScheme}:`);
+  }
+  if (wireCase.server.redirect !== undefined) {
+    expect(
+      request.downgradeTargetRequests,
+      `${id}: the transport served the redirect and counted the downgrade target`,
+    ).toBeTypeOf("number");
+  }
+  if (expected.downgradeTargetRequests !== undefined) {
+    expect(request.downgradeTargetRequests, `${id}: requests to the http downgrade target`).toBe(
+      expected.downgradeTargetRequests,
+    );
+  }
 
   // ---- Outcome side ---------------------------------------------------
   const hasConfig = outcome.status === "fetched" && outcome.configJson != null;
@@ -250,6 +357,13 @@ export function assertWireCase(
         const mapped = ERROR_CODE_TO_CLASS[outcome.errorCode];
         expect(mapped, `${id}: errorCode ${outcome.errorCode} is mapped`).toBeDefined();
         expect(mapped, `${id}: errorClass`).toBe(expected.errorClass);
+        if (expected.failureReason !== undefined) {
+          // Fixed and key-free: the token, never the key, never a URL.
+          const reason = outcome.errorMessage ?? "";
+          expect(reason.toLowerCase(), `${id}: failure reason`).toContain(expected.failureReason);
+          expect(reason, `${id}: the reason carries the SDK key`).not.toContain(sdkKey);
+          expect(reason, `${id}: the reason carries a URL`).not.toContain("://");
+        }
       }
       break;
     default: {
@@ -278,9 +392,23 @@ function sdkParam(url: string): string | undefined {
  * is how a real request-budget timeout aborts the call (#490).
  */
 export function capturedRequestFromSpy(
-  fetchSpy: Mock,
+  fetchSpy: WireFetchSpy,
   server: WireCase["server"],
 ): CapturedRequest {
+  if (server.redirect !== undefined) {
+    // A redirect case: the ORIGIN request is the first one on the wire; the
+    // rest are hops, and the http ones are the downgrade target's hits.
+    const wireLog = fetchSpy.wireLog;
+    if (wireLog === undefined)
+      throw new Error("a redirect case needs buildFetchSpy's redirect transport");
+    expect(fetchSpy).toHaveBeenCalled();
+    const [, firstInit] = fetchSpy.mock.calls[0] as [unknown, RequestInit | undefined];
+    return {
+      url: wireLog[0]!,
+      ifNoneMatch: new Headers(firstInit?.headers).get("If-None-Match"),
+      downgradeTargetRequests: wireLog.slice(1).filter((url) => url.startsWith("http:")).length,
+    };
+  }
   expect(fetchSpy).toHaveBeenCalledOnce();
   const [calledUrl, calledInit] = fetchSpy.mock.calls[0] as [unknown, RequestInit | undefined];
   if (server.behavior === "timeout") {

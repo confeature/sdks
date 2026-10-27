@@ -91,9 +91,41 @@ def fr001_path(sdk_key: str) -> str:
     return f"/configuration-files/{sdk_key}/config_v6.json"
 
 
+def unread_fields(case: dict[str, Any]) -> list[str]:
+    """The ``given`` / ``expected`` fields of a case this reader does not read."""
+    return sorted(
+        [f"given.{f}" for f in set(case["given"]) - KNOWN_GIVEN_FIELDS]
+        + [f"expected.{f}" for f in set(case["expected"]) - KNOWN_EXPECTED_FIELDS]
+    )
+
+
+def pending_cases() -> dict[str, str]:
+    """sdk-python's entry of ``wire-cases-pending.json`` (1.4, #994): case id ->
+    ticket. An absent entry is the empty set — the reader runs every case."""
+    with (FIXTURES_DIR / "wire-cases-pending.json").open() as fh:
+        entry = json.load(fh)["pending"].get("sdk-python", {"ticket": "", "cases": []})
+    return dict.fromkeys(entry["cases"], entry["ticket"])
+
+
 def load_corpus() -> list[dict[str, Any]]:
+    """Every case this reader runs. A case pending for sdk-python is left out
+    BY NAME, under a proof that the entry is still true: this reader still
+    cannot read it. The day it can, loading fails and the entry must go."""
     with (FIXTURES_DIR / "wire-cases.json").open() as fh:
-        return json.load(fh)["cases"]
+        cases: list[dict[str, Any]] = json.load(fh)["cases"]
+    pending = pending_cases()
+    missing = sorted(set(pending) - {c["id"] for c in cases})
+    if missing:
+        raise AssertionError(
+            f"wire-cases-pending.json lists {missing} for sdk-python, not in the corpus"
+        )
+    for case in cases:
+        if case["id"] in pending and not unread_fields(case):
+            raise AssertionError(
+                f"{case['id']} is pending for sdk-python ({pending[case['id']]}) but this reader "
+                "reads every field of it — remove it from wire-cases-pending.json and run it"
+            )
+    return [c for c in cases if c["id"] not in pending]
 
 
 def python_error_to_class(error: str | None) -> str:

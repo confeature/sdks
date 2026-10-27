@@ -52,7 +52,35 @@ internal object WireCaseAssertions {
         val cases = (JsonParser.parseObject(raw)["cases"] as? List<Map<String, Any?>>)
             ?.takeIf { it.isNotEmpty() }
             ?: error("wire-cases.json carries no cases.")
-        return cases.associateBy { it["id"] as String }
+        val pending = pendingCases().toMutableMap()
+        val runnable = cases.filter { wireCase ->
+            val id = wireCase["id"] as String
+            val ticket = pending.remove(id) ?: return@filter true
+            // Left out BY NAME (wire-cases-pending.json, 1.4, #994), under a proof that the entry
+            // is still true: this reader still cannot read the case. The day it can, it must go.
+            val unread = ((wireCase["given"] as Map<String, Any?>).keys - KNOWN_GIVEN) +
+                ((wireCase["expected"] as Map<String, Any?>).keys - KNOWN_EXPECTED)
+            check(unread.isNotEmpty()) {
+                "$id is pending for sdk-android ($ticket) but this reader reads every field of it " +
+                    "— remove it from wire-cases-pending.json and run it"
+            }
+            System.err.println("pending ($ticket): $id — this reader cannot read $unread")
+            false
+        }
+        check(pending.isEmpty()) {
+            "wire-cases-pending.json lists ${pending.keys} for sdk-android, not in the corpus"
+        }
+        return runnable.associateBy { it["id"] as String }
+    }
+
+    /** sdk-android's entry of `wire-cases-pending.json`: case id to ticket. */
+    @Suppress("UNCHECKED_CAST")
+    fun pendingCases(): Map<String, String> {
+        val path = WorkspaceRoot.wireCasesPath().resolveSibling("wire-cases-pending.json")
+        val raw = String(Files.readAllBytes(path), StandardCharsets.UTF_8)
+        val entry = (JsonParser.parseObject(raw)["pending"] as Map<String, Any?>)["sdk-android"]
+            as Map<String, Any?>? ?: return emptyMap()
+        return (entry["cases"] as List<String>).associateWith { entry["ticket"] as String }
     }
 
     /** The key a case's fetcher is configured with: its pinned `given.sdkKey`, else [defaultKey]. */

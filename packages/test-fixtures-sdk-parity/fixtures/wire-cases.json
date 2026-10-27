@@ -1,7 +1,7 @@
 {
   "$schema": "./wire-cases.schema.json",
-  "schemaVersion": "1.3",
-  "description": "Wire-protocol fixture suite. Each case describes one HTTP round-trip the SDK MUST conform to. The 58-tuple parity-corpus tests *evaluation* semantics; this suite tests the *wire layer* (304/ETag/error classes/malformed body) which is otherwise implicitly per-SDK. Consumers live at apps/sdk-*/tests/wire/wire-cases.{ext} and ingest this file at runtime — DO NOT duplicate cases per language. Error classes are normalised: each SDK maps its own SdkErrorCode-style enum onto {fetchFailed, timeout, parseFailed, invalidSdkKey}. Request side (1.3, #803): a case may pin the SDK key (given.sdkKey, a valid key from sdk-key-shapes.json — except request-path-malformed-key, whose inline malformed key pins FR-001's one-segment url.PathEscape) and the exact parsed request path (expected.requestPath, query excluded); a consumer MUST configure the SDK with given.sdkKey when present and MUST FAIL on any expected field it does not read, so a new expectation can never be skipped silently. Schema validated at load-time via wire-cases.schema.json (Draft 2020-12). See epic #146 + #148 + spec 112 for the contract-testing framework.",
+  "schemaVersion": "1.4",
+  "description": "Wire-protocol fixture suite. Each case describes one HTTP round-trip the SDK MUST conform to. The 58-tuple parity-corpus tests *evaluation* semantics; this suite tests the *wire layer* (304/ETag/error classes/malformed body) which is otherwise implicitly per-SDK. Consumers live at apps/sdk-*/tests/wire/wire-cases.{ext} and ingest this file at runtime — DO NOT duplicate cases per language. Error classes are normalised: each SDK maps its own SdkErrorCode-style enum onto {fetchFailed, timeout, parseFailed, invalidSdkKey}. Request side (1.3, #803): a case may pin the SDK key (given.sdkKey, a valid key from sdk-key-shapes.json — except request-path-malformed-key, whose inline malformed key pins FR-001's one-segment url.PathEscape) and the exact parsed request path (expected.requestPath, query excluded); a consumer MUST configure the SDK with given.sdkKey when present and MUST FAIL on any expected field it does not read, so a new expectation can never be skipped silently. Redirects (1.4, #994, epic #834): a case may make an https origin (given.originScheme) answer a 30x first (server.redirect); the SDK MUST NOT send the keyed URL to an http Location after an https request (expected.downgradeTargetRequests 0, failureReason insecure_redirect) and MUST follow an https one. A consumer that cannot yet serve a case skips it only BY NAME through wire-cases-pending.json, under a proof that it still cannot read the case — never silently. Schema validated at load-time via wire-cases.schema.json (Draft 2020-12). See epic #146 + #148 + spec 112 for the contract-testing framework.",
   "errorClasses": {
     "fetchFailed": "Non-2xx HTTP (except 304/403/404), or network error, or unreadable body.",
     "timeout": "Request aborted by SDK timeout (not dispose).",
@@ -327,6 +327,60 @@
         "resultingEtag": "\"v1-malformed-key\"",
         "hasConfig": true,
         "requestPath": "/configuration-files/bad%20key$&+:=@%2C%3B%21%27%28%29%2A~%2Fx%3Fy%23z%25%C3%A9%E2%82%AC%F0%9F%98%80../config_v6.json"
+      }
+    },
+    {
+      "id": "redirect-https-to-http-refused",
+      "description": "Downgrade refused (#834, #994). The SDK fetches from an https origin; the origin answers 302 with a Location on http — same path and query, the keyed config URL. The SDK MUST NOT send that request: the http downgrade target receives ZERO requests (the consumer counts them at the target, never trusts the SDK). The fetch fails as fetchFailed with the fixed, key-free reason insecure_redirect: no SDK key, no Location, no URL in the reason. Should the SDK follow, the target answers a valid 200 config, so a follower reports `fetched` and fails here. hasConfig false is the FETCHER's result; that the poll service keeps its cached config on `failed` is each family child's poll-service test. Refusing is per hop: the request just sent was https and the Location is not.",
+      "given": {
+        "previousEtag": null,
+        "originScheme": "https"
+      },
+      "server": {
+        "redirect": {
+          "status": 302,
+          "location": "http://{origin}{samePath}"
+        },
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-downgraded\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "failed",
+        "errorClass": "fetchFailed",
+        "hasConfig": false,
+        "downgradeTargetRequests": 0,
+        "failureReason": "insecure_redirect"
+      }
+    },
+    {
+      "id": "redirect-https-to-https-followed",
+      "description": "Same-scheme redirect followed (#834, #994). The SDK fetches from an https origin; the origin answers 301 with a Location on https — same path and query. The SDK follows it (bounded by its existing redirect cap) and the second hop answers 200 with config-v6.boolean.json and an ETag: the fetch is `fetched` with that config and that ETag. The refusal of an http Location must not cost an https one.",
+      "given": {
+        "previousEtag": null,
+        "originScheme": "https"
+      },
+      "server": {
+        "redirect": {
+          "status": 301,
+          "location": "https://{origin}{samePath}"
+        },
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "ETag": "\"v1-redirected\""
+        },
+        "bodyRef": "config-v6.boolean.json"
+      },
+      "expected": {
+        "requestHeaderIfNoneMatch": null,
+        "outcome": "fetched",
+        "resultingEtag": "\"v1-redirected\"",
+        "hasConfig": true
       }
     }
   ]

@@ -182,6 +182,12 @@ RSpec.describe "wire-cases.json contract (Ruby)" do
 
   CORPUS = WireCaseAssertions.load_corpus
 
+  CORPUS["pending"].each do |id, ticket|
+    it "case #{id} is pending (#{ticket}): this reader cannot read it yet" do
+      skip "pending (#{ticket}) — wire-cases-pending.json"
+    end
+  end
+
   CORPUS["cases"].each do |wire_case|
     describe "case #{wire_case["id"]}" do
       # The whole case ON THE WIRE (#803 brief item 4): a real Net::HTTP

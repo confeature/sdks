@@ -55,7 +55,35 @@ internal object WireCaseAssertions {
         val cases = ((Json.parseToJsonElement(raw) as JsonObject)["cases"] as? JsonArray)
             ?.takeIf { it.isNotEmpty() }
             ?: error("wire-cases.json carries no cases.")
-        return cases.map { it.jsonObject }.associateBy { it.getValue("id").jsonPrimitive.content }
+        val pending = pendingCases().toMutableMap()
+        val runnable = cases.map { it.jsonObject }.filter { wireCase ->
+            val id = wireCase.getValue("id").jsonPrimitive.content
+            val ticket = pending.remove(id) ?: return@filter true
+            // Left out BY NAME (wire-cases-pending.json, 1.4, #994), under a proof that the entry
+            // is still true: this reader still cannot read the case. The day it can, it must go.
+            val unread = (wireCase.getValue("given").jsonObject.keys - KNOWN_GIVEN_FIELDS) +
+                (wireCase.getValue("expected").jsonObject.keys - KNOWN_EXPECTED_FIELDS)
+            check(unread.isNotEmpty()) {
+                "$id is pending for sdk-kotlin-mp ($ticket) but this reader reads every field of it " +
+                    "— remove it from wire-cases-pending.json and run it"
+            }
+            System.err.println("pending ($ticket): $id — this reader cannot read $unread")
+            false
+        }
+        check(pending.isEmpty()) {
+            "wire-cases-pending.json lists ${pending.keys} for sdk-kotlin-mp, not in the corpus"
+        }
+        return runnable.associateBy { it.getValue("id").jsonPrimitive.content }
+    }
+
+    /** sdk-kotlin-mp's entry of `wire-cases-pending.json`: case id to ticket. */
+    fun pendingCases(): Map<String, String> {
+        val path = WorkspaceRoot.wireCasesPath().resolveSibling("wire-cases-pending.json")
+        val raw = String(Files.readAllBytes(path), StandardCharsets.UTF_8)
+        val entry = (Json.parseToJsonElement(raw) as JsonObject).getValue("pending").jsonObject["sdk-kotlin-mp"]
+            ?.jsonObject ?: return emptyMap()
+        val ticket = entry.getValue("ticket").jsonPrimitive.content
+        return (entry.getValue("cases") as JsonArray).associate { it.jsonPrimitive.content to ticket }
     }
 
     /** A string field of a case block; a JSON `null` or an absent field is null. */

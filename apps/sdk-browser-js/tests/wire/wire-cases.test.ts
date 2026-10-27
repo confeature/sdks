@@ -24,15 +24,20 @@
  *    are byte-identical — that is exactly what this suite gates.
  */
 
-import { afterEach, beforeEach, describe, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, vi } from "vitest";
 
 import { HttpConfigFetcher, LoggerWrapper, NullLogger } from "@confeature/sdk-shared";
 import wireCases from "@confeature/test-fixtures-sdk-parity/fixtures/wire-cases.json" with { type: "json" };
+// Cases this SDK cannot pass yet, by name (1.4, #994): each runs as a STRICT
+// expected failure, so the entry turns red the day the SDK passes the case.
+import wirePending from "@confeature/test-fixtures-sdk-parity/fixtures/wire-cases-pending.json" with { type: "json" };
 import {
   buildFetchSpy,
   capturedRequestFromSpy,
   type WireCase,
   assertWireCase,
+  pendingCasesFor,
+  wireTestFor,
   sdkKeyFor,
 } from "@confeature/test-fixtures-sdk-parity/wire-test-helpers";
 
@@ -40,6 +45,8 @@ const SDK_KEY =
   "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 const BASE_URL = "https://cdn.example.test";
 const SDK_VERSION = "confeature-sdk-browser-js/0.0.0-wire-test";
+
+const wireTest = wireTestFor(pendingCasesFor(wirePending, "sdk-browser-js"));
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -51,7 +58,7 @@ afterEach(() => {
 
 describe("wire-cases.json contract (Browser JS)", () => {
   for (const wireCase of wireCases.cases as unknown as WireCase[]) {
-    test(wireCase.id, async () => {
+    wireTest(wireCase.id)(wireCase.id, async () => {
       const { given, server } = wireCase;
       // The corpus's `given.sdkKey` when the case pins one (#803, FR-003).
       const sdkKey = sdkKeyFor(wireCase, SDK_KEY);

@@ -45,6 +45,22 @@ const NOT_REPRESENTABLE: ReadonlyMap<string, string> = new Map([
           "the corpus seed keys such a case by given.sdkKey and the runners send it.",
       ] as const,
   ),
+  ...(["redirect-https-to-http-refused", "redirect-https-to-https-followed"] as const).map(
+    (id) =>
+      [
+        id,
+        "A GAP in this harness's transport, not in the Worker (#994, epic #834). The " +
+          "case's subject is a hop: an https origin answers a 30x (server.redirect) to " +
+          "an http downgrade target that counts its hits, or to a second https hop. The " +
+          "harness is one plain-http Miniflare listener with no TLS, no Location, no " +
+          "second target and no redirect fault (fault-injector kinds: status, timeout, " +
+          "etag-mismatch), and the CDN Worker never redirects a config request, so a " +
+          "seed would serve the target answer directly and prove nothing. The client " +
+          "half is checked by every hermetic wire suite (wire-test-helpers' redirect " +
+          "transport for the JS family). Unblocked by an https listener plus a redirect " +
+          "fault with a counted second target.",
+      ] as const,
+  ),
 ]);
 
 describe("wire-cases corpus → seed mapping", () => {

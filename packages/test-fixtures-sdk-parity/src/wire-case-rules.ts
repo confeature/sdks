@@ -123,3 +123,176 @@ export function crossFileErrors(
   }
   return errors;
 }
+
+// ---------------------------------------------------------------------------
+// Redirect cases (1.4, #994, epic #834)
+// ---------------------------------------------------------------------------
+
+/** The `server.redirect` / redirect-related fields of a case, as the rules read them. */
+export interface RedirectCaseLike {
+  id: string;
+  given: { originScheme?: string; previousEtag?: string | null };
+  server: {
+    redirect?: { status: number; location: string };
+    status: number;
+    bodyRef?: string | null;
+  };
+  expected: {
+    outcome: string;
+    errorClass?: string;
+    hasConfig: boolean;
+    downgradeTargetRequests?: number;
+    failureReason?: string;
+  };
+}
+
+/**
+ * The redirect rules the schema states only in part:
+ *
+ * 1. `server.redirect` requires `given.originScheme` (the rule is about what
+ *    follows an https request) — and the converse: `originScheme` without a
+ *    redirect pins nothing and is rejected, so it cannot become decoration.
+ * 2. A Location on `http` after an https origin is the DOWNGRADE: the case
+ *    MUST expect `failed` / `fetchFailed`, `downgradeTargetRequests: 0` and
+ *    `failureReason: insecure_redirect`, and its target MUST answer 200 with a
+ *    config — so an SDK that follows reports `fetched` and fails the case
+ *    instead of passing it by accident.
+ * 3. A Location on `https` is FOLLOWED: the case MUST expect `fetched` and
+ *    carries neither `downgradeTargetRequests` nor `failureReason`.
+ * 4. Neither expected field may appear on a case without a redirect.
+ */
+export function redirectErrors(cases: readonly RedirectCaseLike[]): string[] {
+  const errors: string[] = [];
+  for (const wireCase of cases) {
+    const { id, given, server, expected } = wireCase;
+    const redirect = server.redirect;
+    const pinsDowngrade =
+      expected.downgradeTargetRequests !== undefined || expected.failureReason !== undefined;
+    if (redirect === undefined) {
+      if (given.originScheme !== undefined) {
+        errors.push(`${id}: given.originScheme without server.redirect pins nothing`);
+      }
+      if (pinsDowngrade) {
+        errors.push(
+          `${id}: expected.downgradeTargetRequests / failureReason without server.redirect`,
+        );
+      }
+      continue;
+    }
+    if (given.originScheme !== "https") {
+      errors.push(`${id}: server.redirect requires given.originScheme "https"`);
+    }
+    const scheme = /^(https?):\/\/\{origin\}\{samePath\}$/.exec(redirect.location)?.[1];
+    if (scheme === "http") {
+      if (expected.outcome !== "failed" || expected.errorClass !== "fetchFailed") {
+        errors.push(`${id}: an https→http redirect must expect failed / fetchFailed`);
+      }
+      if (expected.downgradeTargetRequests !== 0) {
+        errors.push(`${id}: an https→http redirect must expect downgradeTargetRequests 0`);
+      }
+      if (expected.failureReason !== "insecure_redirect") {
+        errors.push(`${id}: an https→http redirect must expect failureReason insecure_redirect`);
+      }
+      if (server.status !== 200 || server.bodyRef == null) {
+        errors.push(
+          `${id}: the downgrade target must answer 200 with a bodyRef config, so a follower reports fetched`,
+        );
+      }
+    } else if (scheme === "https") {
+      if (expected.outcome !== "fetched") {
+        errors.push(`${id}: an https→https redirect must expect fetched`);
+      }
+      if (pinsDowngrade) {
+        errors.push(
+          `${id}: an https→https redirect has no downgrade target — no downgradeTargetRequests / failureReason`,
+        );
+      }
+    } else {
+      errors.push(
+        `${id}: server.redirect.location ${JSON.stringify(redirect.location)} is not a known template`,
+      );
+    }
+  }
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
+// The pending list (wire-cases-pending.json, 1.4, #994)
+// ---------------------------------------------------------------------------
+
+export interface PendingManifest {
+  description?: string;
+  pending: Record<string, { ticket: string; cases: string[] }>;
+}
+
+/**
+ * A wire-case consumer as the validator finds it BY CONTENT: an `apps/<name>`
+ * directory whose tracked files read `wire-cases.json` (never a path glob —
+ * #490 missed eleven consumers that way). `readsPending` is whether any of
+ * those files names `wire-cases-pending.json`.
+ */
+export interface WireConsumer {
+  name: string;
+  readsPending: boolean;
+}
+
+/**
+ * The pending list's rules. An entry is a narrowing of a claim, so each one
+ * must stay true:
+ *
+ * 1. It names a real consumer (found by content) — a typo would exempt nobody
+ *    and hide that the real consumer is red… or green by skipping.
+ * 2. That consumer READS the pending file, so the skip and its proof actually
+ *    run there (an entry the consumer ignores is decoration).
+ * 3. It carries a ticket (`#NNN`) and at least one case, each a real corpus
+ *    case, listed once.
+ * 4. Only cases that NEED the list may be on it: a case of corpus schema 1.4
+ *    or later that introduced a field consumers cannot yet serve — today the
+ *    redirect cases. Parking a 1.3 case here would be a silent skip with a
+ *    ticket attached.
+ *
+ * Each listed consumer's own suite then proves, per case, that it still
+ * cannot read (native readers) or pass (the TS reader) it — the proof that
+ * fails the moment the entry is stale.
+ */
+export function pendingErrors(
+  manifest: PendingManifest,
+  cases: readonly RedirectCaseLike[],
+  consumers: readonly WireConsumer[],
+): string[] {
+  const errors: string[] = [];
+  const byName = new Map(consumers.map((c) => [c.name, c] as const));
+  const caseById = new Map(cases.map((c) => [c.id, c] as const));
+  for (const [name, entry] of Object.entries(manifest.pending)) {
+    const consumer = byName.get(name);
+    if (consumer === undefined) {
+      errors.push(
+        `pending ${name}: not a wire-case consumer (no apps/${name} file reads wire-cases.json)`,
+      );
+    } else if (!consumer.readsPending) {
+      errors.push(
+        `pending ${name}: no apps/${name} file reads wire-cases-pending.json — the skip and its proof never run there`,
+      );
+    }
+    if (!/^#[1-9][0-9]*$/.test(entry.ticket)) {
+      errors.push(`pending ${name}: ticket ${JSON.stringify(entry.ticket)} is not #NNN`);
+    }
+    if (entry.cases.length === 0) {
+      errors.push(`pending ${name}: an entry with no case — delete it`);
+    }
+    if (new Set(entry.cases).size !== entry.cases.length) {
+      errors.push(`pending ${name}: a case is listed twice`);
+    }
+    for (const id of entry.cases) {
+      const wireCase = caseById.get(id);
+      if (wireCase === undefined) {
+        errors.push(`pending ${name}: ${id} is not in the corpus`);
+      } else if (wireCase.server.redirect === undefined) {
+        errors.push(
+          `pending ${name}: ${id} is not a redirect case — only a 1.4 case may be pending`,
+        );
+      }
+    }
+  }
+  return errors;
+}

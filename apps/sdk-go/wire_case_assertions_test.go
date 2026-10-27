@@ -33,6 +33,8 @@ import (
 // the native suites ignored `requestUrlPrefix` and #803 went unseen.
 type wireCorpus struct {
 	Cases []wireCase `json:"cases"`
+	// Pending is filled by loadWireCorpus, never decoded.
+	Pending []pendingCase `json:"-"`
 }
 
 type wireCase struct {
@@ -200,14 +202,80 @@ func loadWireCorpus(t *testing.T) wireCorpus {
 	if err != nil {
 		t.Fatalf("read wire-cases.json %s: %v", path, err)
 	}
-	var corpus wireCorpus
-	if err := json.Unmarshal(raw, &corpus); err != nil {
+	// Leniently first, so a case this reader cannot read yet can be told
+	// apart from the rest by its id; then every case strictly.
+	var lenient struct {
+		Cases []json.RawMessage `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &lenient); err != nil {
 		t.Fatalf("unmarshal wire-cases.json: %v", err)
+	}
+	pending := loadPendingCases(t)
+	var corpus wireCorpus
+	for _, rawCase := range lenient.Cases {
+		var head struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(rawCase, &head); err != nil {
+			t.Fatalf("unmarshal a wire case: %v", err)
+		}
+		var c wireCase
+		decodeErr := json.Unmarshal(rawCase, &c)
+		if ticket, ok := pending[head.ID]; ok {
+			// The proof that the entry is still true: this reader still
+			// cannot read the case. The day it can, the entry must go.
+			if decodeErr == nil {
+				t.Fatalf("%s is pending for sdk-go (%s) but this reader reads every field of it — "+
+					"remove it from wire-cases-pending.json and run it", head.ID, ticket)
+			}
+			corpus.Pending = append(corpus.Pending, pendingCase{ID: head.ID, Ticket: ticket, Reason: decodeErr.Error()})
+			delete(pending, head.ID)
+			continue
+		}
+		if decodeErr != nil {
+			t.Fatalf("unmarshal wire case %s: %v", head.ID, decodeErr)
+		}
+		corpus.Cases = append(corpus.Cases, c)
+	}
+	for id := range pending {
+		t.Fatalf("wire-cases-pending.json lists %s for sdk-go, but the corpus has no such case", id)
 	}
 	if len(corpus.Cases) == 0 {
 		t.Fatalf("wire-cases.json carries no cases")
 	}
 	return corpus
+}
+
+// pendingCase is a corpus case sdk-go cannot read yet (1.4, #994), skipped
+// BY NAME through wire-cases-pending.json, never silently.
+type pendingCase struct {
+	ID, Ticket, Reason string
+}
+
+// loadPendingCases is sdk-go's entry of wire-cases-pending.json: case id ->
+// ticket. An absent entry is the empty set — the reader runs every case.
+func loadPendingCases(t *testing.T) map[string]string {
+	t.Helper()
+	path := filepath.Join(fixturesDir(), "wire-cases-pending.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read wire-cases-pending.json %s: %v", path, err)
+	}
+	var manifest struct {
+		Pending map[string]struct {
+			Ticket string   `json:"ticket"`
+			Cases  []string `json:"cases"`
+		} `json:"pending"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal wire-cases-pending.json: %v", err)
+	}
+	out := map[string]string{}
+	entry := manifest.Pending["sdk-go"]
+	for _, id := range entry.Cases {
+		out[id] = entry.Ticket
+	}
+	return out
 }
 
 // sdkKeyFor is the key a suite configures its fetcher with: the corpus's

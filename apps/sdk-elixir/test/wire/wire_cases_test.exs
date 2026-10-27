@@ -294,6 +294,15 @@ defmodule Confeature.Wire.WireCasesTest do
   # Parameterised describe/test generation — ExUnit's idiomatic shape
   # for a corpus-driven suite. Each case lands as its own `test`
   # block so failures point at the exact corpus id.
+  # A pending case is reported by name, never dropped (1.4, #994); its
+  # proof (this reader still cannot read it) runs in load_cases/0.
+  for {id, ticket} <- WireCaseAssertions.pending_cases() do
+    @tag skip: "pending (#{ticket}): this reader cannot read it yet"
+    test "case #{id} is pending (#{ticket})" do
+      flunk("a pending case never runs")
+    end
+  end
+
   for wire_case <- @cases do
     @wire_case wire_case
 

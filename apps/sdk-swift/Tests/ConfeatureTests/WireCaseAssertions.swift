@@ -55,7 +55,57 @@ enum WireCaseAssertions {
                 domain: "WireCaseAssertions", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "wire-cases.json is not {cases: [...]}"])
         }
-        return cases
+        // A case pending for sdk-swift (wire-cases-pending.json, 1.4, #994) is
+        // left out BY NAME, under a proof that the entry is still true: this
+        // reader still cannot read it. The day it can, loading throws and the
+        // entry must go.
+        var pending = try loadPendingCases()
+        var runnable: [WireCase] = []
+        for wireCase in cases {
+            guard let ticket = pending.removeValue(forKey: id(wireCase)) else {
+                runnable.append(wireCase)
+                continue
+            }
+            if unknownFields(wireCase).isEmpty {
+                throw NSError(
+                    domain: "WireCaseAssertions", code: 2,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "\(id(wireCase)) is pending for sdk-swift (\(ticket)) but this reader reads "
+                            + "every field of it — remove it from wire-cases-pending.json and run it"
+                    ])
+            }
+            let unread = unknownFields(wireCase)
+            print("pending (\(ticket)): \(id(wireCase)) — this reader cannot read \(unread)")
+        }
+        if !pending.isEmpty {
+            throw NSError(
+                domain: "WireCaseAssertions", code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "wire-cases-pending.json lists \(pending.keys.sorted()) for sdk-swift, not in the corpus"
+                ])
+        }
+        return runnable
+    }
+
+    /// sdk-swift's entry of `wire-cases-pending.json`: case id to ticket.
+    static func loadPendingCases() throws -> [String: String] {
+        let url = fixturesURL.appendingPathComponent("wire-cases-pending.json")
+        let data = try Data(contentsOf: url)
+        guard
+            let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let pending = root["pending"] as? [String: Any]
+        else {
+            throw NSError(
+                domain: "WireCaseAssertions", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "wire-cases-pending.json: no {pending: {...}}"])
+        }
+        guard let entry = pending["sdk-swift"] as? [String: Any],
+            let ticket = entry["ticket"] as? String,
+            let ids = entry["cases"] as? [String]
+        else { return [:] }
+        return Dictionary(uniqueKeysWithValues: ids.map { ($0, ticket) })
     }
 
     static func id(_ wireCase: WireCase) -> String { (wireCase["id"] as? String) ?? "<unknown>" }
