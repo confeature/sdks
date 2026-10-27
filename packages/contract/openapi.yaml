@@ -2417,6 +2417,335 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /v1/products/{productId}/tags:
+    # ConfigCat's "Tags" routes (#1008). A tag belongs to a product; the
+    # product is resolved with the caller's membership, and another org's
+    # product answers 404 like a missing one.
+    parameters:
+      - in: path
+        name: productId
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Identifier of the Product (UUID).
+    get:
+      operationId: getTags
+      summary: List tags
+      description: >
+        Returns the product's tags, oldest first. Aligned with ConfigCat's
+        get-tags.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: The product's tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TagModel"
+        "400":
+          description: The product id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        "403":
+          description: The token lacks tag:read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createTag
+      summary: Create a tag
+      description: >
+        Creates a tag in the product. Two tags of a product may share a
+        name: ConfigCat's contract states no uniqueness. Aligned with
+        ConfigCat's create-tag.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagModel"
+      responses:
+        "201":
+          description: The tag was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagModel"
+        "400":
+          description: A field outside ConfigCat's bounds (the message names the field).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks tag:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /v1/tags/{tagId}:
+    # A tag is resolved with the caller's membership in its org: another
+    # org's tag answers 404 like a missing one.
+    parameters:
+      - in: path
+        name: tagId
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        description: >
+          Identifier of the Tag (`tagId` on TagModel). Confeature bounds it
+          to the integers a JSON client reads exactly.
+    get:
+      operationId: getTag
+      summary: Get a tag
+      description: Returns a tag. Aligned with ConfigCat's get-tag.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: The tag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagModel"
+        "400":
+          description: The tag id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        "403":
+          description: The token lacks tag:read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: updateTag
+      summary: Update a tag
+      description: >
+        Updates a tag: a field that is absent or null keeps its value; the
+        result is held to the create bounds. Aligned with ConfigCat's
+        update-tag.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTagModel"
+      responses:
+        "200":
+          description: The tag was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagModel"
+        "400":
+          description: A field outside ConfigCat's bounds, or an empty name (the message names the field). Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks tag:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      operationId: deleteTag
+      summary: Delete a tag
+      description: >
+        Deletes a tag. Aligned with ConfigCat's delete-tag.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "204":
+          description: The tag was deleted.
+        "400":
+          description: The tag id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks tag:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /v1/tags/{tagId}/settings:
+    parameters:
+      - in: path
+        name: tagId
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        description: >
+          Identifier of the Tag (`tagId` on TagModel). Confeature bounds it
+          to the integers a JSON client reads exactly.
+    get:
+      operationId: getSettingsByTag
+      summary: List the settings carrying a tag
+      description: >
+        Returns the feature flags and settings that carry the tag, in
+        ConfigCat's SettingModel shape. Confeature cannot assign a tag to a
+        setting yet, so the list is always empty. Aligned with ConfigCat's
+        get-settings-by-tag.
+      tags: [Tags]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: The settings carrying the tag.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SettingModel"
+        "400":
+          description: The tag id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        "403":
+          description: The token lacks tag:read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Tag not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/products/{productId}/configs:
     post:
       operationId: createConfig
@@ -4827,8 +5156,10 @@ components:
       bearerFormat: opaque
       description: >
         Management API bearer token. Each token carries a list of
-        scopes (e.g., `product:write`, `config:publish`); the API
-        enforces scope on every /v1/* route.
+        scopes (e.g., `product:write`, `config:publish`, `tag:read`); the
+        API enforces scope on every /v1/* route. The tag operations take
+        `tag:read` for the reads and `tag:write` for create, update and
+        delete.
     cookieAuth:
       type: apiKey
       in: cookie
@@ -6578,6 +6909,73 @@ components:
         usage:
           type: integer
           format: int32
+    TagModel:
+      type: object
+      description: >
+        A tag, as ConfigCat's model: a product-scoped label for sorting
+        feature flags and settings.
+      required:
+        - color
+        - name
+        - product
+        - tagId
+      properties:
+        product:
+          $ref: "#/components/schemas/ProductModel"
+        tagId:
+          type: integer
+          format: int64
+          description: Identifier of the Tag.
+        name:
+          type: string
+          description: Name of the Tag.
+        color:
+          type: string
+          nullable: true
+          description: The configured color of the Tag.
+    CreateTagModel:
+      type: object
+      additionalProperties: false
+      description: A new tag, as ConfigCat's model.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Name of the Tag.
+        color:
+          type: string
+          nullable: true
+          minLength: 0
+          maxLength: 255
+          description: >
+            Color of the Tag. Possible values: `panther`, `whale`, `salmon`,
+            `lizard`, `canary`, `koala`, or any HTML color code. Stored as
+            given: only its length is checked.
+    UpdateTagModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A tag update, as ConfigCat's model: a field that is absent or null
+        keeps its value; the result is held to the create bounds.
+      properties:
+        name:
+          type: string
+          nullable: true
+          minLength: 0
+          maxLength: 255
+          description: Name of the Tag.
+        color:
+          type: string
+          nullable: true
+          minLength: 0
+          maxLength: 255
+          description: >
+            Color of the Tag. Possible values: `panther`, `whale`, `salmon`,
+            `lizard`, `canary`, `koala`, or any HTML color code. Stored as
+            given: only its length is checked.
     UpdateComparisonValueListModel:
       type: object
       additionalProperties: false

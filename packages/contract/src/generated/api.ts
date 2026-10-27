@@ -703,6 +703,87 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/products/{productId}/tags": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * List tags
+     * @description Returns the product's tags, oldest first. Aligned with ConfigCat's get-tags.
+     */
+    get: operations["getTags"];
+    put?: never;
+    /**
+     * Create a tag
+     * @description Creates a tag in the product. Two tags of a product may share a name: ConfigCat's contract states no uniqueness. Aligned with ConfigCat's create-tag.
+     */
+    post: operations["createTag"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/tags/{tagId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a tag
+     * @description Returns a tag. Aligned with ConfigCat's get-tag.
+     */
+    get: operations["getTag"];
+    /**
+     * Update a tag
+     * @description Updates a tag: a field that is absent or null keeps its value; the result is held to the create bounds. Aligned with ConfigCat's update-tag.
+     */
+    put: operations["updateTag"];
+    post?: never;
+    /**
+     * Delete a tag
+     * @description Deletes a tag. Aligned with ConfigCat's delete-tag.
+     */
+    delete: operations["deleteTag"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/tags/{tagId}/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    /**
+     * List the settings carrying a tag
+     * @description Returns the feature flags and settings that carry the tag, in ConfigCat's SettingModel shape. Confeature cannot assign a tag to a setting yet, so the list is always empty. Aligned with ConfigCat's get-settings-by-tag.
+     */
+    get: operations["getSettingsByTag"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/products/{productId}/configs": {
     parameters: {
       query?: never;
@@ -2076,6 +2157,33 @@ export interface components {
       updatedAt: string;
       /** Format: int32 */
       usage: number;
+    };
+    /** @description A tag, as ConfigCat's model: a product-scoped label for sorting feature flags and settings. */
+    TagModel: {
+      product: components["schemas"]["ProductModel"];
+      /**
+       * Format: int64
+       * @description Identifier of the Tag.
+       */
+      tagId: number;
+      /** @description Name of the Tag. */
+      name: string;
+      /** @description The configured color of the Tag. */
+      color: string | null;
+    };
+    /** @description A new tag, as ConfigCat's model. */
+    CreateTagModel: {
+      /** @description Name of the Tag. */
+      name: string;
+      /** @description Color of the Tag. Possible values: `panther`, `whale`, `salmon`, `lizard`, `canary`, `koala`, or any HTML color code. Stored as given: only its length is checked. */
+      color?: string | null;
+    };
+    /** @description A tag update, as ConfigCat's model: a field that is absent or null keeps its value; the result is held to the create bounds. */
+    UpdateTagModel: {
+      /** @description Name of the Tag. */
+      name?: string | null;
+      /** @description Color of the Tag. Possible values: `panther`, `whale`, `salmon`, `lizard`, `canary`, `koala`, or any HTML color code. Stored as given: only its length is checked. */
+      color?: string | null;
     };
     /** @description One item of a list comparison value, as ConfigCat's model. */
     UpdateComparisonValueListModel: {
@@ -5344,6 +5452,378 @@ export interface operations {
         };
       };
       429: components["responses"]["RateLimited"];
+    };
+  };
+  getTags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The product's tags. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagModel"][];
+        };
+      };
+      /** @description The product id is not a UUID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Product not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  createTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Product (UUID). */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateTagModel"];
+      };
+    };
+    responses: {
+      /** @description The tag was created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagModel"];
+        };
+      };
+      /** @description A field outside ConfigCat's bounds (the message names the field). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Product not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  getTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The tag. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagModel"];
+        };
+      };
+      /** @description The tag id is not a positive integer. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Tag not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  updateTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateTagModel"];
+      };
+    };
+    responses: {
+      /** @description The tag was updated. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagModel"];
+        };
+      };
+      /** @description A field outside ConfigCat's bounds, or an empty name (the message names the field). Nothing is written. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Tag not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  deleteTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The tag was deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The tag id is not a positive integer. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Tag not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  getSettingsByTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the Tag (`tagId` on TagModel). Confeature bounds it to the integers a JSON client reads exactly. */
+        tagId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The settings carrying the tag. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingModel"][];
+        };
+      };
+      /** @description The tag id is not a positive integer. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks tag:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Tag not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   listConfigs: {
