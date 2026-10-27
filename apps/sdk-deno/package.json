@@ -40,7 +40,7 @@
     "@confeature/test-fixtures-sdk-parity": "workspace:*",
     "@confeature/test-harness-live-contract": "workspace:*",
     "@types/deno": "^2.7.0",
-    "@types/node": "^25.6.2",
+    "@types/node": "catalog:",
     "@typescript/native-preview": "catalog:",
     "configcat-js": "^9.4.0",
     "typescript": "^6.0.3",

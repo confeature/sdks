@@ -37,7 +37,7 @@
   "dependencies": {},
   "devDependencies": {
     "@confeature/sdk-shared": "workspace:*",
-    "@types/node": "^25.6.2",
+    "@types/node": "catalog:",
     "ajv": "^8.17.1",
     "configcat-js": "^9.4.0",
     "tsx": "^4.19.0",

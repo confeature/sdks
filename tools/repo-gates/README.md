@@ -7,6 +7,9 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
   jobs, pinned env, the frozen action surface, expression references, …).
 - `verify-declarations.mjs` checks that every gate is wired where
   `CONTRIBUTING.md`'s table says.
+- `lockfile-versions.test.mjs` fails if `pnpm-lock.yaml` resolves more than
+  one `@types/node` (or none): two versions make Node's global types depend
+  on which one pnpm hoists.
 - The `*.test.mjs` files run under `pnpm vp run -F @confeature/repo-gates test`.
 
 ## Row snapshots
