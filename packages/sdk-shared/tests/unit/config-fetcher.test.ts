@@ -38,19 +38,45 @@ const keyShapes = JSON.parse(
   ),
 ) as { valid: Array<{ name: string; key: string }> };
 
-// The shared wire corpus's malformed-key case (#803, FR-001): its key and its
-// path are real `go run` url.PathEscape output, so this test tracks the corpus
-// rather than a copy of it. Same relative-path read as above (#417).
-const malformedKeyCase = (
+/** The slice of a wire-corpus case these tests read. */
+interface CorpusCase {
+  id: string;
+  given: { sdkKey: string };
+  server: {
+    redirect?: { status: number; location: string };
+    status: number;
+    headers: Record<string, string>;
+  };
+  expected: {
+    requestPath?: string;
+    outcome: string;
+    errorClass?: string;
+    hasConfig: boolean;
+    resultingEtag?: string;
+    downgradeTargetRequests?: number;
+    failureReason?: string;
+  };
+}
+
+// The shared wire corpus, read by relative path (#417).
+const corpusCases = (
   JSON.parse(
     readFileSync(
       new URL("../../../test-fixtures-sdk-parity/fixtures/wire-cases.json", import.meta.url),
       "utf8",
     ),
-  ) as {
-    cases: Array<{ id: string; given: { sdkKey: string }; expected: { requestPath?: string } }>;
-  }
-).cases.find((c) => c.id === "request-path-malformed-key");
+  ) as { cases: CorpusCase[] }
+).cases;
+
+// The malformed-key case (#803, FR-001): its key and its path are real
+// `go run` url.PathEscape output, so this test tracks the corpus rather than a
+// copy of it.
+const malformedKeyCase = corpusCases.find((c) => c.id === "request-path-malformed-key");
+
+// The corpus 1.4 redirect cases (#994, epic #834), by id — the suite below
+// fails when one disappears, so it can never go vacuous.
+const REDIRECT_CASE_IDS = ["redirect-https-to-http-refused", "redirect-https-to-https-followed"];
+const redirectCases = corpusCases.filter((c) => c.server.redirect !== undefined);
 
 const SDK_KEY =
   "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -371,6 +397,105 @@ describe("HttpConfigFetcher — parse failure branches", () => {
     }
   });
 });
+
+/**
+ * A fetch that behaves like a SERVER runtime's (undici, bun, deno, workerd):
+ * the origin's first answer is the case's 30x; `redirect: "manual"` hands it
+ * to the caller, anything else follows the Location with no scheme check.
+ * `wire` records every URL that reached the network, so the downgrade target
+ * is counted at the transport — never reported by the SDK.
+ */
+function serverRuntimeFetch(
+  wireCase: CorpusCase,
+  body: string,
+): { wire: string[]; fetch: typeof fetch } {
+  const wire: string[] = [];
+  const redirect = wireCase.server.redirect!;
+  const target = (): Response =>
+    new Response(body, { status: wireCase.server.status, headers: wireCase.server.headers });
+  const fake = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = urlOf(input);
+    wire.push(url);
+    if (wire.length > 1) return Promise.resolve(target());
+    const origin = new URL(url);
+    const location = redirect.location
+      .replace("{origin}", origin.host)
+      .replace("{samePath}", origin.pathname + origin.search);
+    if (init?.redirect === "manual") {
+      return Promise.resolve(
+        new Response(null, { status: redirect.status, headers: { Location: location } }),
+      );
+    }
+    wire.push(location);
+    return Promise.resolve(target());
+  };
+  return { wire, fetch: fake as typeof fetch };
+}
+
+/** A logger that keeps every line it is handed, exception text included. */
+function capturingLogger(): { lines: string[]; logger: LoggerWrapper } {
+  const lines: string[] = [];
+  const capture: IConfigCatLogger = {
+    level: LogLevel.Debug,
+    log: (_level, eventId, message, exception) => {
+      lines.push(`${eventId} ${String(message)} ${textOf(exception)}`);
+    },
+  };
+  return { lines, logger: new LoggerWrapper(capture) };
+}
+
+describe("HttpConfigFetcher — corpus 1.4 redirect cases (#834)", () => {
+  test("the corpus still carries both redirect cases", () => {
+    expect(redirectCases.map((c) => c.id).sort()).toEqual(REDIRECT_CASE_IDS);
+  });
+
+  for (const wireCase of redirectCases) {
+    test(wireCase.id, async () => {
+      const { expected } = wireCase;
+      const { lines, logger } = capturingLogger();
+      const transport = serverRuntimeFetch(wireCase, JSON.stringify(makeConfig()));
+      vi.spyOn(globalThis, "fetch").mockImplementation(transport.fetch);
+
+      const out = await new HttpConfigFetcher(BASE_URL, SDK_KEY, SDK_VERSION, logger).fetchAsync(
+        null,
+        new AbortController().signal,
+      );
+
+      expect(transport.wire[0]!.startsWith("https://")).toBe(true);
+      const downgradeHits = transport.wire.slice(1).filter((u) => u.startsWith("http:")).length;
+      expect(downgradeHits, "requests to the http downgrade target").toBe(
+        expected.downgradeTargetRequests ?? 0,
+      );
+      expect(out.status).toBe(expected.outcome);
+      expect(out.status === "fetched").toBe(expected.hasConfig);
+      if (out.status === "fetched") expect(out.eTag).toBe(expected.resultingEtag);
+      if (out.status === "failed") {
+        expect(out.errorCode).toBe(errorCodeOf(expected.errorClass));
+        expect(out.errorMessage).toContain(expected.failureReason);
+        expect(out.exception).toBeUndefined();
+        // Logged through the fetch-failure event, the key redacted, and
+        // neither the Location nor any URL quoted.
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(`status=${expected.failureReason!}`);
+        for (const text of [out.errorMessage, ...lines]) {
+          expect(text).not.toContain(SDK_KEY);
+          expect(text).not.toContain("://");
+        }
+      }
+    });
+  }
+});
+
+/** The corpus errorClass → the shared SdkErrorCode it stands for. */
+function errorCodeOf(errorClass: string | undefined): string {
+  const codes: Record<string, string> = {
+    fetchFailed: "FETCH_FAILED",
+    timeout: "FETCH_TIMEOUT",
+    parseFailed: "PARSE_FAILED",
+    invalidSdkKey: "INVALID_SDK_KEY",
+  };
+  return codes[errorClass ?? ""] ?? `unmapped errorClass ${String(errorClass)}`;
+}
 
 describe("HttpConfigFetcher — SC-006 (SDK key never leaks)", () => {
   test("404 failure message does NOT include the raw SDK key", async () => {

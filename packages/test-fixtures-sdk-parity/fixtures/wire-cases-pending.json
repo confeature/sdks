@@ -5,14 +5,6 @@
       "ticket": "#996",
       "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
     },
-    "sdk-browser-js": {
-      "ticket": "#995",
-      "cases": ["redirect-https-to-http-refused"]
-    },
-    "sdk-bun": {
-      "ticket": "#995",
-      "cases": ["redirect-https-to-http-refused"]
-    },
     "sdk-cpp": {
       "ticket": "#999",
       "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
@@ -20,10 +12,6 @@
     "sdk-dart": {
       "ticket": "#1000",
       "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
-    },
-    "sdk-deno": {
-      "ticket": "#995",
-      "cases": ["redirect-https-to-http-refused"]
     },
     "sdk-dotnet": {
       "ticket": "#1001",
@@ -44,10 +32,6 @@
     "sdk-kotlin-mp": {
       "ticket": "#996",
       "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
-    },
-    "sdk-node": {
-      "ticket": "#995",
-      "cases": ["redirect-https-to-http-refused"]
     },
     "sdk-php": {
       "ticket": "#1001",

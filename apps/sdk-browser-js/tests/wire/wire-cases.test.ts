@@ -22,6 +22,11 @@
  *    `fetchAsync(sdkKey, eTag, signal)`).
  *  - error classification, URL shape, and `If-None-Match` round-trip
  *    are byte-identical — that is exactly what this suite gates.
+ *  - redirects (#834): this suite runs with no `isSecureContext`, so the
+ *    fetcher takes its server-runtime hop loop, which the mock transport
+ *    exercises. The browser branches are unit-tested in sdk-shared
+ *    (`tests/unit/redirect.test.ts`); the secure-context block is a platform
+ *    behaviour, observed in a real browser (#995).
  */
 
 import { afterEach, beforeEach, describe, vi } from "vitest";
