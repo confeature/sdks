@@ -210,6 +210,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: Currently authenticated user, with connected methods.
@@ -218,11 +219,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/MeWithMethods"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/auth/session:
     get:
       operationId: authSession
@@ -258,6 +264,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: query
           name: limit
@@ -287,11 +294,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/AuthEventModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/auth/accept-invite:
     post:
       operationId: authAcceptInvite
@@ -684,6 +696,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -700,6 +713,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SsoStartResponse"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: >
             No valid cookie session presented (session-only endpoint — a
             management-token bearer is rejected). Nothing is minted.
@@ -707,6 +723,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/auth/set-password:
     post:
       operationId: authSetPassword
@@ -723,6 +741,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -737,11 +756,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/SetPasswordResponse"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "409":
           description: >
             The account already has a password set — no overwrite. Use a
@@ -772,6 +796,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: >
@@ -782,11 +807,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/UnlinkGoogleResponse"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented (session-only endpoint).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "409":
           description: >
             Google is the account's only sign-in method (no password set) —
@@ -820,6 +850,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -847,6 +878,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
@@ -988,6 +1022,7 @@ paths:
       tags: [Tokens]
       security:
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -1008,6 +1043,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1027,6 +1065,7 @@ paths:
       tags: [Tokens]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: List of token summaries.
@@ -1035,11 +1074,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/TokenList"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1053,6 +1097,7 @@ paths:
       tags: [Tokens]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: id
@@ -1065,11 +1110,16 @@ paths:
         "204":
           description: Token revoked.
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1089,6 +1139,7 @@ paths:
       tags: [Products]
       security:
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -1109,6 +1160,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1140,6 +1194,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: query
           name: organizationId
@@ -1161,11 +1216,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/ProductModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1187,6 +1247,7 @@ paths:
       tags: [Products]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -1203,11 +1264,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1226,6 +1292,7 @@ paths:
       tags: [Products]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -1254,6 +1321,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1282,6 +1352,7 @@ paths:
       tags: [Products]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -1294,6 +1365,9 @@ paths:
         "204":
           description: Product deleted.
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1322,6 +1396,7 @@ paths:
       tags: [Environments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -1350,6 +1425,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1375,6 +1453,7 @@ paths:
       tags: [Environments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -1393,11 +1472,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/EnvironmentModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1417,6 +1501,7 @@ paths:
       tags: [Environments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: environmentId
@@ -1433,11 +1518,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/EnvironmentModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1456,6 +1546,7 @@ paths:
       tags: [Environments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: environmentId
@@ -1484,6 +1575,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1515,6 +1609,7 @@ paths:
       tags: [Environments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: environmentId
@@ -1539,6 +1634,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1579,6 +1677,7 @@ paths:
       tags: [Setting Values]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: environmentId
@@ -1618,11 +1717,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1649,6 +1753,7 @@ paths:
       tags: [Setting Values]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: environmentId
@@ -1696,6 +1801,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1758,6 +1866,7 @@ paths:
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: Every setting's value data in this environment.
@@ -1772,11 +1881,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1823,6 +1937,7 @@ paths:
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: The setting's value data.
@@ -1839,11 +1954,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -1880,6 +2000,7 @@ paths:
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - $ref: "#/components/parameters/ValueWriteReason"
         - $ref: "#/components/parameters/ValueWriteBypassApproval"
@@ -1900,6 +2021,9 @@ paths:
         "400":
           $ref: "#/components/responses/ValueWriteBadRequest"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -1947,6 +2071,7 @@ paths:
       tags: [Setting Values V2]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - $ref: "#/components/parameters/ValueWriteReason"
         - $ref: "#/components/parameters/ValueWriteBypassApproval"
@@ -1972,6 +2097,9 @@ paths:
         "400":
           $ref: "#/components/responses/ValueWriteBadRequest"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2025,6 +2153,7 @@ paths:
       tags: [Segments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: The product's segments.
@@ -2041,11 +2170,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks segment:read.
           content:
@@ -2074,6 +2208,7 @@ paths:
       tags: [Segments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -2094,6 +2229,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2135,6 +2273,7 @@ paths:
       tags: [Segments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: The segment.
@@ -2149,11 +2288,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks segment:read.
           content:
@@ -2180,6 +2324,7 @@ paths:
       tags: [Segments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       requestBody:
         required: true
         content:
@@ -2200,6 +2345,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2236,6 +2384,7 @@ paths:
       tags: [Segments]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "204":
           description: The segment was deleted.
@@ -2246,6 +2395,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2272,6 +2424,7 @@ paths:
       tags: [Configs]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -2300,6 +2453,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2325,6 +2481,7 @@ paths:
       tags: [Configs]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: productId
@@ -2343,11 +2500,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/ConfigModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -2367,6 +2529,7 @@ paths:
       tags: [Configs]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2383,11 +2546,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConfigModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -2406,6 +2574,7 @@ paths:
       tags: [Configs]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2434,6 +2603,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2462,6 +2634,7 @@ paths:
       tags: [Configs]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2486,6 +2659,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2530,6 +2706,7 @@ paths:
       tags: [Settings]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2562,6 +2739,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2612,6 +2792,7 @@ paths:
       tags: [Settings]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2632,11 +2813,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/SettingModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -2663,6 +2849,7 @@ paths:
       tags: [Settings]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2685,11 +2872,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Setting"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -2715,6 +2907,7 @@ paths:
       tags: [Settings]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2749,6 +2942,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2781,6 +2977,7 @@ paths:
       tags: [Settings]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2814,6 +3011,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2846,6 +3046,7 @@ paths:
       tags: [SDK Keys]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2869,11 +3070,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/SdkKeysModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the required scope.
           content:
@@ -2913,6 +3119,7 @@ paths:
       tags: [SDK Keys]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -2936,6 +3143,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SdkKeysModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -2981,6 +3191,7 @@ paths:
       tags: [SDK Keys]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -3020,6 +3231,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -3069,6 +3283,7 @@ paths:
       tags: [Publish]
       security:
         - bearerAuth: []
+        - basicAuth: []
       parameters:
         - in: path
           name: configId
@@ -3097,6 +3312,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid bearer token.
           content:
             application/json:
@@ -3132,6 +3350,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: Authenticated user details.
@@ -3140,11 +3359,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/MeModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/organizations:
     get:
       operationId: organizationsList
@@ -3163,6 +3387,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: List of Organizations.
@@ -3173,11 +3398,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/OrganizationModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/organizations/{organizationId}/members:
     get:
       operationId: organizationsMembersList
@@ -3201,6 +3431,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: List of Organization Members.
@@ -3209,11 +3440,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrganizationMembersModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "404":
           description: >
             Organization not found OR the authenticated user is not a
@@ -3246,6 +3482,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: The list of the Organization's invitations (possibly empty).
@@ -3256,11 +3493,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/InvitationModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "404":
           description: >
             Organization not found OR the authenticated user is not a
@@ -3290,6 +3532,7 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: The requested invitation.
@@ -3298,11 +3541,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "404":
           description: >
             Invitation does not exist OR belongs to another Organization.
@@ -3331,12 +3579,16 @@ paths:
       security:
         - cookieAuth: []
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "204":
           description: >
             The pending invitation was revoked. No content — a revoked
             invitation ceases to exist; there is no model to return.
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid credential presented.
           content:
             application/json:
@@ -3361,6 +3613,7 @@ paths:
       tags: [Audit logs]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3426,11 +3679,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/AuditLogItemModel"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Missing or invalid authentication.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
         "403":
           description: Token lacks the auditlog:read scope.
           content:
@@ -3483,6 +3741,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3511,6 +3770,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: Unauthenticated.
           content:
             application/json:
@@ -3536,6 +3798,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3545,6 +3808,15 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: Integrations (newest-first).
           content:
@@ -3566,6 +3838,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3581,6 +3854,15 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateGuardianIntegrationRequest"
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: Updated integration (no tokens).
           content:
@@ -3607,6 +3889,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3616,6 +3899,15 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "204":
           description: Deleted (its events are cascaded).
         "404":
@@ -3633,6 +3925,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3642,6 +3935,15 @@ paths:
             type: string
             format: uuid
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: Rotated — includes the new one-time webhookUrl.
           content:
@@ -3663,6 +3965,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3677,6 +3980,15 @@ paths:
           schema:
             $ref: "#/components/schemas/GuardianEventStatus"
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: Events (newest-first).
           content:
@@ -3698,6 +4010,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3707,6 +4020,15 @@ paths:
             type: integer
             format: int64
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: The updated event (status acknowledged).
           content:
@@ -3728,6 +4050,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3737,6 +4060,15 @@ paths:
             type: integer
             format: int64
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: The updated event (status dismissed).
           content:
@@ -3762,6 +4094,7 @@ paths:
       tags: [Guardian]
       security:
         - bearerAuth: []
+        - basicAuth: []
         - cookieAuth: []
       parameters:
         - in: path
@@ -3784,6 +4117,15 @@ paths:
                   type: string
                   description: Mandatory note if the scope requires one.
       responses:
+        "401":
+          description: Missing or invalid credential.
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: >
             Rolled back — the suspect flag's draft value restored and the event
@@ -3969,6 +4311,7 @@ paths:
       tags: [CLI Auth]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         "200":
           description: Token revoked (idempotent).
@@ -3977,11 +4320,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/CliLogoutResponse"
         "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
           description: No valid CLI token presented.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/cli/tokens:
     get:
       operationId: listCliTokens
@@ -4180,8 +4528,142 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/public-api-credentials:
+    get:
+      operationId: listPublicApiCredentials
+      summary: List the session user's own Public API credentials (cookie-session authed).
+      description: >
+        Owner-scoped list of the signed-in user's Public API credentials, the
+        username / password pairs accepted as HTTP Basic (`basicAuth`) on the
+        management API. Newest first, revoked ones included. NEVER returns the
+        password or its hash. ConfigCat manages these credentials on its
+        dashboard only and has no API for them; this route follows
+        Confeature's own `/v1/cli/tokens` pattern.
+      tags: [Public API Credentials]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The session user's own credentials (no password, no hash).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicApiCredentialList"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createPublicApiCredential
+      summary: Create a Public API credential for the session user (cookie-session authed).
+      description: >
+        Mints a username / password pair bound to the signed-in user. The
+        credential acts as its owner: org-scoped to the owner's current
+        membership and role on every request, never more. The `password` is in
+        this response ONLY (`Cache-Control: no-store`) and is stored hashed; it
+        cannot be read again. Cookie-session only, so no credential can mint
+        another. A user holds at most 10 live credentials: the 11th answers
+        `409 credential_limit` until one is revoked. Credentials do not expire;
+        revocation is the control.
+      tags: [Public API Credentials]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePublicApiCredentialRequest"
+      responses:
+        "201":
+          description: Created. The only response that carries the password.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicApiCredentialCreated"
+        "400":
+          description: The label is missing, empty or longer than 100 characters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >
+            `credential_limit` — the user already holds 10 live credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /v1/public-api-credentials/{id}:
+    delete:
+      operationId: revokePublicApiCredential
+      summary: Revoke the caller's own Public API credential (cookie-session authed; idempotent).
+      description: >
+        Owner-scoped revoke. The credential is refused with `401` on its next
+        request. A credential belonging to another user (or an unknown id)
+        returns the SAME uniform 404 — no cross-user enumeration. Idempotent: a
+        second revoke of the caller's own already-revoked credential is a 204
+        no-op.
+      tags: [Public API Credentials]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Credential revoked (idempotent).
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown id or another user's credential (uniform — no enumeration).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        A user-bound Public API credential sent as HTTP Basic
+        (`Authorization: Basic base64(username:password)`), the scheme
+        ConfigCat's Public Management API accepts (it names it `Basic`; this
+        contract keeps the `<kind>Auth` naming of its other schemes). The
+        principal is the credential's owner, scoped to the owner's CURRENT org
+        and role on every request, exactly as a dashboard session is: a
+        demotion or a removal binds on the next request. It is never a platform
+        operator, even when its owner is one: operator-only operations answer
+        `403` to it and need the owner's session. Mint, list and revoke
+        credentials on the dashboard's account security page
+        (`/account/security`, the `Public API Credentials` operations). Every
+        failure (wrong password, unknown username, revoked credential, removed
+        owner, malformed header) is the same `401 invalid_credentials` with a
+        `WWW-Authenticate: Basic` challenge; too many failures answer
+        `429 too_many_attempts` (see `TooManyAttempts`).
     bearerAuth:
       type: http
       scheme: bearer
@@ -4251,6 +4733,24 @@ components:
         The `lastVersionId` the client last read. When it no longer matches
         the stored value, the write is refused with 409 and nothing changes.
   responses:
+    TooManyAttempts:
+      description: >
+        `too_many_attempts` — too many FAILED HTTP Basic attempts. From one IP
+        (a burst of 20, then one per 6 s) a Basic request is refused before
+        verification unless its username verified successfully in the last 30
+        days; on one username (a burst of 10, then one per 30 s) only further
+        failures are refused, so a working credential is never locked out. Wait
+        `Retry-After` seconds. The body names no key.
+      headers:
+        Retry-After:
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     ConfigV6:
       description: Raw config_v6 JSON payload.
       headers:
@@ -4355,6 +4855,15 @@ components:
           schema:
             $ref: "#/components/schemas/RateLimited"
   headers:
+    BasicChallenge:
+      required: false
+      description: >
+        `Basic realm="Confeature Management API", charset="UTF-8"`. Sent on a
+        401 ONLY when the request carried HTTP Basic (`basicAuth`): a challenge
+        on every 401 would make a browser prompt on dashboard calls and cache an
+        ambient credential.
+      schema:
+        type: string
     ConfigCacheControl:
       required: true
       description: >
@@ -7017,6 +7526,8 @@ components:
         - cli_token_revoked
         - management_token_minted
         - management_token_revoked
+        - public_api_credential_created
+        - public_api_credential_revoked
     AuditLogType:
       type: string
       description: >
@@ -7461,6 +7972,77 @@ components:
           items:
             $ref: "#/components/schemas/CliTokenSummary"
       description: The session user's own CLI logins.
+    CreatePublicApiCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: A name the owner recognises the credential by (e.g. "Kill switch").
+      description: Request body for POST /v1/public-api-credentials.
+    PublicApiCredentialCreated:
+      type: object
+      additionalProperties: false
+      required: [id, username, password, label, createdAt]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+          description: >
+            The HTTP Basic user-id, `cfapi_` and 22 url-safe characters. Not a
+            secret: it is shown in the credential list. Never contains a colon.
+        password:
+          type: string
+          description: >
+            The HTTP Basic password, `cfapi_secret_` and 43 url-safe characters.
+            Shown in this response only; the server keeps its hash.
+        label:
+          type: string
+        createdAt:
+          type: integer
+          description: Unix milliseconds.
+      description: >
+        A freshly minted Public API credential. The only body that ever carries
+        the password.
+    PublicApiCredentialSummary:
+      type: object
+      additionalProperties: false
+      required: [id, username, label, createdAt, lastUsedAt, revokedAt]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        label:
+          type: string
+        createdAt:
+          type: integer
+          description: Unix milliseconds.
+        lastUsedAt:
+          type: integer
+          nullable: true
+          description: Unix milliseconds, refreshed at most every 5 minutes.
+        revokedAt:
+          type: integer
+          nullable: true
+          description: Unix milliseconds; set once the credential is revoked.
+      description: >
+        One Public API credential in the owner's list. NEVER carries the
+        password or its hash.
+    PublicApiCredentialList:
+      type: object
+      additionalProperties: false
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicApiCredentialSummary"
+      description: The session user's own Public API credentials, newest first.
     McpAuthorizeApproveRequest:
       type: object
       additionalProperties: false
@@ -7592,6 +8174,15 @@ tags:
       here enters the SDK eval wire (`config_v6` / `ConfigV6`). Auth separation:
       the public authorize / token endpoints never read account data
       and only yield a token AFTER an authenticated cookie-session approval.
+  - name: Public API Credentials
+    description: >
+      User-bound Public API credentials: the username / password pairs a
+      ConfigCat-compatible client (CLI, Terraform, MCP server, the management
+      kill switch) sends as HTTP Basic (`basicAuth`) to the management API.
+      A credential acts as its owner, org-scoped to the owner's current
+      membership and role, never more. Minted, listed and revoked by the owner
+      over a cookie session only (ConfigCat manages them on its dashboard and
+      has no API for them). The password is shown once and stored hashed.
   - name: MCP Auth
     description: >
       Dashboard consent endpoints for the remote MCP server

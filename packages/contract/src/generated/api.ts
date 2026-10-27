@@ -1341,6 +1341,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/public-api-credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the session user's own Public API credentials (cookie-session authed).
+     * @description Owner-scoped list of the signed-in user's Public API credentials, the username / password pairs accepted as HTTP Basic (`basicAuth`) on the management API. Newest first, revoked ones included. NEVER returns the password or its hash. ConfigCat manages these credentials on its dashboard only and has no API for them; this route follows Confeature's own `/v1/cli/tokens` pattern.
+     */
+    get: operations["listPublicApiCredentials"];
+    put?: never;
+    /**
+     * Create a Public API credential for the session user (cookie-session authed).
+     * @description Mints a username / password pair bound to the signed-in user. The credential acts as its owner: org-scoped to the owner's current membership and role on every request, never more. The `password` is in this response ONLY (`Cache-Control: no-store`) and is stored hashed; it cannot be read again. Cookie-session only, so no credential can mint another. A user holds at most 10 live credentials: the 11th answers `409 credential_limit` until one is revoked. Credentials do not expire; revocation is the control.
+     */
+    post: operations["createPublicApiCredential"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/public-api-credentials/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke the caller's own Public API credential (cookie-session authed; idempotent).
+     * @description Owner-scoped revoke. The credential is refused with `401` on its next request. A credential belonging to another user (or an unknown id) returns the SAME uniform 404 — no cross-user enumeration. Idempotent: a second revoke of the caller's own already-revoked credential is a 204 no-op.
+     */
+    delete: operations["revokePublicApiCredential"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2427,7 +2471,9 @@ export interface components {
       | "cli_token_minted"
       | "cli_token_revoked"
       | "management_token_minted"
-      | "management_token_revoked";
+      | "management_token_revoked"
+      | "public_api_credential_created"
+      | "public_api_credential_revoked";
     /**
      * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature values `configPublished` and `settingTargetingRulesChanged` (a change to a value's targeting rules, its sensitive comparison values redacted; ConfigCat records it under `settingValueChanged`). Confeature's emitter only produces the config-plane subset it supports.
      * @enum {string}
@@ -2681,6 +2727,38 @@ export interface components {
     CliTokenList: {
       tokens: components["schemas"]["CliTokenSummary"][];
     };
+    /** @description Request body for POST /v1/public-api-credentials. */
+    CreatePublicApiCredentialRequest: {
+      /** @description A name the owner recognises the credential by (e.g. "Kill switch"). */
+      label: string;
+    };
+    /** @description A freshly minted Public API credential. The only body that ever carries the password. */
+    PublicApiCredentialCreated: {
+      id: string;
+      /** @description The HTTP Basic user-id, `cfapi_` and 22 url-safe characters. Not a secret: it is shown in the credential list. Never contains a colon. */
+      username: string;
+      /** @description The HTTP Basic password, `cfapi_secret_` and 43 url-safe characters. Shown in this response only; the server keeps its hash. */
+      password: string;
+      label: string;
+      /** @description Unix milliseconds. */
+      createdAt: number;
+    };
+    /** @description One Public API credential in the owner's list. NEVER carries the password or its hash. */
+    PublicApiCredentialSummary: {
+      id: string;
+      username: string;
+      label: string;
+      /** @description Unix milliseconds. */
+      createdAt: number;
+      /** @description Unix milliseconds, refreshed at most every 5 minutes. */
+      lastUsedAt: number | null;
+      /** @description Unix milliseconds; set once the credential is revoked. */
+      revokedAt: number | null;
+    };
+    /** @description The session user's own Public API credentials, newest first. */
+    PublicApiCredentialList: {
+      credentials: components["schemas"]["PublicApiCredentialSummary"][];
+    };
     /** @description Request body for POST /v1/mcp/authorize/approve. */
     McpAuthorizeApproveRequest: {
       /** @description The opaque CSRF state that binds the dashboard consent decision to the MCP server's `mcp:authreq:{state}` KV record carrying the parsed OAuth request. */
@@ -2722,6 +2800,16 @@ export interface components {
     };
   };
   responses: {
+    /** @description `too_many_attempts` — too many FAILED HTTP Basic attempts. From one IP (a burst of 20, then one per 6 s) a Basic request is refused before verification unless its username verified successfully in the last 30 days; on one username (a burst of 10, then one per 30 s) only further failures are refused, so a working credential is never locked out. Wait `Retry-After` seconds. The body names no key. */
+    TooManyAttempts: {
+      headers: {
+        "Retry-After": number;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
     /** @description Raw config_v6 JSON payload. */
     ConfigV6: {
       headers: {
@@ -2813,6 +2901,8 @@ export interface components {
   };
   requestBodies: never;
   headers: {
+    /** @description `Basic realm="Confeature Management API", charset="UTF-8"`. Sent on a 401 ONLY when the request carried HTTP Basic (`basicAuth`): a challenge on every 401 would make a browser prompt on dashboard calls and cache an ambient credential. */
+    BasicChallenge: string;
     /** @description Always `max-age=0, must-revalidate`, as ConfigCat's CDN sends it: caches must revalidate before reuse, so a stale flag set is never served from a heuristic freshness window. */
     ConfigCacheControl: "max-age=0, must-revalidate";
     /** @description Strong, quoted, content-derived ETag. Present whenever the config was published with one; send it back as `If-None-Match`. */
@@ -3003,12 +3093,14 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   authSession: {
@@ -3057,12 +3149,14 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   authAcceptInvite: {
@@ -3368,12 +3462,14 @@ export interface operations {
       /** @description No valid cookie session presented (session-only endpoint — a management-token bearer is rejected). Nothing is minted. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   authSetPassword: {
@@ -3401,6 +3497,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3416,6 +3513,7 @@ export interface operations {
           "application/json": components["schemas"]["SetPasswordError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   authUnlinkGoogle: {
@@ -3439,6 +3537,7 @@ export interface operations {
       /** @description No valid credential presented (session-only endpoint). */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3454,6 +3553,7 @@ export interface operations {
           "application/json": components["schemas"]["UnlinkGoogleError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createInvite: {
@@ -3490,6 +3590,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3626,6 +3727,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3641,6 +3743,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createToken: {
@@ -3677,6 +3780,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3717,6 +3821,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3741,6 +3846,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   listProducts: {
@@ -3767,6 +3873,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3791,6 +3898,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createProduct: {
@@ -3827,6 +3935,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3869,6 +3978,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3893,6 +4003,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   deleteProduct: {
@@ -3917,6 +4028,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -3981,6 +4093,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4032,6 +4145,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4056,6 +4170,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createEnvironment: {
@@ -4095,6 +4210,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4146,6 +4262,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4170,6 +4287,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   deleteEnvironment: {
@@ -4207,6 +4325,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4271,6 +4390,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4335,6 +4455,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4359,6 +4480,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   setSettingValue: {
@@ -4402,6 +4524,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4475,6 +4598,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4499,6 +4623,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   getSettingValueV2: {
@@ -4536,6 +4661,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4560,6 +4686,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   replaceSettingValueV2: {
@@ -4600,6 +4727,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4683,6 +4811,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4754,6 +4883,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4778,6 +4908,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createSegment: {
@@ -4817,6 +4948,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4886,6 +5018,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -4910,6 +5043,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   updateSegment: {
@@ -4949,6 +5083,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5016,6 +5151,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5067,6 +5203,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5091,6 +5228,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createConfig: {
@@ -5130,6 +5268,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5181,6 +5320,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5205,6 +5345,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   deleteConfig: {
@@ -5242,6 +5383,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5306,6 +5448,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5357,6 +5500,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5381,6 +5525,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   createSetting: {
@@ -5420,6 +5565,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5493,6 +5639,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5517,6 +5664,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   deleteSetting: {
@@ -5556,6 +5704,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5622,6 +5771,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5675,6 +5825,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5699,6 +5850,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   rotateSdkKeys: {
@@ -5727,6 +5879,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5800,6 +5953,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5873,6 +6027,7 @@ export interface operations {
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5921,12 +6076,14 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   organizationsList: {
@@ -5950,12 +6107,14 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   organizationsMembersList: {
@@ -5981,6 +6140,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -5996,6 +6156,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   listInvitations: {
@@ -6021,6 +6182,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6036,6 +6198,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   getInvitation: {
@@ -6061,6 +6224,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6076,6 +6240,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   deleteInvitation: {
@@ -6099,6 +6264,7 @@ export interface operations {
       /** @description No valid credential presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6151,6 +6317,7 @@ export interface operations {
       /** @description Missing or invalid authentication. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6175,6 +6342,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   receiveGuardianSignal: {
@@ -6231,6 +6399,16 @@ export interface operations {
           "application/json": components["schemas"]["GuardianIntegration"][];
         };
       };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       /** @description Product not found / cross-org. */
       404: {
         headers: {
@@ -6278,6 +6456,7 @@ export interface operations {
       /** @description Unauthenticated. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6322,6 +6501,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
       };
       /** @description Integration not found / cross-org. */
       404: {
@@ -6368,6 +6557,16 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       /** @description Integration not found / cross-org. */
       404: {
         headers: {
@@ -6398,6 +6597,16 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GuardianIntegrationCreated"];
+        };
+      };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
       /** @description Integration not found / cross-org. */
@@ -6434,6 +6643,16 @@ export interface operations {
           "application/json": components["schemas"]["GuardianEvent"][];
         };
       };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       /** @description Product not found / cross-org. */
       404: {
         headers: {
@@ -6463,6 +6682,16 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GuardianEvent"];
+        };
+      };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
       /** @description Event not found / cross-org. */
@@ -6495,6 +6724,16 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GuardianEvent"];
+        };
+      };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
       /** @description Event not found / cross-org. */
@@ -6541,6 +6780,16 @@ export interface operations {
       /** @description A change note (reason) is required for this change. */
       400: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid credential. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
@@ -6766,12 +7015,14 @@ export interface operations {
       /** @description No valid CLI token presented. */
       401: {
         headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["Error"];
         };
       };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   listCliTokens: {
@@ -6955,6 +7206,126 @@ export interface operations {
     };
   };
   revokeMcpToken: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Credential revoked (idempotent). */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Unknown id or another user's credential (uniform — no enumeration). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  listPublicApiCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The session user's own credentials (no password, no hash). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublicApiCredentialList"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  createPublicApiCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePublicApiCredentialRequest"];
+      };
+    };
+    responses: {
+      /** @description Created. The only response that carries the password. */
+      201: {
+        headers: {
+          "Cache-Control"?: "no-store";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PublicApiCredentialCreated"];
+        };
+      };
+      /** @description The label is missing, empty or longer than 100 characters. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description `credential_limit` — the user already holds 10 live credentials. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  revokePublicApiCredential: {
     parameters: {
       query?: never;
       header?: never;
