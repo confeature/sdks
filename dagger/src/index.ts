@@ -128,7 +128,8 @@ function jsWorkspace(source: Directory, platform?: Platform): Container {
 
 /**
  * Build the shared Android-SDK container (JDK 17 + cmdline-tools + platform-34 +
- * build-tools), used by `androidTest` and `kotlinMpTest`. Both apply the Android
+ * build-tools), used by `androidTest`, and by `kotlinMpTest` through
+ * `kotlinMpToolchain`. Both apply the Android
  * Gradle Plugin (kotlin-mp's `androidTarget` needs ANDROID_HOME even to
  * *configure* its `jvmTest` task), so neither can run on a bare JDK image.
  *
@@ -138,6 +139,11 @@ function jsWorkspace(source: Directory, platform?: Platform): Container {
  * target. License acceptance is non-interactive (`yes | sdkmanager --licenses`).
  */
 function androidSdkContainer(source: Directory): Container {
+  return androidSdkToolchain().withMountedDirectory("/work", source);
+}
+
+/** {@link androidSdkContainer} before the source is mounted, so a layer added on top stays cached. */
+function androidSdkToolchain(): Container {
   const cmdlineTools =
     "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip";
   // Pin to linux/amd64: AGP fetches `com.android.tools.build:aapt2:*:linux`, an
@@ -176,7 +182,42 @@ function androidSdkContainer(source: Directory): Container {
         `  "$TOOLS/sdkmanager" 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' >/dev/null`,
         "fi",
       ].join("\n"),
+    ]);
+}
+
+/**
+ * Chrome for Testing's headless shell, pinned by version and SHA-256: the browser
+ * kotlin-mp's `jsBrowserTest` runs in (#928). Without it the gate skipped the
+ * browser target. The zip carries `deb.deps`, Chrome's own list of the Debian
+ * packages it needs; `apt-get satisfy` installs them under whatever names the
+ * base image's release gives them (the t64 renames included), so the list is
+ * never restated here. Karma finds the binary through `CHROME_BIN`.
+ */
+const CHROME_FOR_TESTING = {
+  version: "156.0.8078.47",
+  sha256: "0d5acc62c3e213f8c87d3c298d66ffcf9a236d12ea4b9f85318bf85dbc279daa",
+};
+
+/** kotlin-mp's toolchain: the Android SDK image plus the pinned headless Chrome. */
+function kotlinMpToolchain(source: Directory): Container {
+  const { version, sha256 } = CHROME_FOR_TESTING;
+  const zip = `https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-headless-shell-linux64.zip`;
+  return androidSdkToolchain()
+    .withExec([
+      "bash",
+      "-eu",
+      "-c",
+      [
+        `curl -sSfLo /tmp/chrome.zip ${zip}`,
+        `echo "${sha256}  /tmp/chrome.zip" | sha256sum -c -`,
+        "unzip -q /tmp/chrome.zip -d /opt",
+        "rm /tmp/chrome.zip",
+        "apt-get update >/dev/null",
+        'apt-get satisfy -y --no-install-recommends "$(paste -sd, /opt/chrome-headless-shell-linux64/deb.deps)" >/dev/null',
+        "rm -rf /var/lib/apt/lists/*",
+      ].join("\n"),
     ])
+    .withEnvVariable("CHROME_BIN", "/opt/chrome-headless-shell-linux64/chrome-headless-shell")
     .withMountedDirectory("/work", source);
 }
 
@@ -439,7 +480,7 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   rust: { build: rustToolchain },
   java: { build: javaToolchain },
   android: { build: androidSdkContainer },
-  "kotlin-mp": { build: androidSdkContainer },
+  "kotlin-mp": { build: kotlinMpToolchain },
   dotnet: { build: dotnetToolchain },
   dart: { build: dartToolchain },
   elixir: { build: elixirToolchain },
@@ -852,12 +893,12 @@ export class Confeature {
     return `${lastLine} (Tier 3 androidTest)`;
   }
 
-  /** Run apps/sdk-kotlin-mp's `check`, minus jsBrowserTest: the image has no browser. */
+  /** Run apps/sdk-kotlin-mp's `check`, its browser target included (#928). */
   @func()
   async kotlinMpTest(source: Directory): Promise<string> {
-    const result = await androidSdkContainer(source)
+    const result = await kotlinMpToolchain(source)
       .withWorkdir("/work/apps/sdk-kotlin-mp")
-      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check -x jsBrowserTest"])
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 kotlinMpTest)`;

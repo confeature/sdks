@@ -107,7 +107,19 @@ kotlin {
     // --- JS (IR) target ---
     js(IR) {
         nodejs()
-        browser()
+        browser {
+            testTask {
+                useKarma {
+                    // Chrome will not start as root without --no-sandbox, and the Dagger gate
+                    // (kotlinMpTest) runs as root (#928). A developer's own Chrome keeps its sandbox.
+                    if (System.getProperty("user.name") == "root") {
+                        useChromeHeadlessNoSandbox()
+                    } else {
+                        useChromeHeadless()
+                    }
+                }
+            }
+        }
         binaries.library()
     }
 
