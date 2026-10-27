@@ -1278,3 +1278,100 @@ describe("the sandbox bin never writes through to a host file (#932)", () => {
     expect(() => writeProgram(scratch(), "../escape", "exit 0", BASH)).toThrow(/not a file name/);
   });
 });
+
+describe("the Hex jobs, verbatim: publish-hex uploads the pack job's tarball, the key never in argv (#909)", () => {
+  const MANIFEST_UNITS = JSON.parse(
+    readFileSync(join(ROOT, "dagger/sdk-manifest.json"), "utf8"),
+  ).publish;
+  const HEX = MANIFEST_UNITS.filter((u) => u.registry === "hex");
+  const FILE = "confeature_client-1.2.3.tar";
+  const TABLE = (key) => ({
+    "needs.pack-hex.outputs.sha256": "s",
+    "needs.pack-hex.outputs.file": FILE,
+    "needs.setup.outputs.coordinates": "confeature_client",
+    "needs.setup.outputs.version": "1.2.3",
+    "secrets.HEX_API_KEY": key,
+  });
+  /** curl's stub: its argv, and whether its env holds the key, one line each. */
+  const CURL_SEES = `${RECORD("curl")}
+if [ "$HEX_API_KEY" = "test-hex-key" ]; then echo "env holds the key" >> "$ARGV_LOG"; fi
+exit 0`;
+  const upload = (key) => {
+    const ws = scratch();
+    mkdirSync(join(ws, "release"));
+    writeFileSync(join(ws, "release", FILE), "tarball bytes");
+    const log = join(scratch(), "argv.log");
+    const s = step(PUBLISH, "publish-hex", "Upload");
+    const r = runBlock(s, ws, resolveEnv(s, TABLE(key)), {
+      stubs: { curl: CURL_SEES },
+      test: { ARGV_LOG: log },
+    });
+    return { r, argv: argvLog(log), ws };
+  };
+
+  it("there is exactly one Hex unit, and the upload URL names its coordinates", () => {
+    expect(HEX.map((u) => u.coordinates)).toEqual(["confeature_client"]);
+    const run = PUBLISH.jobs["publish-hex"].steps.find((x) => x.name === "Upload").run;
+    expect(run).toContain(
+      `'https://hex.pm/api/packages/${HEX[0].coordinates}/releases?replace=false'`,
+    );
+  });
+
+  it("curl POSTs ./release/<the pack job's file> to hex.pm, reading the key from its env only", () => {
+    const { r, argv, ws } = upload("test-hex-key");
+    expect(r.status, r.stderr).toBe(0);
+    expect(argv).toEqual([
+      `curl -sS --fail-with-body --tlsv1.2 --proto =https --variable %HEX_API_KEY --expand-header authorization: {{HEX_API_KEY}} --header content-type: application/octet-stream --data-binary @release/${FILE} https://hex.pm/api/packages/confeature_client/releases?replace=false`,
+      "env holds the key",
+    ]);
+    expect(argv.join("\n")).not.toContain("test-hex-key");
+    expect(existsSync(join(ws, "release", FILE))).toBe(true);
+  });
+
+  it("an unset HEX_API_KEY fails the job before curl runs", () => {
+    const { r, argv } = upload("");
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toMatch(/HEX_API_KEY is not set in environment sdk-publish-hex/);
+    expect(argv).toEqual([]);
+  });
+
+  it("the digest check accepts the pack job's tarball and refuses any other", () => {
+    const s = step(PUBLISH, "publish-hex", "Check the artifact against the pack job's digest");
+    const ws = scratch();
+    mkdirSync(join(ws, "release"));
+    writeFileSync(join(ws, "release", FILE), "tarball bytes");
+    const env = resolveEnv(s, {
+      ...TABLE("k"),
+      "needs.pack-hex.outputs.sha256": sha256Text("tarball bytes"),
+    });
+    expect(runBlock(s, ws, env).status).toBe(0);
+    writeFileSync(join(ws, "release", FILE), "other bytes");
+    expect(runBlock(s, ws, env).status).not.toBe(0);
+  });
+
+  it("pack-hex builds <coordinates>-<version>.tar with mix hex.build, MIX_ENV=prod", () => {
+    const s = step(PUBLISH, "pack-hex", "Pack the release artifact (mix hex.build, the dry run)");
+    const log = join(scratch(), "argv.log");
+    const temp = scratch();
+    const r = runBlock(
+      s,
+      scratch(),
+      {
+        ...resolveEnv(s, {
+          "needs.setup.outputs.coordinates": "confeature_client",
+          "needs.setup.outputs.version": "1.2.3",
+        }),
+        RUNNER_TEMP: temp,
+      },
+      {
+        tools: ["mkdir"],
+        stubs: { mix: `${RECORD("mix")}\n[ "$MIX_ENV" = prod ] || exit 3` },
+        test: { ARGV_LOG: log },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(argvLog(log)).toEqual([
+      `mix hex.build --output ${temp}/release/confeature_client-1.2.3.tar`,
+    ]);
+  });
+});

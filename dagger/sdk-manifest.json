@@ -375,8 +375,7 @@
         "file": "apps/sdk-elixir/mix.exs",
         "pattern": "^  @version \"([^\"]+)\"$"
       },
-      "after": [],
-      "blockedBy": "#805 — mix compile fails outside MIX_ENV=test"
+      "after": []
     },
     {
       "name": "go",

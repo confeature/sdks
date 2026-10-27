@@ -1546,6 +1546,7 @@ describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
       "CLOUDFLARE_ACCOUNT_ID",
       "DEPLOY_KEY",
       "GH_TOKEN",
+      "HEX_API_KEY",
       "MAVEN_R2_ACCESS_KEY_ID",
       "MAVEN_R2_SECRET_ACCESS_KEY",
       "NUGET_API_KEY",
@@ -2644,5 +2645,128 @@ describe("the attest job is rule 2's one named exception, and no wider (#903)", 
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("the Hex pair is held to every rule (#909)", () => {
+  const upload = (w) => w[P].jobs["publish-hex"].steps.find((s) => s.name === "Upload");
+  const swapRun = (from, to) => (w) => {
+    const s = upload(w);
+    if (!s.run.includes(from)) throw new Error(`the Upload step has no ${from}`);
+    s.run = s.run.replace(from, to);
+  };
+  const beam = (w) =>
+    w[P].jobs["pack-hex"].steps.find((s) => String(s.uses).startsWith("erlef/setup-beam@"));
+  it.each([
+    [
+      "the key as a shell word in curl's argv",
+      swapRun("--variable %HEX_API_KEY", '-H "authorization: ${HEX_API_KEY}"'),
+      /curl is not a command environment sdk-publish-hex's job runs|credential HEX_API_KEY/,
+    ],
+    [
+      "another destination",
+      swapRun("https://hex.pm/api/", "https://hex.attacker.example/api/"),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "replacing a published version",
+      swapRun("replace=false", "replace=true"),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "another uploaded file",
+      swapRun('"@release/${ARTIFACT}"', '"@publish-tmp/other.tar"'),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "an OTP range",
+      (w) => {
+        w[P].env.OTP_VERSION = "27";
+      },
+      /env OTP_VERSION is 27, not an exact version/,
+    ],
+    [
+      "an Elixir minor only",
+      (w) => {
+        w[P].env.ELIXIR_VERSION = "1.17";
+      },
+      /env ELIXIR_VERSION is 1\.17, not an exact version/,
+    ],
+    [
+      "an unpinned Hex",
+      (w) => {
+        w[P].env.HEX_VERSION = "latest";
+      },
+      /env HEX_VERSION is latest, not an exact version/,
+    ],
+    [
+      "setup-beam guessing versions",
+      (w) => {
+        beam(w).with["version-type"] = "loose";
+      },
+      /pack-hex/,
+    ],
+    [
+      "setup-beam installing the latest Hex",
+      (w) => {
+        beam(w).with["install-hex"] = true;
+      },
+      /pack-hex/,
+    ],
+    [
+      "setup-beam by tag",
+      (w) => {
+        beam(w).uses = "erlef/setup-beam@v1";
+      },
+      /uses erlef\/setup-beam@v1 without a full commit SHA/,
+    ],
+    [
+      "an OIDC token on the key's job",
+      (w) => {
+        w[P].jobs["publish-hex"].permissions["id-token"] = "write";
+      },
+      /publish-hex/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    expect(added(mutate)).toEqual(expect.arrayContaining([expect.stringMatching(why)]));
+  });
+
+  const withSettings = (edit) => {
+    const s = structuredClone(settings);
+    edit(s);
+    return allFindings({
+      settings: s,
+      manifest,
+      workflows: BASE,
+      scriptOutputs: SCRIPTS,
+      actions: ACTIONS,
+    }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
+  };
+  it("refuses setup-beam once it is no longer allowed", () =>
+    expect(
+      withSettings((s) => {
+        s.allowedActions = s.allowedActions.filter((a) => a !== "erlef/setup-beam@*");
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/uses erlef\/setup-beam, which .* does not allow/),
+      ]),
+    ));
+  it("refuses HEX_API_KEY once the inventory no longer declares it", () =>
+    expect(
+      withSettings((s) => {
+        s.environments.find((e) => e.name === "sdk-publish-hex").secrets = [];
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /reads secret HEX_API_KEY, which environment sdk-publish-hex does not declare/,
+        ),
+      ]),
+    ));
+  it("declares HEX_API_KEY with a rotation date", () => {
+    const [secret] = settings.environments.find((e) => e.name === "sdk-publish-hex").secrets;
+    expect(secret).toMatchObject({ name: "HEX_API_KEY", kind: "token" });
+    expect(secret.rotateBy).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

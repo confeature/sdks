@@ -178,6 +178,14 @@ export const GATE_WORKFLOWS = [VERIFY_WORKFLOW, SDK_GATES_WORKFLOW];
 export const CACHE_FREE_WORKFLOWS = [SDK_GATES_WORKFLOW];
 
 const EXACT = /^\d+\.\d+\.\d+$/;
+/**
+ * An exact Erlang/OTP release: OTP numbers its releases with two to four
+ * parts (27.0, 27.3.4, 27.3.4.19), each one exact (#909). A range, `27`,
+ * `27.x` or `latest` is none.
+ */
+const OTP_PIN = /^\d+\.\d+(?:\.\d+){0,2}$/;
+/** The exact form each *_VERSION takes: OTP's own, every other one's X.Y.Z. */
+const exactPin = (name) => (name === "OTP_VERSION" ? OTP_PIN : EXACT);
 /** Code-unit order, the order `.sort()` gives strings, said explicitly. */
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -269,6 +277,9 @@ const triggersOf = (doc) => {
  *     takes TypeScript source, never a prebuilt archive. No checkout.
  *   pub.dev (#900): `dart pub publish --force` packs and uploads in one
  *     command, and pub.dev accepts it only from the OIDC job.
+ *   hex.pm (#909): one curl POST of the pack job's sha-checked tarball;
+ *     `mix hex.publish` cannot upload a prebuilt package (it packs the
+ *     checkout again, running mix.exs beside the key).
  *   maven.confeature.io (#902): maven-r2-upload.sh, whose ordering and
  *     immutability logic is outside the strict grammar (round 3).
  *   cli.confeature.io (#801): publish-r2.sh is the only writer of the bucket
@@ -289,6 +300,13 @@ export const PUBLISH_EXCEPTIONS = {
       /^deno publish --config publish-tmp\/jsr\/jsr\.json$/,
     ],
     "publish-maven": [/^bash tools\/sdk-pack\/maven-r2-upload\.sh release$/],
+    // Hex (#909): hex.pm takes the pack job's tarball as one POST, the
+    // request hex_core's publish makes; no mix, no checkout. curl imports the
+    // key from its env (`--variable %HEX_API_KEY`) into the one header, so no
+    // shell word and no argv holds it; the destination is literal.
+    "publish-hex": [
+      /^curl -sS --fail-with-body --tlsv1\.2 --proto =https --variable %HEX_API_KEY --expand-header 'authorization: \{\{HEX_API_KEY\}\}' --header 'content-type: application\/octet-stream' --data-binary "@release\/\$\{ARTIFACT\}" 'https:\/\/hex\.pm\/api\/packages\/confeature_client\/releases\?replace=false'$/,
+    ],
   },
   [CLI_WORKFLOW]: {
     // Each job holding a token re-checks that the tag is on main (round 10).
@@ -332,6 +350,7 @@ export const PIN = {
   rubygemsAuth: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a",
   setupDart: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
   setupDeno: "denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282",
+  setupBeam: "erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124",
   setupDotnet: "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
   setupGo: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
   setupJava: "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
@@ -560,6 +579,23 @@ export const ACTION_SURFACE = {
       step(PIN.setupDeno, { with: { "deno-version": "${{ env.DENO_VERSION }}" } }),
       download("release-jsr", "release"),
     ],
+    "pack-hex": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupBeam, {
+        with: {
+          "otp-version": "${{ env.OTP_VERSION }}",
+          "elixir-version": "${{ env.ELIXIR_VERSION }}",
+          "version-type": "strict",
+          "install-hex": false,
+          "install-rebar": false,
+        },
+      }),
+      uploadRelease("release-hex", "*.tar"),
+    ],
+    // No checkout: the pack job's tarball, by its digest, then one POST.
+    "publish-hex": [download("release-hex", "release")],
     "pack-go": [
       shallowCheckout(),
       step(PIN.pnpm),
@@ -887,6 +923,9 @@ export const PINNED_ENV = {
   GO_VERSION: () => VERSION_PIN,
   JAVA_VERSION: () => VERSION_PIN,
   DENO_VERSION: () => VERSION_PIN,
+  OTP_VERSION: () => OTP_PIN,
+  ELIXIR_VERSION: () => VERSION_PIN,
+  HEX_VERSION: () => VERSION_PIN,
   MAVEN_URL: () => LIT("https://maven.confeature.io"),
   MAVEN_BUCKET: () => LIT("confeature-maven"),
   // github.com's published ed25519 host key, exact (docs.github.com).
@@ -915,6 +954,7 @@ export const PINNED_ENV = {
   CLOUDFLARE_ACCOUNT_ID: () => SECRET("CLOUDFLARE_ACCOUNT_ID"),
   MAVEN_R2_ACCESS_KEY_ID: () => SECRET("MAVEN_R2_ACCESS_KEY_ID"),
   MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET("MAVEN_R2_SECRET_ACCESS_KEY"),
+  HEX_API_KEY: () => SECRET("HEX_API_KEY"),
   NUGET_API_KEY: () => EXPR("steps\\.login\\.outputs\\.NUGET_API_KEY"),
   CARGO_REGISTRY_TOKEN: () => EXPR("steps\\.auth\\.outputs\\.token"),
   // deno reads no package.json (#935): the staged JSR package has none.
@@ -940,6 +980,7 @@ export const CREDENTIAL_ENV = new Set([
   "CLOUDFLARE_ACCOUNT_ID",
   "DEPLOY_KEY",
   "GH_TOKEN",
+  "HEX_API_KEY",
   "MAVEN_R2_ACCESS_KEY_ID",
   "MAVEN_R2_SECRET_ACCESS_KEY",
   "NUGET_API_KEY",
@@ -1269,6 +1310,8 @@ export const ENVIRONMENT_COMMANDS = {
   ],
   "sdk-publish-pubdev": [],
   "sdk-publish-jsr": ["mkdir", "printf", "sha256sum"],
+  // The upload is its PUBLISH_EXCEPTIONS curl; these check the digest and the key.
+  "sdk-publish-hex": ["[", "echo", "exit", "printf", "sha256sum"],
   "sdk-publish-go": ["[", "curl", "echo", "exit", "git", "mkdir", "printf", "rm", "umask"],
   "sdk-publish-packagist": [
     "[",
@@ -1436,7 +1479,7 @@ function workflowPins(file, doc, add) {
   const pins = { NODE_VERSION: doc?.env?.NODE_VERSION, NPM_VERSION: doc?.env?.NPM_VERSION };
   // Every tool pin in the top-level env, not only node and npm (#900).
   for (const [k, v] of Object.entries(doc?.env ?? {}))
-    if (k.endsWith("_VERSION") && !EXACT.test(String(v)))
+    if (k.endsWith("_VERSION") && !exactPin(k).test(String(v)))
       add(file, "-", `env ${k} is ${String(v)}, not an exact version`);
   return pins;
 }

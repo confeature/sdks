@@ -52,6 +52,19 @@ describe("the real publish table", () => {
     },
   );
 
+  // #805 closed (mix compile works outside MIX_ENV=test): Hex ships (#909).
+  it("the Hex unit resolves: nothing is blocked any more", async () => {
+    expect(REAL.publish.filter((u) => u.blockedBy !== undefined)).toEqual([]);
+    const out = await resolvePublish({ root: ROOT, unit: "elixir" });
+    expect(out).toMatchObject({
+      registry: "hex",
+      coordinates: "confeature_client",
+      path: "apps/sdk-elixir",
+      gate: "test",
+      daggerFn: "elixir-test",
+    });
+  });
+
   it("a release tag carries the declared version, never a substring of the tag", async () => {
     const out = await resolvePublish({
       root: ROOT,

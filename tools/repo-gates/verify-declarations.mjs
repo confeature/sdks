@@ -136,6 +136,20 @@ export const DECLARED_GATES = {
       },
     ],
   },
+  "check:hex-tarball": {
+    // The Hex package is the unit the resolver accepted (#909): named
+    // <name>-<version>.tar, tarball format 3 with exactly its four entries,
+    // and metadata declaring that name, app and version once each. It runs in
+    // the Hex pack job, after `mix hex.build` and before the digest the
+    // publish job uploads by.
+    script: "tools/sdk-pack/check-hex-tarball.sh",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Record the Hex package digest",
+      },
+    ],
+  },
   "split-mirror": {
     // The PHP and Swift SDKs are published as mirror repositories whose
     // history is this split of the unit's directory, and a pushed history

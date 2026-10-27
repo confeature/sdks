@@ -52,7 +52,7 @@
 # Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900);
 # go, packagist, swiftpm (#901); maven (#902), which is not Maven Central but
 # a static Maven repository on Cloudflare R2, served at MAVEN_URL; jsr (#935),
-# which rides along a unit's primary registry. Hex waits on #805.
+# which rides along a unit's primary registry; hex (#909).
 #
 # JSR (#935): a unit with a `registry: "jsr"` entry in publish[] (today only
 # deno) also publishes to JSR from the SAME tag, at the SAME version: the
@@ -111,6 +111,11 @@ env:
   GO_VERSION: "1.27.2"
   DENO_VERSION: "2.8.2"
   JAVA_VERSION: "21.0.11"
+  # The Elixir gate's toolchain (dagger elixirToolchain: Elixir 1.17.3 on OTP
+  # 27); OTP's exact version has up to four parts.
+  OTP_VERSION: "27.3.4.19"
+  ELIXIR_VERSION: "1.17.3"
+  HEX_VERSION: "2.6.0"
   # The JVM SDKs' repository (#902): the R2 bucket MAVEN_BUCKET, served at
   # MAVEN_URL. Not Maven Central, which since 2026-10-01 asks a paid tier of a
   # service-dependent SDK.
@@ -1046,6 +1051,137 @@ jobs:
           DENO_NO_PACKAGE_JSON: "1"
         run: deno publish --config publish-tmp/jsr/jsr.json
 
+  # ---------------------------------------------------------------- hex ----
+  # Hex (#909). The pack job builds the package with `mix hex.build` on the
+  # gate's toolchain (OTP_VERSION, ELIXIR_VERSION, HEX_VERSION, all exact) and
+  # checks its metadata against the resolved unit; `mix hex.build` IS the
+  # registry's credential-free dry run. The publish job runs no project code
+  # and no mix: it uploads that same, sha-checked tarball with one HTTP request
+  # to hex.pm's release endpoint (the one hex_core's publish makes), with
+  # HEX_API_KEY, a secret of environment sdk-publish-hex only. curl reads the
+  # key from its environment (`--variable %HEX_API_KEY`), so it is never in a
+  # shell word or in curl's argv. Hex's Workload Identity cannot publish a
+  # package's first release, hence the key.
+
+  pack-hex:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'hex' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      file: ${{ steps.digest.outputs.file }}
+    env:
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      # Exact OTP and Elixir (version-type: strict, no range guessing). Hex
+      # and rebar are not installed by the action, whose `mix local.hex`
+      # takes the latest Hex: the next step installs HEX_VERSION.
+      - name: Setup OTP and Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          version-type: strict
+          install-hex: false
+          install-rebar: false
+
+      - name: Install the pinned Hex
+        run: mix local.hex "${HEX_VERSION}" --force
+
+      # No deps.get: hex.build reads mix.exs only, compiles nothing.
+      - name: Pack the release artifact (mix hex.build, the dry run)
+        working-directory: ${{ needs.setup.outputs.path }}
+        env:
+          MIX_ENV: prod
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          mix hex.build --output "$RUNNER_TEMP/release/${UNIT_COORDINATES}-${UNIT_VERSION}.tar"
+
+      # The package's own metadata must name the resolved unit.
+      - name: Check the artifact against the resolved unit
+        run: pnpm run check:hex-tarball "$RUNNER_TEMP/release/${UNIT_COORDINATES}-${UNIT_VERSION}.tar" "$UNIT_COORDINATES" "$UNIT_VERSION"
+
+      - name: Record the Hex package digest
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          file="$(ls -- *.tar)"
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-hex
+          path: ${{ runner.temp }}/release/*.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-hex:
+    name: publish ${{ needs.setup.outputs.coordinates }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-hex]
+    if: >-
+      always() &&
+      needs.pack-hex.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-hex
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-hex.outputs.sha256 }}
+      ARTIFACT: ${{ needs.pack-hex.outputs.file }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-hex
+          path: release
+
+      - name: Check the artifact against the pack job's digest
+        run: |
+          printf '%s  %s\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict
+
+      # Never replaced (`replace=false`): hex.pm refuses a version that exists,
+      # and --fail-with-body turns that refusal into a red job with its reason.
+      - name: Upload
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: |
+          if [ -z "$HEX_API_KEY" ]; then echo "::error::HEX_API_KEY is not set in environment sdk-publish-hex"; exit 1; fi
+          curl -sS --fail-with-body --tlsv1.2 --proto =https --variable %HEX_API_KEY --expand-header 'authorization: {{HEX_API_KEY}}' --header 'content-type: application/octet-stream' --data-binary "@release/${ARTIFACT}" 'https://hex.pm/api/packages/confeature_client/releases?replace=false'
+
   # ----------------------------------------------------------------- go ----
   # A Go module is published by its tag: proxy.golang.org builds the module zip
   # from `apps/sdk-go/v<X.Y.Z>` on the first request, so nothing is uploaded
@@ -1722,6 +1858,8 @@ jobs:
       - publish-maven
       - pack-jsr
       - publish-jsr
+      - pack-hex
+      - publish-hex
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

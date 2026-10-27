@@ -47,7 +47,14 @@
     {
       "name": "sdk-publish-hex",
       "registry": "hex",
-      "secrets": []
+      "secrets": [
+        {
+          "name": "HEX_API_KEY",
+          "kind": "token",
+          "issuer": "hex.pm personal key of the MakerLabs role account, never a person's: permissions api:read and publish (publish:confeature_client once the package exists), expiring no later than rotateBy. Hex's Workload Identity cannot publish a first release; after 0.1.0, prefer it and delete this secret",
+          "rotateBy": "2027-10-27"
+        }
+      ]
     },
     {
       "name": "sdk-publish-maven",
@@ -171,6 +178,7 @@
     "dagger/dagger-for-github@*",
     "dart-lang/setup-dart@*",
     "denoland/setup-deno@*",
+    "erlef/setup-beam@*",
     "NuGet/login@*",
     "pnpm/action-setup@*",
     "pypa/gh-action-pypi-publish@*",
