@@ -40,6 +40,11 @@
       "secrets": []
     },
     {
+      "name": "sdk-publish-jsr",
+      "registry": "jsr",
+      "secrets": []
+    },
+    {
       "name": "sdk-publish-hex",
       "registry": "hex",
       "secrets": []

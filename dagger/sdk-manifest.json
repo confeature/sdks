@@ -260,6 +260,16 @@
       "after": ["shared"]
     },
     {
+      "name": "deno",
+      "registry": "jsr",
+      "coordinates": "@confeature/sdk-deno",
+      "path": "apps/sdk-deno",
+      "versionSource": {
+        "file": "apps/sdk-deno/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      }
+    },
+    {
       "name": "react",
       "gate": "react",
       "registry": "npm",

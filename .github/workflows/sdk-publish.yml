@@ -51,12 +51,24 @@
 #
 # Registries wired: npm (#899); pypi, crates, rubygems, nuget, pubdev (#900);
 # go, packagist, swiftpm (#901); maven (#902), which is not Maven Central but
-# a static Maven repository on Cloudflare R2, served at MAVEN_URL. Hex waits
-# on #805.
-# Two publish jobs package from source because their registry accepts nothing
-# else: publish-crates (`cargo publish --no-verify`, nothing compiled) and
+# a static Maven repository on Cloudflare R2, served at MAVEN_URL; jsr (#935),
+# which rides along a unit's primary registry. Hex waits on #805.
+#
+# JSR (#935): a unit with a `registry: "jsr"` entry in publish[] (today only
+# deno) also publishes to JSR from the SAME tag, at the SAME version: the
+# resolver emits the package as `jsr`, and pack-jsr / publish-jsr run beside
+# the primary registry's jobs, not instead of them. JSR publishes TypeScript
+# source: pack-jsr stages it out of the checkout with sdk-shared bundled and
+# dry-runs `deno publish` on the stage; publish-jsr publishes that same,
+# sha-checked stage, authenticated by this job's OIDC token. JSR trusts a linked REPOSITORY, not a workflow or an
+# environment: the operator links confeature/sdks once, in the package's
+# Settings on jsr.io (@confeature/sdk-deno > Settings > GitHub repository).
+# Three publish jobs package from source because their registry accepts
+# nothing else: publish-crates (`cargo publish --no-verify`, nothing compiled),
 # publish-pubdev (`dart pub publish --force`, which pub.dev requires in the
-# OIDC job). Rule 3 allows exactly those commands, in exactly those jobs.
+# OIDC job) and publish-jsr (`deno publish` of the pack job's staged source,
+# which it unpacks first: `tar -x`). Rule 3 allows exactly those commands, in exactly
+# those jobs.
 
 name: sdk-publish
 
@@ -97,6 +109,7 @@ env:
   DOTNET_VERSION: "10.0.400"
   DART_VERSION: "3.11.6"
   GO_VERSION: "1.27.2"
+  DENO_VERSION: "2.8.2"
   JAVA_VERSION: "21.0.11"
   # The JVM SDKs' repository (#902): the R2 bucket MAVEN_BUCKET, served at
   # MAVEN_URL. Not Maven Central, which since 2026-10-01 asks a paid tier of a
@@ -158,6 +171,7 @@ jobs:
       releaseTag: ${{ steps.resolve.outputs.releaseTag }}
       mirrorRepository: ${{ steps.resolve.outputs.mirrorRepository }}
       mirrorTag: ${{ steps.resolve.outputs.mirrorTag }}
+      jsr: ${{ steps.resolve.outputs.jsr }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -900,6 +914,138 @@ jobs:
       - name: Upload
         run: dart pub publish --force --directory "${UNIT_PATH}"
 
+  # ---------------------------------------------------------------- jsr ----
+  # Beside the primary registry, never instead of it (#935): each runs when the
+  # resolver names a JSR package for the unit. Architect ruling (b): pack-jsr
+  # stages the package OUT of the checkout (tools/sdk-pack/stage-jsr.mjs:
+  # the unit's source with sdk-shared's bundled, no package.json, no
+  # node_modules), dry-runs deno publish on the stage, checks the checkout is
+  # untouched, and hands the stage on as one tar with its sha256. publish-jsr
+  # checks out nothing: it publishes those same bytes. DENO_NO_PACKAGE_JSON
+  # keeps deno from reading a package.json, wherever one is.
+
+  pack-jsr:
+    name: pack jsr:${{ needs.setup.outputs.jsr }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.jsr != '' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+      file: ${{ steps.digest.outputs.file }}
+    env:
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      UNIT_VERSION: ${{ needs.setup.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # No install: the author rule and the stager are zero-dependency.
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      # The dry run runs every check JSR runs, slow types included, on exactly
+      # the tree the tar carries; it uploads nothing.
+      - name: Pack the release artifact
+        env:
+          DENO_NO_PACKAGE_JSON: "1"
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/jsr-stage"
+          node tools/sdk-pack/stage-jsr.mjs --unit "$UNIT_NAME" --version "$UNIT_VERSION" --out "$stage"
+          test ! -e "$stage/node_modules"
+          deno publish --dry-run --config "$stage/jsr.json"
+          dirty="$(git -C "$GITHUB_WORKSPACE" status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::the dry run changed the checkout: $dirty"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/release"
+          tar -C "$stage" -cf "$RUNNER_TEMP/release/jsr-${UNIT_NAME}-${UNIT_VERSION}.tar" .
+
+      - name: Record the artifact digest
+        id: digest
+        run: |
+          cd "$RUNNER_TEMP/release"
+          file="$(ls -- *.tar)"
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum -- "$file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-jsr
+          path: ${{ runner.temp }}/release/*.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-jsr:
+    name: publish jsr:${{ needs.setup.outputs.jsr }}@${{ needs.setup.outputs.version }}
+    needs: [setup, pack-jsr]
+    if: >-
+      always() &&
+      needs.pack-jsr.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-jsr
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-jsr.outputs.sha256 }}
+      ARTIFACT: ${{ needs.pack-jsr.outputs.file }}
+    steps:
+      - name: Setup Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-jsr
+          path: release
+
+      - name: Check the artifact against the pack job's digest
+        run: |
+          printf '%s  %s\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict
+
+      - name: Unpack the staged package
+        run: |
+          mkdir -p publish-tmp/jsr
+          tar -x -f "release/${ARTIFACT}" -C publish-tmp/jsr
+
+      # OIDC: deno exchanges this job's token with JSR (no token, no secret),
+      # and JSR records Sigstore provenance for the run.
+      - name: Upload
+        env:
+          DENO_NO_PACKAGE_JSON: "1"
+        run: deno publish --config publish-tmp/jsr/jsr.json
+
   # ----------------------------------------------------------------- go ----
   # A Go module is published by its tag: proxy.golang.org builds the module zip
   # from `apps/sdk-go/v<X.Y.Z>` on the first request, so nothing is uploaded
@@ -1574,6 +1720,8 @@ jobs:
       - publish-swiftpm
       - pack-maven
       - publish-maven
+      - pack-jsr
+      - publish-jsr
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1589,13 +1737,14 @@ jobs:
             const setup = needs.setup;
             if (setup?.result !== "success") { console.error("::error::the tag was refused (setup)"); process.exit(1); }
             const reg = setup.outputs.registry;
-            const want = [`pack-${reg}`, ...(process.env.EVENT === "push" ? [`publish-${reg}`] : [])];
+            const regs = [reg, ...(setup.outputs.jsr ? ["jsr"] : [])];
+            const want = regs.flatMap((r) => [`pack-${r}`, ...(process.env.EVENT === "push" ? [`publish-${r}`] : [])]);
             for (const job of want) {
               if (!(job in needs)) { console.error(`::error::this workflow has no ${job} job: registry ${reg} is not wired yet`); process.exit(1); }
               if (needs[job].result !== "success") { console.error(`::error::${job} ended ${needs[job].result}`); process.exit(1); }
             }
             const out = [`### sdk-publish — ${setup.outputs.coordinates}@${setup.outputs.version}`, "",
-              `- Registry: \`${reg}\``, `- Gate: \`${setup.outputs.gate}\` ${setup.outputs.daggerFn}`,
+              `- Registry: \`${regs.join("`, `")}\``, `- Gate: \`${setup.outputs.gate}\` ${setup.outputs.daggerFn}`,
               `- Mode: ${process.env.EVENT === "push" ? "published" : "dry run (nothing published)"}`];
             require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
           '

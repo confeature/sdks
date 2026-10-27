@@ -127,6 +127,11 @@
  *      nativeLegProblems). Rules 2 and 18 already read every
  *      workflow; continueOnErrorFindings and rule 3's cache rules read it
  *      because it is listed (CACHE_FREE_WORKFLOWS, SDK_GATES_WORKFLOW).
+ *  20. JSR TARGETS (#935). Every `registry: "jsr"` entry of publish[] and its
+ *      `<path>/jsr.json` pass tools/sdk-pack/jsr-unit.mjs (jsrFindings): it
+ *      rides along a primary entry of the same name (one tag, one version),
+ *      and jsr.json's name, license, exports, imports and version (the drift
+ *      guard) are the unit's. Read from disk, so it runs in verifyWorkflows.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -138,7 +143,11 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
 import { lexStrict } from "./strict-shell.mjs";
-import { OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS } from "../sdk-pack/resolve-publish.mjs";
+import { jsrProblems } from "../sdk-pack/jsr-unit.mjs";
+import {
+  declaredVersion,
+  OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS,
+} from "../sdk-pack/resolve-publish.mjs";
 import {
   DAGGER_FN,
   KINDS,
@@ -254,6 +263,10 @@ const triggersOf = (doc) => {
  * path each names is the checkout's.
  *   crates.io (#900): `cargo publish --no-verify` packages the commit again and
  *     compiles nothing; crates.io takes no prebuilt archive.
+ *   JSR (#935): `tar -x` unpacks the pack job's staged package (its digest
+ *     checked first) into publish-tmp/jsr, and `deno publish --config
+ *     publish-tmp/jsr/jsr.json` type-checks and uploads exactly that tree; JSR
+ *     takes TypeScript source, never a prebuilt archive. No checkout.
  *   pub.dev (#900): `dart pub publish --force` packs and uploads in one
  *     command, and pub.dev accepts it only from the OIDC job.
  *   maven.confeature.io (#902): maven-r2-upload.sh, whose ordering and
@@ -269,6 +282,12 @@ export const PUBLISH_EXCEPTIONS = {
       /^cargo "\+\$\{RUST_VERSION\}" publish --no-verify --manifest-path "\$\{UNIT_PATH\}\/Cargo\.toml"$/,
     ],
     "publish-pubdev": [/^dart pub publish --force --directory "\$\{UNIT_PATH\}"$/],
+    // JSR publishes source (#935): the pack job's staged tree, unpacked into
+    // publish-tmp/, then deno type-checks it and uploads it, by OIDC.
+    "publish-jsr": [
+      /^tar -x -f "release\/\$\{ARTIFACT\}" -C publish-tmp\/jsr$/,
+      /^deno publish --config publish-tmp\/jsr\/jsr\.json$/,
+    ],
     "publish-maven": [/^bash tools\/sdk-pack\/maven-r2-upload\.sh release$/],
   },
   [CLI_WORKFLOW]: {
@@ -528,6 +547,18 @@ export const ACTION_SURFACE = {
     "publish-pubdev": [
       shallowCheckout(),
       step(PIN.setupDart, { with: { sdk: "${{ env.DART_VERSION }}" } }),
+    ],
+    "pack-jsr": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupDeno, { with: { "deno-version": "${{ env.DENO_VERSION }}" } }),
+      uploadRelease("release-jsr", "*.tar"),
+    ],
+    // No checkout (ruling (b)): the pack job's staged package, by its digest.
+    "publish-jsr": [
+      step(PIN.setupDeno, { with: { "deno-version": "${{ env.DENO_VERSION }}" } }),
+      download("release-jsr", "release"),
     ],
     "pack-go": [
       shallowCheckout(),
@@ -886,6 +917,8 @@ export const PINNED_ENV = {
   MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET("MAVEN_R2_SECRET_ACCESS_KEY"),
   NUGET_API_KEY: () => EXPR("steps\\.login\\.outputs\\.NUGET_API_KEY"),
   CARGO_REGISTRY_TOKEN: () => EXPR("steps\\.auth\\.outputs\\.token"),
+  // deno reads no package.json (#935): the staged JSR package has none.
+  DENO_NO_PACKAGE_JSON: () => LIT("1"),
   DOTNET_NOLOGO: () => LIT("1"),
   DOTNET_CLI_TELEMETRY_OPTOUT: () => LIT("1"),
   CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: () => LIT("fallback"),
@@ -1235,6 +1268,7 @@ export const ENVIRONMENT_COMMANDS = {
     "sort",
   ],
   "sdk-publish-pubdev": [],
+  "sdk-publish-jsr": ["mkdir", "printf", "sha256sum"],
   "sdk-publish-go": ["[", "curl", "echo", "exit", "git", "mkdir", "printf", "rm", "umask"],
   "sdk-publish-packagist": [
     "[",
@@ -1819,6 +1853,7 @@ export const WRITE_PERMISSIONS = {
   "sdk-publish.yml#publish-rubygems": ["id-token"],
   "sdk-publish.yml#publish-nuget": ["id-token"],
   "sdk-publish.yml#publish-pubdev": ["id-token"],
+  "sdk-publish.yml#publish-jsr": ["id-token"],
   "sdk-publish.yml#publish-maven": ["attestations", "id-token"],
 };
 
@@ -2993,13 +3028,29 @@ export function verifyWorkflows(root) {
   const workflows = {};
   for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
     workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
-  return allFindings({
-    settings,
-    manifest,
-    workflows,
-    scriptOutputs: readScriptOutputs(),
-    actions: readLocalActions(root),
-  });
+  return [
+    ...allFindings({
+      settings,
+      manifest,
+      workflows,
+      scriptOutputs: readScriptOutputs(),
+      actions: readLocalActions(root),
+    }),
+    ...jsrFindings(manifest, root),
+  ];
+}
+
+/**
+ * The manifest's JSR entries and each one's jsr.json (#935): the drift guard
+ * (jsr.json's version is the unit's versionSource) and the entry's shape, on
+ * every `pnpm run verify`, the same checks the resolver refuses a tag on.
+ */
+export function jsrFindings(manifest, root) {
+  return jsrProblems(manifest, root, (u) => declaredVersion(u, root, undefined)).map((why) => ({
+    file: MANIFEST,
+    job: "jsr",
+    why,
+  }));
 }
 
 /**

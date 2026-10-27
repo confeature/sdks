@@ -22,7 +22,10 @@
  *   - its version differs from the one the unit's `versionSource` declares;
  *   - (tag mode) a unit listed in `after` is not on its registry at the version
  *     this commit declares for it, read-only;
- *   - (tag mode) the commit is not an ancestor of main (`--main-ref`, required).
+ *   - (tag mode) the commit is not an ancestor of main (`--main-ref`, required);
+ *   - the manifest's JSR entries break any rule of jsr-unit.mjs (#935): a unit
+ *     with a `registry: "jsr"` entry of its name also publishes to JSR, from
+ *     the same tag at the same version, and `jsr` names that package.
  *
  * Every value it emits comes from the matching unit, never from a substring of
  * the tag, and is checked against a safe character set, so a workflow can pass
@@ -43,6 +46,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
+import { JSR, jsrProblems } from "./jsr-unit.mjs";
 
 export const MANIFEST = "dagger/sdk-manifest.json";
 
@@ -183,6 +187,7 @@ export const OUTPUT_KEYS = Object.freeze([
   "releaseTag",
   "mirrorRepository",
   "mirrorTag",
+  "jsr",
 ]);
 
 export function checkSafe(out) {
@@ -238,8 +243,14 @@ export async function resolvePublish({
     tagVersion = dryRunVersion;
   }
 
-  const unit = units.find((u) => u?.name === name);
+  // The unit is its primary entry; a jsr entry of the same name rides along (#935).
+  const unit = units.find((u) => u?.name === name && u?.registry !== JSR);
   if (!unit) throw new Refusal(`no publish unit is named "${name}"`);
+  const jsr = units.find((u) => u?.name === name && u?.registry === JSR);
+  if (jsr !== undefined) {
+    const problems = jsrProblems(manifest, root, (u) => declaredVersion(u, root, tagVersion));
+    if (problems.length > 0) throw new Refusal(`${MANIFEST}: ${problems[0]}`);
+  }
   if (typeof unit.registry !== "string" || unit.registry === "")
     throw new Refusal(`unit "${name}" names no registry`);
   if (unit.registry === "none")
@@ -290,6 +301,7 @@ export async function resolvePublish({
     releaseTag: unit.releaseTag ? fill(unit.releaseTag, version) : "",
     mirrorRepository: unit.mirror?.repository ?? "",
     mirrorTag: unit.mirror ? fill(unit.mirror.releaseTag, version) : "",
+    jsr: jsr?.coordinates ?? "",
   });
 }
 
