@@ -25,8 +25,15 @@ namespace
 		void ShutdownModule() override
 		{
 			// v0.1 has no module-scoped singletons to tear down — each
-			// `UConfeatureClient` owns its own ticker / cache / fetcher
-			// and unwinds via `BeginDestroy()`.
+			// `UConfeatureClient` owns its own cache / fetcher and unwinds
+			// via `BeginDestroy()` → `Close()`, which cancels its HTTP
+			// request but does not join a refresh thread still blocked on
+			// it (that needs a game-thread tick this shutdown may not give).
+			// Such a thread returns within its give-up bound; a refresh
+			// started after engine exit was requested never spawns one.
+			// A runtime module is normally unloaded only at engine exit
+			// (hot reload aside) — UNVERIFIED that no such thread can
+			// outlive the unload in every shutdown path.
 		}
 	};
 

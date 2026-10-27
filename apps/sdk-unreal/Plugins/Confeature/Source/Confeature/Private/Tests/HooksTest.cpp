@@ -8,6 +8,15 @@
 //   - OnFlagEvaluated fires from the GetValueDetails* path (LocalOnly).
 //   - OnConfigChanged fires on a successful FETCH (ForceRefresh, FETCHED).
 //   - OnError fires on a failed fetch (non-2xx).
+//   - A body past the 16 MiB cap (#837) fires OnError once and keeps the
+//     config the client already held.
+//   - ForceRefresh is synchronous like upstream but never deadlocks on the
+//     game thread (#832): it pumps the HTTP manager and returns with the
+//     fresh config applied and its hooks fired, also while an async
+//     refresh holds the fetch lock. ForceRefreshWithCallback and
+//     ForceRefreshAsync return at once and deliver the outcome on the game
+//     thread after the hooks. Concurrent async calls coalesce into one
+//     fetch; Close() during a refresh voids it.
 //   - Empty-binding safety: a client with no listeners never crashes.
 //   - Both halves of each pair (native FOn* + Blueprint FOn*Bp) carry the
 //     same payload from the same site.
@@ -27,14 +36,21 @@
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "HAL/ThreadSafeBool.h"
+#include "HAL/FileManager.h"
 #include "HAL/UnrealMemory.h"
 #include "HttpManager.h"
 #include "HttpModule.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
+#include "UObject/StrongObjectPtr.h"
 
 #include "ConfeatureClient.h"
 #include "ConfeatureHooks.h"
+#include "Internal/ConfigFetcher.h"
+
+#include <atomic>
 
 #if PLATFORM_WINDOWS
 #include "Windows/AllowWindowsPlatformTypes.h"
@@ -104,14 +120,20 @@ namespace
 		return Predicate();
 	}
 
-	// Minimal single-shot loopback HTTP/1.1 server — serves one canned
-	// response then exits. Mirrors WireCasesTest's FMockServer, trimmed to
-	// the one-request-one-response shape the hook tests need.
+	// Minimal loopback HTTP/1.1 server — answers each connection with the
+	// next canned response (the last one repeats), then closes it. Mirrors
+	// WireCasesTest's FMockServer, trimmed to the one-request-one-response
+	// shape the hook tests need.
 	class FHookMockServer
 	{
 	public:
 		explicit FHookMockServer(FString InResponse)
-			: Response(MoveTemp(InResponse))
+			: FHookMockServer(TArray<FString>{MoveTemp(InResponse)})
+		{
+		}
+
+		explicit FHookMockServer(TArray<FString> InResponses)
+			: Responses(MoveTemp(InResponses))
 		{
 #if PLATFORM_WINDOWS
 			WSADATA Data;
@@ -171,6 +193,14 @@ namespace
 
 		bool IsValid() const { return bValid; }
 		uint16 GetPort() const { return Port; }
+
+		// Holds every response back this long after reading the request
+		// (#832: long enough that a caller waiting on the fetch would
+		// visibly stall). Set before Start().
+		void SetResponseDelaySeconds(float Seconds) { ResponseDelaySeconds = Seconds; }
+
+		// Requests read so far.
+		int32 RequestCount() const { return Requests.load(); }
 
 		void Start()
 		{
@@ -247,13 +277,53 @@ namespace
 						break;
 					}
 				}
-				const FTCHARToUTF8 Utf8(*Response);
-				::send(Client, Utf8.Get(), Utf8.Length(), 0);
+				Requests.fetch_add(1);
+				if (ResponseDelaySeconds > 0.0f)
+				{
+					FPlatformProcess::Sleep(ResponseDelaySeconds);
+				}
+				const FString& Response = Responses.IsEmpty()
+					? FString()
+					: Responses[FMath::Min(Served++, Responses.Num() - 1)];
+				SendAll(Client, Response);
 				CloseSock(Client);
 			}
 		}
 
-		FString Response;
+		// Writes all of `Text` as UTF-8, looping over short sends (a body
+		// past 16 MiB does not go out in one). A send to a client that
+		// hung up fails instead of raising SIGPIPE: MSG_NOSIGNAL where it
+		// exists, SO_NOSIGPIPE on Apple.
+		static void SendAll(HookSocketType Client, const FString& Text)
+		{
+#if defined(SO_NOSIGPIPE)
+			int NoSigPipe = 1;
+			::setsockopt(Client, SOL_SOCKET, SO_NOSIGPIPE, &NoSigPipe, sizeof(NoSigPipe));
+#endif
+#if defined(MSG_NOSIGNAL)
+			constexpr int Flags = MSG_NOSIGNAL;
+#else
+			constexpr int Flags = 0;
+#endif
+			const FTCHARToUTF8 Utf8(*Text);
+			int64 Offset = 0;
+			while (Offset < Utf8.Length())
+			{
+				const int Chunk = static_cast<int>(FMath::Min<int64>(Utf8.Length() - Offset, 1 << 16));
+				const int N = static_cast<int>(::send(Client, Utf8.Get() + Offset, Chunk, Flags));
+				if (N <= 0)
+				{
+					return;
+				}
+				Offset += N;
+			}
+		}
+
+		// Touched by the server thread only.
+		TArray<FString> Responses;
+		int32 Served = 0;
+		float ResponseDelaySeconds = 0.0f;
+		std::atomic<int32> Requests{0};
 		HookSocketType Sock = HookInvalidSocket;
 		uint16 Port = 0;
 		bool bValid = false;
@@ -271,6 +341,17 @@ namespace
 			TEXT("HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: %d\r\n")
 			TEXT("Connection: close\r\n\r\n%s"),
 			Utf8Body.Length(), *Body);
+	}
+
+	// A 200 whose body is one byte past the fetcher's 16 MiB cap (#837),
+	// length declared — however the backend reports it (the header, the
+	// received count, or only the finished body), the fetch must refuse it.
+	FString BuildOverCapResponse()
+	{
+		const int32 Len = static_cast<int32>(Confeature::Internal::MaxBodyBytes) + 1;
+		return FString::Printf(
+				   TEXT("HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"), Len)
+			+ FString::ChrN(Len, TEXT(' '));
 	}
 
 	FString BuildBaseUrl(uint16 Port)
@@ -373,23 +454,15 @@ bool FConfeatureHooksConfigChangedTest::RunTest(const FString& /*Parameters*/)
 	Client->OnConfigChanged.AddLambda(
 		[Count](UConfeatureSettingsWrapper* Wrapper) { if (Wrapper) ++(*Count); });
 
-	// ForceRefresh blocks on the fetch internally; run it on a worker
-	// thread while we pump the HTTP manager + game-thread tasks so the
-	// fetch completes AND the marshalled OnConfigChanged drains.
-	TSharedRef<FThreadSafeBool> RefreshDone = MakeShared<FThreadSafeBool>();
+	// ForceRefresh is synchronous; from a worker thread its hooks are
+	// marshalled to the game thread, which we pump (HTTP manager + tasks)
+	// so the fetch completes AND the OnConfigChanged drains.
 	UConfeatureClient* Raw = Client.Get();
-	TFuture<bool> RefreshFuture = Async(EAsyncExecution::Thread,
-		[Raw, RefreshDone]()
-		{
-			const bool R = Raw->ForceRefresh();
-			RefreshDone->AtomicSet(true);
-			return R;
-		});
+	TFuture<void> RefreshFuture = Async(EAsyncExecution::Thread, [Raw]() { Raw->ForceRefresh(); });
 
 	const bool bFired = PumpWithHttpUntil(10.0, [&Count]() { return *Count >= 1; });
 	RefreshFuture.Wait();
 
-	TestTrue(TEXT("ForceRefresh succeeded"), RefreshFuture.Get());
 	TestTrue(TEXT("OnConfigChanged fired on a successful FETCH"), bFired);
 
 	Client->Close();
@@ -433,13 +506,11 @@ bool FConfeatureHooksErrorTest::RunTest(const FString& /*Parameters*/)
 		});
 
 	UConfeatureClient* Raw = Client.Get();
-	TFuture<bool> RefreshFuture = Async(EAsyncExecution::Thread,
-		[Raw]() { return Raw->ForceRefresh(); });
+	TFuture<void> RefreshFuture = Async(EAsyncExecution::Thread, [Raw]() { Raw->ForceRefresh(); });
 
 	const bool bFired = PumpWithHttpUntil(10.0, [&SawError]() { return (bool)*SawError; });
 	RefreshFuture.Wait();
 
-	TestFalse(TEXT("ForceRefresh failed on 503"), RefreshFuture.Get());
 	TestTrue(TEXT("OnError fired on a failed fetch"), bFired);
 	TestFalse(TEXT("OnError message is non-empty"), ErrMessage->IsEmpty());
 	// The raw SDK key must NEVER appear in the error payload.
@@ -448,6 +519,476 @@ bool FConfeatureHooksErrorTest::RunTest(const FString& /*Parameters*/)
 
 	Client->Close();
 	Server.Stop();
+	return true;
+}
+
+// ── Body cap (#837) ──────────────────────────────────────────────────
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksOverCapBodyTest,
+	"Confeature.Hooks.OverCapBodyKeepsConfig",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FConfeatureHooksOverCapBodyTest::RunTest(const FString& /*Parameters*/)
+{
+	// First a config serving `k = true`, then a body past the cap.
+	const FString Body
+		= TEXT("{\"p\":{\"s\":\"\"},\"f\":{\"k\":{\"t\":0,\"v\":{\"b\":true}}},\"s\":[]}");
+	const FTCHARToUTF8 Utf8Body(*Body);
+	FHookMockServer Server(TArray<FString>{
+		FString::Printf(
+			TEXT("HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: %d\r\n")
+			TEXT("Connection: close\r\n\r\n%s"),
+			Utf8Body.Length(), *Body),
+		BuildOverCapResponse()});
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping OverCapBodyKeepsConfig: failed to bind loopback socket"));
+		return true;
+	}
+	Server.Start();
+
+	TStrongObjectPtr<UConfeatureClient> Client(
+		UConfeatureClient::Builder(FString(HookTestSdkKey))
+			.PollingMode(FConfeaturePollingModeConfig::ManualPollMode())
+			.BaseUrl(BuildBaseUrl(Server.GetPort()))
+			.CacheDirectory(FPaths::Combine(FPaths::ProjectIntermediateDir(),
+				TEXT("ConfeatureTests"), FGuid::NewGuid().ToString()))
+			.HttpTimeoutSeconds(30)
+			.Build());
+
+	TSharedRef<int32> Errors = MakeShared<int32>(0);
+	TSharedRef<FString> ErrDetail = MakeShared<FString>();
+	Client->OnError.AddLambda(
+		[Errors, ErrDetail](const FString& /*Message*/, const FString& Detail)
+		{
+			*ErrDetail = Detail;
+			++(*Errors);
+		});
+
+	// Synchronous ForceRefresh on the game thread: it pumps the HTTP
+	// manager itself, and its hooks have fired when it returns.
+	Client->ForceRefresh();
+	FConfeatureUser User;
+	TestEqual(TEXT("the first refresh raised no error"), *Errors, 0);
+	TestTrue(TEXT("the first config serves k = true"), Client->GetValueBool(TEXT("k"), false, User));
+
+	Client->ForceRefresh();
+	// A second OnError would arrive in this window.
+	PumpUntil(0.5, []() { return false; });
+
+	TestEqual(TEXT("OnError fired once"), *Errors, 1);
+	TestEqual(TEXT("OnError carries the fixed reason"), *ErrDetail,
+		FString(Confeature::Internal::FetchError::BodyTooLarge));
+	TestFalse(TEXT("OnError detail redacts the SDK key"), ErrDetail->Contains(FString(HookTestSdkKey)));
+	TestTrue(TEXT("the previous config is kept"), Client->GetValueBool(TEXT("k"), false, User));
+
+	Client->Close();
+	Server.Stop();
+	return true;
+}
+
+// ── ForceRefresh never blocks the game thread (#832) ─────────────────
+//
+// Before #832 the Blueprint ForceRefresh fetched synchronously on the game
+// thread and waited on a completion only that thread's ticks deliver: the
+// frame froze for the whole give-up bound, then the refresh failed. Each
+// test below calls from the test (game) thread against a server that
+// holds its answer back, and asserts the call returned long before it.
+namespace
+{
+	constexpr float HeldResponseSeconds = 2.0f;
+	// A call that returns within this did not wait for the held answer.
+	constexpr double NonBlockingBoundSeconds = 0.5;
+
+	TStrongObjectPtr<UConfeatureClient> MakeRefreshClient(const FHookMockServer& Server)
+	{
+		return TStrongObjectPtr<UConfeatureClient>(
+			UConfeatureClient::Builder(FString(HookTestSdkKey))
+				.PollingMode(FConfeaturePollingModeConfig::ManualPollMode())
+				.BaseUrl(BuildBaseUrl(Server.GetPort()))
+				.CacheDirectory(FPaths::Combine(FPaths::ProjectIntermediateDir(),
+					TEXT("ConfeatureTests"), FGuid::NewGuid().ToString()))
+				.HttpTimeoutSeconds(10)
+				.Build());
+	}
+
+	// What a refresh's observers saw, in the order the game thread saw it.
+	struct FRefreshObservations
+	{
+		int32 ConfigChanged = 0;
+		int32 Errors = 0;
+		FString ErrorDetail;
+		int32 Completions = 0;
+		FConfeatureRefreshResult Result;
+		bool bCompletedOnGameThread = false;
+		// Hooks seen when the completion ran: they must precede it.
+		int32 HooksBeforeCompletion = -1;
+	};
+
+	void Observe(UConfeatureClient& Client, const TSharedRef<FRefreshObservations>& Seen)
+	{
+		Client.OnConfigChanged.AddLambda(
+			[Seen](UConfeatureSettingsWrapper* /*Settings*/) { ++Seen->ConfigChanged; });
+		Client.OnError.AddLambda(
+			[Seen](const FString& /*Message*/, const FString& Detail)
+			{
+				++Seen->Errors;
+				Seen->ErrorDetail = Detail;
+			});
+	}
+
+	TFunction<void(const FConfeatureRefreshResult&)> CompletionInto(
+		const TSharedRef<FRefreshObservations>& Seen)
+	{
+		return [Seen](const FConfeatureRefreshResult& Result)
+		{
+			++Seen->Completions;
+			Seen->Result = Result;
+			Seen->bCompletedOnGameThread = IsInGameThread();
+			Seen->HooksBeforeCompletion = Seen->ConfigChanged + Seen->Errors;
+		};
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksForceRefreshAsyncTest,
+	"Confeature.Hooks.ForceRefreshAsyncNonBlocking",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+bool FConfeatureHooksForceRefreshAsyncTest::RunTest(const FString& /*Parameters*/)
+{
+	if (!TestTrue(TEXT("the test runs on the game thread"), IsInGameThread()))
+	{
+		return false;
+	}
+
+	// Success: a fetched config. Failure: a 503. Each must deliver the
+	// same outcome the blocking bool did, and the same hooks.
+	struct FCase
+	{
+		const TCHAR* Name;
+		FString Response;
+		bool bWantSuccess;
+		int32 WantConfigChanged;
+		int32 WantErrors;
+		const TCHAR* WantError;
+	};
+	const FCase Cases[] = {
+		{TEXT("fetched"), BuildOkConfigResponse(), true, 1, 0, TEXT("")},
+		{TEXT("503"),
+			TEXT("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+			false, 0, 1, TEXT("HTTP 503")},
+	};
+
+	for (const FCase& Case : Cases)
+	{
+		FHookMockServer Server(Case.Response);
+		if (!Server.IsValid())
+		{
+			AddWarning(FString::Printf(TEXT("Skipping %s: failed to bind loopback socket"), Case.Name));
+			continue;
+		}
+		Server.SetResponseDelaySeconds(HeldResponseSeconds);
+		Server.Start();
+		TStrongObjectPtr<UConfeatureClient> Client = MakeRefreshClient(Server);
+		const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+		Observe(*Client, Seen);
+
+		const double Start = FPlatformTime::Seconds();
+		Client->ForceRefreshAsync(CompletionInto(Seen));
+		const double Returned = FPlatformTime::Seconds() - Start;
+
+		TestTrue(
+			FString::Printf(TEXT("%s: ForceRefreshAsync returned at once (%.3f s)"), Case.Name, Returned),
+			Returned < NonBlockingBoundSeconds);
+		TestEqual(FString::Printf(TEXT("%s: no completion inside the call"), Case.Name), Seen->Completions, 0);
+
+		PumpWithHttpUntil(15.0, [&Seen]() { return Seen->Completions >= 1; });
+		PumpUntil(0.5, []() { return false; });  // a second completion would land here
+
+		TestEqual(FString::Printf(TEXT("%s: one completion"), Case.Name), Seen->Completions, 1);
+		TestTrue(FString::Printf(TEXT("%s: completed on the game thread"), Case.Name), Seen->bCompletedOnGameThread);
+		TestTrue(FString::Printf(TEXT("%s: success == %d"), Case.Name, Case.bWantSuccess ? 1 : 0),
+			Seen->Result.bSuccess == Case.bWantSuccess);
+		TestEqual(FString::Printf(TEXT("%s: reason"), Case.Name), Seen->Result.ErrorMessage, FString(Case.WantError));
+		TestEqual(FString::Printf(TEXT("%s: OnConfigChanged"), Case.Name), Seen->ConfigChanged, Case.WantConfigChanged);
+		TestEqual(FString::Printf(TEXT("%s: OnError"), Case.Name), Seen->Errors, Case.WantErrors);
+		TestEqual(FString::Printf(TEXT("%s: OnError detail"), Case.Name), Seen->ErrorDetail,
+			FString(Case.WantErrors > 0 ? Case.WantError : TEXT("")));
+		TestEqual(FString::Printf(TEXT("%s: hooks fired before the completion"), Case.Name),
+			Seen->HooksBeforeCompletion, Case.WantConfigChanged + Case.WantErrors);
+
+		Client->Close();
+		Server.Stop();
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksForceRefreshBlueprintTest,
+	"Confeature.Hooks.ForceRefreshWithCallbackNonBlocking",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// The non-blocking Blueprint node, called as a graph calls it with nothing
+// bound to the pin: it returns at once, the hooks fire later.
+bool FConfeatureHooksForceRefreshBlueprintTest::RunTest(const FString& /*Parameters*/)
+{
+	if (!TestTrue(TEXT("the test runs on the game thread"), IsInGameThread()))
+	{
+		return false;
+	}
+	FHookMockServer Server(BuildOkConfigResponse());
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping ForceRefreshWithCallbackNonBlocking: failed to bind loopback socket"));
+		return true;
+	}
+	Server.SetResponseDelaySeconds(HeldResponseSeconds);
+	Server.Start();
+	TStrongObjectPtr<UConfeatureClient> Client = MakeRefreshClient(Server);
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Observe(*Client, Seen);
+
+	const double Start = FPlatformTime::Seconds();
+	Client->ForceRefreshWithCallback(FConfeatureOnRefreshCompletedBp());
+	const double Returned = FPlatformTime::Seconds() - Start;
+	TestTrue(FString::Printf(TEXT("ForceRefreshWithCallback returned at once (%.3f s)"), Returned),
+		Returned < NonBlockingBoundSeconds);
+	const bool bChanged = PumpWithHttpUntil(15.0, [&Seen]() { return Seen->ConfigChanged >= 1; });
+	PumpUntil(0.5, []() { return false; });
+	TestTrue(TEXT("OnConfigChanged fired"), bChanged);
+	TestEqual(TEXT("OnConfigChanged fired once"), Seen->ConfigChanged, 1);
+	TestEqual(TEXT("no OnError"), Seen->Errors, 0);
+	TestEqual(TEXT("one request"), Server.RequestCount(), 1);
+
+	Client->Close();
+	Server.Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksSyncRefreshOnGameThreadTest,
+	"Confeature.Hooks.ForceRefreshOnGameThreadSeesFreshConfig",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// The #832 defect, inverted. Upstream's synchronous ForceRefresh on the
+// game thread, with NO external pumping, against a server that holds its
+// answer: it waits for the answer (it really blocks, as upstream does),
+// returns well inside the request timeout (no deadlock), and the very next
+// GetValue sees the fresh config — with OnConfigChanged already fired.
+bool FConfeatureHooksSyncRefreshOnGameThreadTest::RunTest(const FString& /*Parameters*/)
+{
+	if (!TestTrue(TEXT("the test runs on the game thread"), IsInGameThread()))
+	{
+		return false;
+	}
+	const FString Body
+		= TEXT("{\"p\":{\"s\":\"\"},\"f\":{\"k\":{\"t\":0,\"v\":{\"b\":true}}},\"s\":[]}");
+	const FTCHARToUTF8 Utf8Body(*Body);
+	FHookMockServer Server(FString::Printf(
+		TEXT("HTTP/1.1 200 OK\r\nETag: \"v1\"\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"),
+		Utf8Body.Length(), *Body));
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping ForceRefreshOnGameThreadSeesFreshConfig: failed to bind loopback socket"));
+		return true;
+	}
+	Server.SetResponseDelaySeconds(1.0f);
+	Server.Start();
+	TStrongObjectPtr<UConfeatureClient> Client = MakeRefreshClient(Server);  // 10 s request timeout
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Observe(*Client, Seen);
+	FConfeatureUser User;
+	TestFalse(TEXT("before: k is not served"), Client->GetValueBool(TEXT("k"), false, User));
+
+	const double Start = FPlatformTime::Seconds();
+	Client->ForceRefresh();
+	const double Elapsed = FPlatformTime::Seconds() - Start;
+
+	TestTrue(FString::Printf(TEXT("it waited for the held answer (%.2f s)"), Elapsed), Elapsed >= 0.9);
+	TestTrue(FString::Printf(TEXT("no deadlock: well inside the timeout (%.2f s)"), Elapsed), Elapsed < 5.0);
+	TestTrue(TEXT("GetValue sees the fresh config"), Client->GetValueBool(TEXT("k"), false, User));
+	TestEqual(TEXT("OnConfigChanged fired before ForceRefresh returned"), Seen->ConfigChanged, 1);
+	TestEqual(TEXT("no OnError"), Seen->Errors, 0);
+	TestEqual(TEXT("one request"), Server.RequestCount(), 1);
+
+	Client->Close();
+	Server.Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksSyncRefreshDuringAsyncTest,
+	"Confeature.Hooks.ForceRefreshDuringAsyncRefresh",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// A synchronous ForceRefresh on the game thread while an async refresh
+// holds the fetch lock: the async refresh's completion is delivered only by
+// game-thread HTTP ticks, so a plain lock would deadlock. The game thread
+// pumps while it waits for the lock: the async fetch ends, then its own.
+bool FConfeatureHooksSyncRefreshDuringAsyncTest::RunTest(const FString& /*Parameters*/)
+{
+	FHookMockServer Server(BuildOkConfigResponse());
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping ForceRefreshDuringAsyncRefresh: failed to bind loopback socket"));
+		return true;
+	}
+	Server.SetResponseDelaySeconds(1.0f);
+	Server.Start();
+	TStrongObjectPtr<UConfeatureClient> Client = MakeRefreshClient(Server);  // 10 s request timeout
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Observe(*Client, Seen);
+
+	Client->ForceRefreshAsync(CompletionInto(Seen));
+	// The async fetch is under way (its request reached the server).
+	PumpWithHttpUntil(5.0, [&Server]() { return Server.RequestCount() >= 1; });
+
+	const double Start = FPlatformTime::Seconds();
+	Client->ForceRefresh();
+	const double Elapsed = FPlatformTime::Seconds() - Start;
+	PumpUntil(2.0, [&Seen]() { return Seen->Completions >= 1; });
+
+	TestTrue(FString::Printf(TEXT("no deadlock (%.2f s)"), Elapsed), Elapsed < 8.0);
+	TestEqual(TEXT("two requests: the async one, then the synchronous one"), Server.RequestCount(), 2);
+	TestEqual(TEXT("the async completion arrived"), Seen->Completions, 1);
+	TestTrue(TEXT("the async refresh succeeded"), Seen->Result.bSuccess);
+	TestEqual(TEXT("no OnError"), Seen->Errors, 0);
+
+	Client->Close();
+	Server.Stop();
+	return true;
+}
+
+// ── Refresh coalescing + close guard (#832 review) ───────────────────
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksRefreshCoalescesTest,
+	"Confeature.Hooks.ForceRefreshCoalesces",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// Three calls while one refresh is in flight: one request, one
+// OnConfigChanged, three completions with the same outcome — so no two
+// refreshes race on the cached config and ETag.
+bool FConfeatureHooksRefreshCoalescesTest::RunTest(const FString& /*Parameters*/)
+{
+	FHookMockServer Server(BuildOkConfigResponse());
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping ForceRefreshCoalesces: failed to bind loopback socket"));
+		return true;
+	}
+	Server.SetResponseDelaySeconds(HeldResponseSeconds);
+	Server.Start();
+	TStrongObjectPtr<UConfeatureClient> Client = MakeRefreshClient(Server);
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Observe(*Client, Seen);
+	TSharedRef<int32> Successes = MakeShared<int32>(0);
+	for (int32 I = 0; I < 3; ++I)
+	{
+		Client->ForceRefreshAsync(
+			[Seen, Successes](const FConfeatureRefreshResult& Result)
+			{
+				++Seen->Completions;
+				*Successes += Result.bSuccess ? 1 : 0;
+			});
+	}
+	PumpWithHttpUntil(15.0, [&Seen]() { return Seen->Completions >= 3; });
+	PumpUntil(0.5, []() { return false; });
+
+	TestEqual(TEXT("three completions"), Seen->Completions, 3);
+	TestEqual(TEXT("all three succeeded"), *Successes, 3);
+	TestEqual(TEXT("one request"), Server.RequestCount(), 1);
+	TestEqual(TEXT("OnConfigChanged fired once"), Seen->ConfigChanged, 1);
+
+	Client->Close();
+	Server.Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksCloseDuringRefreshTest,
+	"Confeature.Hooks.CloseDuringRefresh",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// Close() while the fetch is in flight: the late response writes neither
+// the config nor the cache, fires no hook, and reports CLIENT_CLOSED.
+bool FConfeatureHooksCloseDuringRefreshTest::RunTest(const FString& /*Parameters*/)
+{
+	FHookMockServer Server(BuildOkConfigResponse());
+	if (!Server.IsValid())
+	{
+		AddWarning(TEXT("Skipping CloseDuringRefresh: failed to bind loopback socket"));
+		return true;
+	}
+	Server.SetResponseDelaySeconds(HeldResponseSeconds);
+	Server.Start();
+	const FString CacheDir = FPaths::Combine(
+		FPaths::ProjectIntermediateDir(), TEXT("ConfeatureTests"), FGuid::NewGuid().ToString());
+	TStrongObjectPtr<UConfeatureClient> Client(
+		UConfeatureClient::Builder(FString(HookTestSdkKey))
+			.PollingMode(FConfeaturePollingModeConfig::ManualPollMode())
+			.BaseUrl(BuildBaseUrl(Server.GetPort()))
+			.CacheDirectory(CacheDir)
+			.HttpTimeoutSeconds(10)
+			.Build());
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Observe(*Client, Seen);
+
+	Client->ForceRefreshAsync(CompletionInto(Seen));
+	// The request reaches the server, then the client closes.
+	PumpWithHttpUntil(5.0, [&Server]() { return Server.RequestCount() >= 1; });
+	const double ClosedAt = FPlatformTime::Seconds();
+	Client->Close();
+	PumpWithHttpUntil(15.0, [&Seen]() { return Seen->Completions >= 1; });
+	const double Ended = FPlatformTime::Seconds() - ClosedAt;
+	PumpUntil(0.5, []() { return false; });
+
+	// Close() cancelled the request: the refresh ended before the server's
+	// held answer would have.
+	TestTrue(FString::Printf(TEXT("the cancel ended the refresh early (%.2f s)"), Ended),
+		Ended < HeldResponseSeconds * 0.75);
+
+	TestEqual(TEXT("one request"), Server.RequestCount(), 1);
+	TestEqual(TEXT("one completion"), Seen->Completions, 1);
+	TestFalse(TEXT("the refresh failed"), Seen->Result.bSuccess);
+	TestEqual(TEXT("it reports CLIENT_CLOSED"), Seen->Result.ErrorMessage, FString(TEXT("CLIENT_CLOSED")));
+	TestEqual(TEXT("no OnConfigChanged"), Seen->ConfigChanged, 0);
+	TestEqual(TEXT("no OnError"), Seen->Errors, 0);
+	TArray<FString> Files;
+	IFileManager::Get().FindFiles(Files, *FPaths::Combine(CacheDir, TEXT("*")), true, false);
+	TestEqual(TEXT("nothing written to the cache"), Files.Num(), 0);
+
+	Server.Stop();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfeatureHooksRefreshUninitializedTest,
+	"Confeature.Hooks.ForceRefreshUninitialized",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+// A client never built through Create / Builder (a bare NewObject) has no
+// fetcher: the refresh completes on a later tick with CLIENT_NOT_INITIALIZED.
+bool FConfeatureHooksRefreshUninitializedTest::RunTest(const FString& /*Parameters*/)
+{
+	TStrongObjectPtr<UConfeatureClient> Client(NewObject<UConfeatureClient>());
+	const TSharedRef<FRefreshObservations> Seen = MakeShared<FRefreshObservations>();
+	Client->ForceRefreshAsync(CompletionInto(Seen));
+	TestEqual(TEXT("no completion inside the call"), Seen->Completions, 0);
+	PumpUntil(2.0, [&Seen]() { return Seen->Completions >= 1; });
+	TestEqual(TEXT("one completion"), Seen->Completions, 1);
+	TestFalse(TEXT("the refresh failed"), Seen->Result.bSuccess);
+	TestEqual(TEXT("CLIENT_NOT_INITIALIZED"), Seen->Result.ErrorMessage, FString(TEXT("CLIENT_NOT_INITIALIZED")));
+	Client->ForceRefresh();  // no fetcher: returns at once, no crash
+	TestEqual(TEXT("the synchronous variant completes nothing"), Seen->Completions, 1);
 	return true;
 }
 

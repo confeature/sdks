@@ -9,7 +9,10 @@
 //   - UConfeatureClient::Create(SdkKey) → TStrongObjectPtr<UConfeatureClient>
 //   - UConfeatureClient::Builder(SdkKey) → FConfeatureClientBuilder
 //   - UFUNCTION(BlueprintCallable) GetValue{Bool,String,Int,Float,Double}
-//   - UFUNCTION(BlueprintCallable) ForceRefresh / Close
+//   - UFUNCTION(BlueprintCallable) ForceRefresh (upstream's shape and
+//     semantics: synchronous) / ForceRefreshWithCallback (Confeature
+//     addition, non-blocking) / Close
+//   - ForceRefreshAsync (C++, non-blocking Confeature addition)
 //   - Snapshot() — synchronous view of the cached config
 //
 // UE Blueprint nodes cannot dispatch on template type parameters, so
@@ -21,13 +24,14 @@
 //
 // Memory: `UConfeatureClient` is a `UObject` rooted via
 // `TStrongObjectPtr<>` so the UE garbage collector cannot reclaim it
-// while the customer holds a strong handle. `Close()` releases all
-// background ticker handles + HTTP requests.
+// while the customer holds a strong handle. `Close()` cancels the HTTP
+// request in flight and voids any refresh still running; it does not join
+// the refresh thread (see Close).
 
 #include "CoreMinimal.h"
 #include "Templates/SharedPointer.h"
-#include "Templates/UniquePtr.h"
 #include "UObject/Object.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 
 #include "ConfeatureEvaluationDetails.h"
 #include "ConfeatureFlagOverrides.h"
@@ -39,6 +43,30 @@
 #include "ConfeatureClient.generated.h"
 
 class UConfeatureClient;
+
+// The outcome of a force refresh — ConfigCat's cpp-sdk `RefreshResult`
+// (`success()` is `!errorMessage`) in UE shape (#832). Success means the
+// config is current: a new config was fetched, the origin answered 304
+// Not Modified, or LocalOnly overrides need no fetch. A failure carries
+// a fixed, key-free reason (the same one `OnError` gets for a failed
+// fetch).
+USTRUCT(BlueprintType)
+struct CONFEATURE_API FConfeatureRefreshResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Confeature")
+	bool bSuccess = false;
+
+	// Empty on success.
+	UPROPERTY(BlueprintReadOnly, Category = "Confeature")
+	FString ErrorMessage;
+};
+
+// Completion of `ForceRefreshWithCallback` — delivered on the game
+// thread, after `OnConfigChanged` / `OnError` for the same refresh.
+DECLARE_DYNAMIC_DELEGATE_OneParam(
+	FConfeatureOnRefreshCompletedBp, const FConfeatureRefreshResult&, Result);
 
 // Fluent builder. Mirrors `ConfeatureClient::builder(...)` from the C++
 // SDK; lives outside the UCLASS so its setters can chain via reference
@@ -149,14 +177,57 @@ public:
 	FConfeatureEvaluationDetails GetValueDetailsDouble(
 		const FString& Key, double DefaultValue, const FConfeatureUser& User) const;
 
-	// Triggers an immediate synchronous fetch + cache update. Returns
-	// true on success, false if the fetch failed (the reason is logged).
-	// No-op when LocalOnly overrides are configured.
-	UFUNCTION(BlueprintCallable, Category = "Confeature")
-	bool ForceRefresh();
+	// ── Force refresh (#832) ─────────────────────────────────────────────
+	//
+	// An on-demand fetch outside the poll cycle. Every variant fires the
+	// hooks the same way: OnConfigChanged when a new config landed (not on
+	// a 304), OnError when the fetch failed; a closed or offline client, or
+	// LocalOnly overrides, fetch nothing and fire nothing.
 
-	// Idempotent close — cancels every spawned task. Safe to call from
-	// any thread.
+	// ConfigCat's `UConfigCatSubsystem::ForceRefresh` — same name, no
+	// arguments, void, SYNCHRONOUS (Principle II; configcat/unreal-engine-sdk
+	// @ 923800268dba36ad25963dcace191179de4ba936, read 2026-10-27). It
+	// returns once the fetch ended and its config is applied; on the game
+	// thread the hooks have fired by then too (off it they are queued to
+	// the game thread). On the game thread it pumps the HTTP manager while
+	// it waits (Tick 0.05 s + Sleep 0.05 s, upstream's loop), so the frame
+	// stalls for the request — at most the request timeout + 5 s — but
+	// never deadlocks (#832). To refresh without stalling the frame, use
+	// `ForceRefreshWithCallback` (Blueprint) or `ForceRefreshAsync` (C++).
+	UFUNCTION(BlueprintCallable, Category = "Confeature")
+	void ForceRefresh();
+
+	// Confeature addition (no upstream counterpart) and the route to use
+	// from Blueprint: a NON-blocking `ForceRefresh` — it returns at once,
+	// the fetch runs on its own thread, and the completion receives the
+	// outcome on the game thread, after the hooks. A Blueprint delegate
+	// unbinds itself when its object dies, so a completion that outlives
+	// its graph is a silent no-op.
+	UFUNCTION(BlueprintCallable, Category = "Confeature")
+	void ForceRefreshWithCallback(FConfeatureOnRefreshCompletedBp OnCompleted);
+
+	// Confeature addition, C++, the non-blocking route from the game
+	// thread: returns at once; `OnCompleted` (may be empty) runs on the
+	// game thread once the refresh ended — always on a later tick, never
+	// inside this call.
+	// A call made while an async refresh runs joins it (one fetch, every
+	// completion called). A never-initialised client completes with
+	// CLIENT_NOT_INITIALIZED, a closed one with CLIENT_CLOSED (also when
+	// Close() ran mid-refresh).
+	//
+	// LIFETIME: `OnCompleted` may run after this client was closed or
+	// garbage-collected (it still gets the outcome), and is dropped
+	// unrun once the engine is exiting. Guard what it captures — a
+	// TWeakObjectPtr for UObjects, a TWeakPtr for shared state — rather
+	// than capturing raw pointers.
+	void ForceRefreshAsync(TFunction<void(const FConfeatureRefreshResult&)> OnCompleted = nullptr);
+
+	// Idempotent close. Cancels the HTTP request in flight and voids any
+	// refresh still running: it writes nothing, fires no hook and reports
+	// CLIENT_CLOSED. It does NOT join the refresh thread — that thread
+	// returns once UE delivers the cancel (a later HTTP-manager tick) or
+	// at its give-up bound (request timeout + 5 s), holding only the
+	// client's shared internals, not the UObject. Safe from any thread.
 	UFUNCTION(BlueprintCallable, Category = "Confeature")
 	void Close();
 
@@ -226,9 +297,31 @@ public:
 	// `Create` / `Builder` — never this directly.
 	void InitializeFromBuilder(const FConfeatureClientBuilder& InBuilder);
 
-private:
+	// Opaque implementation types, defined in ConfeatureClient.cpp.
+	// Public only so that file's free helpers may name them; an
+	// incomplete type is unusable anywhere else.
 	struct FImpl;
-	TUniquePtr<FImpl> Impl;
+	struct FUpdateResult;
+
+private:
+	// Shared, not unique: an in-flight `ForceRefreshAsync` keeps the
+	// fetcher, cache and config alive past this UObject's destruction.
+	TSharedPtr<FImpl, ESPMode::ThreadSafe> Impl;
+
+	// Fires the hooks a finished refresh owes and returns its outcome.
+	// Callable from any thread (the hooks marshal to the game thread).
+	FConfeatureRefreshResult ReportRefresh(const FUpdateResult& Update) const;
+
+	// Hands a finished (or never-started) refresh to the game thread on a
+	// later tick: ReportRefresh there, then every callback. Static: the
+	// client may be gone by then.
+	static void DeliverRefresh(TWeakObjectPtr<UConfeatureClient> WeakSelf,
+		TSharedPtr<FImpl, ESPMode::ThreadSafe> ImplRef,
+		FUpdateResult Update,
+		TArray<TFunction<void(const FConfeatureRefreshResult&)>> Callbacks);
+
+	// DeliverRefresh for one caller's refresh resolved without a fetch.
+	void DeliverAlone(FUpdateResult Update, TFunction<void(const FConfeatureRefreshResult&)> OnCompleted);
 
 	// ── Hook emission helpers (always broadcast on the GAME THREAD) ──────
 	// Each marshals onto the game thread (via AsyncTask(ENamedThreads::
