@@ -33,22 +33,6 @@ import io.confeature.kmp.internal.ConfigValues.selectSettingValue
  * a `null` sink (the hot path) is zero-cost.
  */
 public object Evaluator {
-    /** Setting-type discriminator for boolean values (matches `SettingType.Bool=0`). */
-    public const val SETTING_TYPE_BOOL: Int = 0
-
-    /** Setting-type discriminator for string values (matches `SettingType.String=1`). */
-    public const val SETTING_TYPE_STRING: Int = 1
-
-    /** Setting-type discriminator for int values (matches `SettingType.Int=2`). */
-    public const val SETTING_TYPE_INT: Int = 2
-
-    /** Setting-type discriminator for double values (matches `SettingType.Double=3`). */
-    public const val SETTING_TYPE_DOUBLE: Int = 3
-
-    // PrerequisiteFlagComparator / SegmentComparator negated codes (the eval-log trace reads them).
-    internal const val PREREQ_NOT_EQUALS = 1
-    internal const val SEGMENT_IS_NOT_IN = 1
-
     /** Discrete error classes — never surfaced to customers; used for logging. */
     public enum class Error {
         NONE,
@@ -210,14 +194,14 @@ public object Evaluator {
         return LocatedSetting(
             settings ?: emptyMap(),
             setting ?: emptyMap(),
-            type ?: SETTING_TYPE_BOOL,
+            type ?: SettingType.BOOL,
             error,
         )
     }
 
     private fun typeError(settingType: Int, defaultValue: Any?): Error =
         when {
-            settingType !in SETTING_TYPE_BOOL..SETTING_TYPE_DOUBLE -> Error.UNSUPPORTED_TYPE
+            settingType !in SettingType.BOOL..SettingType.DOUBLE -> Error.UNSUPPORTED_TYPE
             defaultValue != null && !defaultMatchesType(defaultValue, settingType) -> Error.TYPE_MISMATCH
             else -> Error.NONE
         }

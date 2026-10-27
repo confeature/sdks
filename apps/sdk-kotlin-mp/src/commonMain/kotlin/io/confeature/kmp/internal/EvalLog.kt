@@ -278,13 +278,13 @@ internal object EvalLog {
             comparator: Int,
             comparisonValue: String,
         ): EvaluateLogBuilder {
-            val op = if (comparator == Evaluator.PREREQ_NOT_EQUALS) "NOT EQUALS" else "EQUALS"
+            val op = if (comparator == PrerequisiteComparator.NOT_EQUALS) "NOT EQUALS" else "EQUALS"
             return append("Flag '$prereqKey' $op '$comparisonValue'")
         }
 
         /** Append a segment condition (`User IS [NOT] IN SEGMENT 'X'`). */
         fun appendSegmentCondition(segmentName: String, comparator: Int): EvaluateLogBuilder {
-            val op = if (comparator == Evaluator.SEGMENT_IS_NOT_IN) "IS NOT IN SEGMENT" else "IS IN SEGMENT"
+            val op = if (comparator == SegmentComparator.IS_NOT_IN) "IS NOT IN SEGMENT" else "IS IN SEGMENT"
             return append("User $op '$segmentName'")
         }
 

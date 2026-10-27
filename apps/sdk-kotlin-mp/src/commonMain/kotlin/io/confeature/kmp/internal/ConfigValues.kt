@@ -42,10 +42,10 @@ internal object ConfigValues {
     fun selectSettingValue(value: Map<String, Any?>?, type: Int): Any? {
         if (value == null) return null
         return when (type) {
-            Evaluator.SETTING_TYPE_BOOL -> value["b"]
-            Evaluator.SETTING_TYPE_STRING -> value["s"]
-            Evaluator.SETTING_TYPE_INT -> value["i"]
-            Evaluator.SETTING_TYPE_DOUBLE -> value["d"]
+            SettingType.BOOL -> value["b"]
+            SettingType.STRING -> value["s"]
+            SettingType.INT -> value["i"]
+            SettingType.DOUBLE -> value["d"]
             else -> null
         }
     }
@@ -53,19 +53,19 @@ internal object ConfigValues {
     /** Coerce a selected raw value to the Kotlin type the setting type implies (or null). */
     fun coerceTyped(raw: Any?, type: Int): Any? =
         when (type) {
-            Evaluator.SETTING_TYPE_BOOL -> raw as? Boolean
-            Evaluator.SETTING_TYPE_STRING -> raw as? String
-            Evaluator.SETTING_TYPE_INT -> if (raw is Number && raw !is Boolean) raw.toInt() else null
-            Evaluator.SETTING_TYPE_DOUBLE -> if (raw is Number && raw !is Boolean) raw.toDouble() else null
+            SettingType.BOOL -> raw as? Boolean
+            SettingType.STRING -> raw as? String
+            SettingType.INT -> if (raw is Number && raw !is Boolean) raw.toInt() else null
+            SettingType.DOUBLE -> if (raw is Number && raw !is Boolean) raw.toDouble() else null
             else -> null
         }
 
     fun defaultMatchesType(defaultValue: Any?, type: Int): Boolean =
         when (type) {
-            Evaluator.SETTING_TYPE_BOOL -> defaultValue is Boolean
-            Evaluator.SETTING_TYPE_STRING -> defaultValue is String
-            Evaluator.SETTING_TYPE_INT -> defaultValue is Int || defaultValue is Long
-            Evaluator.SETTING_TYPE_DOUBLE -> defaultValue is Double || defaultValue is Float
+            SettingType.BOOL -> defaultValue is Boolean
+            SettingType.STRING -> defaultValue is String
+            SettingType.INT -> defaultValue is Int || defaultValue is Long
+            SettingType.DOUBLE -> defaultValue is Double || defaultValue is Float
             else -> false
         }
 

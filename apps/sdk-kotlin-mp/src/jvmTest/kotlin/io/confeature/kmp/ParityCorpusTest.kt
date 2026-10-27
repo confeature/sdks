@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp
 
-import io.confeature.kmp.internal.Evaluator
+import io.confeature.kmp.internal.SettingType
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -86,8 +86,8 @@ class ParityCorpusTest {
      */
     private fun canonicalise(value: Any?, settingType: Int?): Any? = when {
         settingType == null || value !is Number -> value
-        settingType == Evaluator.SETTING_TYPE_DOUBLE -> value.toDouble()
-        settingType == Evaluator.SETTING_TYPE_INT -> value.toInt()
+        settingType == SettingType.DOUBLE -> value.toDouble()
+        settingType == SettingType.INT -> value.toInt()
         else -> value
     }
 
