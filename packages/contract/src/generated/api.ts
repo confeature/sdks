@@ -2038,7 +2038,7 @@ export interface components {
       percentageOptions: components["schemas"]["PercentageOptionModel"][];
       value: components["schemas"]["ValueModel"] | null;
     };
-    /** @description The limits this setting's values are held to, as ConfigCat's `FeatureFlagLimitations`: ConfigCat's published maxima, each one enforced. */
+    /** @description The limits this setting's values are held to, as ConfigCat's `FeatureFlagLimitations`: the organization's limits, at most ConfigCat's published maxima, each one enforced. */
     FeatureFlagLimitations: {
       /** Format: int32 */
       maxPercentageOptionCount: number;

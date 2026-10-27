@@ -6025,8 +6025,8 @@ components:
       type: object
       description: >
         The limits this setting's values are held to, as ConfigCat's
-        `FeatureFlagLimitations`: ConfigCat's published maxima, each one
-        enforced.
+        `FeatureFlagLimitations`: the organization's limits, at most
+        ConfigCat's published maxima, each one enforced.
       required:
         - maxPercentageOptionCount
         - maxTargetingRuleCount
