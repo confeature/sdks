@@ -20,6 +20,12 @@
  * ones the CDN reads, which is the harness half of contract.test.ts's
  * metadata and key checks, moved here because it travels with the harness.
  *
+ * And it holds the origin to the transcript's `runtime` block (#941): what no
+ * exchange can record — the compatibility date, and the `onError` 500 an
+ * unexpected failure answers (its status, its body keys and values, and the
+ * request header its correlation id is read from). The private repository
+ * holds the same block to the CDN Worker, so the two cannot drift apart unseen.
+ *
  * Fails closed: an empty transcript, or one whose metadata uses a field the
  * seed format cannot express, fails before anything is replayed.
  */
@@ -28,7 +34,9 @@ import { readFileSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { unstable_readConfig } from "wrangler";
 
+import origin from "../reference-origin/src/index.js";
 import { sdkKeyFromUrl } from "../src/fault-injector.js";
 import { SeededKeySchema } from "../src/seed-schema.js";
 import type { SeededKey } from "../src/types.js";
@@ -46,7 +54,20 @@ type Entry = {
   response: { status: number; headers: Record<string, string>; body: string };
 };
 
-const entries = (JSON.parse(readFileSync(TRANSCRIPT, "utf-8")) as { entries: Entry[] }).entries;
+/** What the transcript cannot record by exchange (#795 FR-012). Public: no id, no hostname. */
+type Runtime = {
+  compatibilityDate: string;
+  onError: {
+    status: number;
+    body: { error: string; message: string; requestId: string };
+    correlationHeader: string;
+  };
+};
+
+const { entries, runtime } = JSON.parse(readFileSync(TRANSCRIPT, "utf-8")) as {
+  entries: Entry[];
+  runtime: Runtime;
+};
 
 /**
  * HTTP framing, not the Worker's answer. The transcript is recorded in the
@@ -166,5 +187,46 @@ describe("the harness's own seeding writes what the transcript recorded", () => 
 
   it.each(seedable.map(({ entry }) => [entry.name, entry] as const))("%s", async (_name, entry) => {
     expectRecorded(entry, await send(entry));
+  });
+});
+
+describe("the reference origin's runtime is the transcript's runtime block (#941)", () => {
+  it("the block carries exactly its three facts", () => {
+    // The file is public (#795 security F2): a fourth field is reviewed here first.
+    expect(Object.keys(runtime).sort()).toEqual(["compatibilityDate", "onError"]);
+    expect(Object.keys(runtime.onError).sort()).toEqual(["body", "correlationHeader", "status"]);
+  });
+
+  it("its compatibility_date is the block's compatibilityDate", () => {
+    const config = unstable_readConfig(
+      { config: referenceOrigin().cdnConfigPath },
+      { hideWarnings: true },
+    );
+    expect(config.compatibility_date).toBe(runtime.compatibilityDate);
+  });
+
+  it("an unexpected failure answers the block's onError: status, body and correlation id", async () => {
+    // KV failing is the one failure the transcript cannot record, so the origin
+    // is called in-process with a KV that throws (on its first read).
+    const failingKv = {
+      getWithMetadata: () => Promise.reject(new Error("KV unavailable")),
+    };
+    const correlationId = "transcript-correlation-0941";
+    const [entry] = entries.filter((e) => e.kv !== null);
+    const res = await origin.fetch(
+      new Request(`http://reference.test${entry!.request.path}`, {
+        headers: { [runtime.onError.correlationHeader]: correlationId },
+      }),
+      { CONFIG_KV: failingKv },
+    );
+
+    expect(res.status).toBe(runtime.onError.status);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(Object.keys(runtime.onError.body).sort());
+    expect(body.error).toBe(runtime.onError.body.error);
+    expect(body.message).toBe(runtime.onError.body.message);
+    // The block names requestId's meaning, not a value: it is the id the
+    // correlation header carried, echoed back.
+    expect(body.requestId).toBe(correlationId);
   });
 });

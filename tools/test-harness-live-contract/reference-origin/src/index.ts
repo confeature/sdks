@@ -19,7 +19,8 @@
  *     stored, and a 304 when `If-None-Match` equals the stored ETag verbatim;
  *   - anything else is a 404 `404 Not Found`, and an unexpected failure is the
  *     real Worker's `onError` 500 (not recordable: the transcript cannot make
- *     KV fail, so contract.test.ts holds its body to the CDN Worker's textually).
+ *     KV fail, so tests/reference-origin-transcript.test.ts holds it to the
+ *     transcript's `runtime` block, which the CDN Worker is held to privately).
  * Path decoding follows the router the real Worker uses: the path is
  * `decodeURI`d (so `%2F` stays a separator-free segment), then each segment
  * is `decodeURIComponent`d once.
