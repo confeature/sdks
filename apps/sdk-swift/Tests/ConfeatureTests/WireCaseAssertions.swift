@@ -99,7 +99,9 @@ enum WireCaseAssertions {
         else {
             throw NSError(
                 domain: "WireCaseAssertions", code: 4,
-                userInfo: [NSLocalizedDescriptionKey: "wire-cases-pending.json: no {pending: {...}}"])
+                userInfo: [
+                    NSLocalizedDescriptionKey: "wire-cases-pending.json: no {pending: {...}}"
+                ])
         }
         guard let entry = pending["sdk-swift"] as? [String: Any],
             let ticket = entry["ticket"] as? String,
