@@ -32,8 +32,7 @@ class User {
  public:
   // Mirrors `configcat::ConfigCatUser`'s public alias surface 1:1.
   using date_time_t = std::chrono::system_clock::time_point;
-  using AttributeValue =
-      std::variant<std::string, double, date_time_t, std::vector<std::string>>;
+  using AttributeValue = std::variant<std::string, double, date_time_t, std::vector<std::string>>;
 
   explicit User(std::string identifier) : identifier_(std::move(identifier)) {}
 

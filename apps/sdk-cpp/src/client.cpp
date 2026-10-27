@@ -54,8 +54,7 @@ struct ConfeatureClient::Impl {
   /// LocalOnly overrides switch the network off for the client's whole life:
   /// refresh, setOnline/setOffline and isOffline all key off this one predicate.
   bool isLocalOnly() const {
-    return flagOverrides.has_value() &&
-           flagOverrides->behaviour() == OverrideBehaviour::LocalOnly;
+    return flagOverrides.has_value() && flagOverrides->behaviour() == OverrideBehaviour::LocalOnly;
   }
 
   static std::int64_t nowUnixMillis() {
@@ -329,8 +328,8 @@ bool ConfeatureClient::forceRefresh() {
 void ConfeatureClient::setOnline() {
   if (closed_.load(std::memory_order_seq_cst)) {
     if (impl_->logger) {
-      impl_->logger->warning("setOnline called after close (sdkKey=" +
-                             internal::redactSdkKey(impl_->sdkKey) + ")");
+      impl_->logger->warning(
+          "setOnline called after close (sdkKey=" + internal::redactSdkKey(impl_->sdkKey) + ")");
     }
     return;
   }
@@ -349,8 +348,8 @@ void ConfeatureClient::setOnline() {
 void ConfeatureClient::setOffline() {
   if (closed_.load(std::memory_order_seq_cst)) {
     if (impl_->logger) {
-      impl_->logger->warning("setOffline called after close (sdkKey=" +
-                             internal::redactSdkKey(impl_->sdkKey) + ")");
+      impl_->logger->warning(
+          "setOffline called after close (sdkKey=" + internal::redactSdkKey(impl_->sdkKey) + ")");
     }
     return;
   }
@@ -421,8 +420,8 @@ template std::string ConfeatureClient::getValue<std::string>(const std::string&,
 // Spec 085 / #266 slice 7/12 — typed evaluation-details envelope.
 template <typename T>
 EvaluationDetails<T> ConfeatureClient::getValueDetails(const std::string& key,
-                                                      const T& defaultValue,
-                                                      const User* user) const {
+                                                       const T& defaultValue,
+                                                       const User* user) const {
   if (closed_.load(std::memory_order_seq_cst)) {
     if (impl_->logger) {
       impl_->logger->warning("getValueDetails called after close (sdkKey=" +
@@ -468,14 +467,14 @@ EvaluationDetails<T> ConfeatureClient::getValueDetails(const std::string& key,
 }
 
 template EvaluationDetails<bool> ConfeatureClient::getValueDetails<bool>(const std::string&,
-                                                                        const bool&,
-                                                                        const User*) const;
+                                                                         const bool&,
+                                                                         const User*) const;
 template EvaluationDetails<int> ConfeatureClient::getValueDetails<int>(const std::string&,
-                                                                      const int&,
-                                                                      const User*) const;
+                                                                       const int&,
+                                                                       const User*) const;
 template EvaluationDetails<double> ConfeatureClient::getValueDetails<double>(const std::string&,
-                                                                            const double&,
-                                                                            const User*) const;
+                                                                             const double&,
+                                                                             const User*) const;
 template EvaluationDetails<std::string> ConfeatureClient::getValueDetails<std::string>(
     const std::string&, const std::string&, const User*) const;
 
@@ -484,8 +483,8 @@ std::unordered_map<std::string, nlohmann::json> ConfeatureClient::getAllValues(
     const User* user) const {
   if (closed_.load(std::memory_order_seq_cst)) {
     if (impl_->logger) {
-      impl_->logger->warning("getAllValues called after close (sdkKey=" +
-                             internal::redactSdkKey(impl_->sdkKey) + ")");
+      impl_->logger->warning(
+          "getAllValues called after close (sdkKey=" + internal::redactSdkKey(impl_->sdkKey) + ")");
     }
     return {};
   }

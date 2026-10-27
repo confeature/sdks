@@ -488,8 +488,9 @@ TEST_CASE("ConfigFetcher keeps the key out of logs and errors on transport failu
     auto logger = std::make_shared<CapturingLogger>();
     ConfigFetcher fetcher(key, "1.0.0", baseUrlFor(server), 5s, logger);
     // Every response redirects to the key-bearing URL itself.
-    server.setFallback("HTTP/1.1 302 Found\r\nLocation: " + confeature::tests::requireValue(fetcher.url(), "url") +
-                       "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    server.setFallback(
+        "HTTP/1.1 302 Found\r\nLocation: " + confeature::tests::requireValue(fetcher.url(), "url") +
+        "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     server.start();
     const auto result = fetcher.fetch(std::nullopt);
     server.stop();
@@ -693,7 +694,6 @@ TEST_CASE("a cache entry with an out-of-range number is ignored, never thrown (#
   constructsAndFetchesOver(std::make_shared<FixedCache>("1e400"));
 }
 
-TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)",
-          "[client][cache]") {
+TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)", "[client][cache]") {
   constructsAndFetchesOver(std::make_shared<FixedCache>(std::nullopt, /*throws=*/true));
 }

@@ -246,8 +246,7 @@ inline bool comparatorMeta(int comparator, ComparatorMeta* out) {
       {kSensitiveTextEndsWithAnyOf, {"ENDS WITH ANY OF", ComparatorKind::kList, true}},
       {kSensitiveTextNotEndsWithAnyOf, {"NOT ENDS WITH ANY OF", ComparatorKind::kList, true}},
       {kSensitiveArrayContainsAnyOf, {"ARRAY CONTAINS ANY OF", ComparatorKind::kList, true}},
-      {kSensitiveArrayNotContainsAnyOf,
-       {"ARRAY NOT CONTAINS ANY OF", ComparatorKind::kList, true}},
+      {kSensitiveArrayNotContainsAnyOf, {"ARRAY NOT CONTAINS ANY OF", ComparatorKind::kList, true}},
       {kTextEquals, {"EQUALS", ComparatorKind::kStr, false}},
       {kTextNotEquals, {"NOT EQUALS", ComparatorKind::kStr, false}},
       {kTextStartsWithAnyOf, {"STARTS WITH ANY OF", ComparatorKind::kList, false}},
@@ -415,8 +414,8 @@ class EvaluateLogBuilder {
     const std::string comparatorText = formatUserComparator(comparator);
     if (isSensitive) {
       const std::string word = values.size() == 1 ? "value" : "values";
-      return append("User." + attr + " " + comparatorText + " [<" +
-                    std::to_string(values.size()) + " hashed " + word + ">]");
+      return append("User." + attr + " " + comparatorText + " [<" + std::to_string(values.size()) +
+                    " hashed " + word + ">]");
     }
     return append("User." + attr + " " + comparatorText + " [" +
                   formatStringList(values, kStringListMaxLength) + "]");

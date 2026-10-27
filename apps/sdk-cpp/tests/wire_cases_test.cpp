@@ -433,10 +433,10 @@ TEST_CASE("wire-cases.json — wire-protocol conformance (sdk-cpp)", "[wire_case
       // Exactly one request per fetch: a retrying fetcher must not pass.
       REQUIRE(mock.requestCount() == 1);
       const auto request = mock.lastRequest();
-      wire::assertWireCase(
-          wireCase, sdkKey,
-          wire::SentRequest{wire::pathOf(requestTarget(request)), headerValue(request, "If-None-Match")},
-          result);
+      wire::assertWireCase(wireCase, sdkKey,
+                           wire::SentRequest{wire::pathOf(requestTarget(request)),
+                                             headerValue(request, "If-None-Match")},
+                           result);
     }
   }
 }

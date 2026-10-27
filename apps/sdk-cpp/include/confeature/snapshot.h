@@ -54,8 +54,7 @@ class Snapshot {
   // codebase convention — see `getValueJson`). Returns an empty map
   // when neither the captured config nor the override datasource
   // expose any keys.
-  std::unordered_map<std::string, nlohmann::json> getAllValues(
-      const User* user = nullptr) const;
+  std::unordered_map<std::string, nlohmann::json> getAllValues(const User* user = nullptr) const;
 
   // Returns the union of cached-config + override keys, sorted
   // ordinally for deterministic output. Mirrors ConfigCat-cpp's

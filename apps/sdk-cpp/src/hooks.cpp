@@ -40,8 +40,7 @@ void invoke_each(const Listeners& listeners, const char* hook_name, Logger* logg
       listener(args...);
     } catch (const std::exception& ex) {
       if (logger != nullptr) {
-        logger->error(std::string("Hooks: ") + hook_name +
-                      " listener raised: " + ex.what());
+        logger->error(std::string("Hooks: ") + hook_name + " listener raised: " + ex.what());
       }
     } catch (...) {
       if (logger != nullptr) {
@@ -63,8 +62,7 @@ void Hooks::invokeOnClientReady() {
   invoke_each(snapshot, "onClientReady", logger_.get());
 }
 
-void Hooks::invokeOnConfigChanged(
-    const std::unordered_map<std::string, nlohmann::json>& settings) {
+void Hooks::invokeOnConfigChanged(const std::unordered_map<std::string, nlohmann::json>& settings) {
   std::vector<OnConfigChanged> snapshot;
   {
     std::lock_guard<std::mutex> lock(mutex_);

@@ -2,11 +2,10 @@
 
 #include "internal/evaluator.h"
 
-#include <nlohmann/json.hpp>
-
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -62,21 +61,21 @@ struct Outcome {
 // Per-evaluation context threaded through rule / condition / prerequisite
 // resolution. `visitedFlags` is the shared cycle-detection stack.
 struct EvalContext {
-  const json* settings;            // config["f"] object
-  const json* segments;            // config["s"] array (may be null)
-  std::string configSalt;          // config["p"]["s"]
-  const User* user;                // optional
+  const json* settings;    // config["f"] object
+  const json* segments;    // config["s"] array (may be null)
+  std::string configSalt;  // config["p"]["s"]
+  const User* user;        // optional
   std::vector<std::string>* visitedFlags;
-  std::string* evalError;          // first surfaced condition error
-  bool* missingUserLogged;         // dedups the no-user surface
-  EvalTraceLog* log;               // trace logger (WARN/ERROR sink)
-  EvaluateLogBuilder* lb;          // trace builder (nullptr when tracing off)
-  const std::string* currentKey;   // setting key currently under evaluation
+  std::string* evalError;         // first surfaced condition error
+  bool* missingUserLogged;        // dedups the no-user surface
+  EvalTraceLog* log;              // trace logger (WARN/ERROR sink)
+  EvaluateLogBuilder* lb;         // trace builder (nullptr when tracing off)
+  const std::string* currentKey;  // setting key currently under evaluation
 };
 
 // The resolved value envelope + matched-rule/option identity.
 struct SettingResult {
-  json value;            // the resolved `v` envelope ({b}/{s}/{i}/{d})
+  json value;  // the resolved `v` envelope ({b}/{s}/{i}/{d})
   std::string variationId;
   bool matchedRule{false};
   bool matchedOption{false};
@@ -163,9 +162,9 @@ std::string userAttributeValueToString(const User::AttributeValue& value) {
   }
   if (std::holds_alternative<User::date_time_t>(value)) {
     const auto tp = std::get<User::date_time_t>(value);
-    const double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
-                          tp.time_since_epoch())
-                          .count();
+    const double ms =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(tp.time_since_epoch())
+            .count();
     return evalLogNumberToString(ms / 1000.0);
   }
   // string array → JSON.stringify (compact, slashes + UTF-8 raw, ensure_ascii
@@ -331,10 +330,11 @@ bool comparisonValueInvalid(int cmp, const std::string& sv, const json* dvJson,
     case kNumberGreaterOrEquals: {
       if (dvJson == nullptr || !dvJson->is_number() || std::isnan(dvJson->get<double>())) {
         const std::string v =
-            dvJson != nullptr ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>()
-                                                                          : std::nan(""))
-                              : "undefined";
-        *error = "comparison value '" + v + "' is invalid ('" + v + "' is not a valid decimal "
+            dvJson != nullptr
+                ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>() : std::nan(""))
+                : "undefined";
+        *error = "comparison value '" + v + "' is invalid ('" + v +
+                 "' is not a valid decimal "
                  "number)";
         return true;
       }
@@ -344,9 +344,9 @@ bool comparisonValueInvalid(int cmp, const std::string& sv, const json* dvJson,
     case kDateTimeAfter: {
       if (dvJson == nullptr || !dvJson->is_number() || std::isnan(dvJson->get<double>())) {
         const std::string v =
-            dvJson != nullptr ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>()
-                                                                          : std::nan(""))
-                              : "undefined";
+            dvJson != nullptr
+                ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>() : std::nan(""))
+                : "undefined";
         *error = "comparison value '" + v + "' is invalid ('" + v +
                  "' is not a valid Unix timestamp (number of seconds elapsed since Unix epoch))";
         return true;
@@ -442,8 +442,8 @@ Outcome evaluateUserCondition(EvalContext& ctx, const json& condition,
       break;
     case kSensitiveTextEquals:
     case kSensitiveTextNotEquals:
-      matched = sensitiveTextEquals(attrValue, sv, salt, contextSalt,
-                                    cmp == kSensitiveTextNotEquals);
+      matched =
+          sensitiveTextEquals(attrValue, sv, salt, contextSalt, cmp == kSensitiveTextNotEquals);
       break;
     case kTextIsOneOf:
     case kTextIsNotOneOf:
@@ -451,8 +451,8 @@ Outcome evaluateUserCondition(EvalContext& ctx, const json& condition,
       break;
     case kSensitiveTextIsOneOf:
     case kSensitiveTextIsNotOneOf:
-      matched = sensitiveTextIsOneOf(attrValue, list, salt, contextSalt,
-                                     cmp == kSensitiveTextIsNotOneOf);
+      matched =
+          sensitiveTextIsOneOf(attrValue, list, salt, contextSalt, cmp == kSensitiveTextIsNotOneOf);
       break;
     case kTextStartsWithAnyOf:
     case kTextNotStartsWithAnyOf:
@@ -557,8 +557,8 @@ Outcome evaluateSegmentCondition(EvalContext& ctx, const json& condition) {
        static_cast<std::size_t>(segIndex) < ctx.segments->size())
           ? &(*ctx.segments)[static_cast<std::size_t>(segIndex)]
           : nullptr;
-  const std::string segNameForTrace = segmentForName != nullptr ? getString(*segmentForName, "n")
-                                                                : std::string();
+  const std::string segNameForTrace =
+      segmentForName != nullptr ? getString(*segmentForName, "n") : std::string();
   if (lb != nullptr) {
     lb->appendSegmentCondition(segNameForTrace, segCmp);
   }
@@ -840,8 +840,8 @@ bool evaluatePercentageOptions(EvalContext& ctx, const json& options, const std:
         out->matchedRule = matchedRule;
         out->matchedOption = true;
         if (lb != nullptr) {
-          const json optValue = selectSettingValue(out->value.is_object() ? &out->value : nullptr,
-                                                   settingType);
+          const json optValue =
+              selectSettingValue(out->value.is_object() ? &out->value : nullptr, settingType);
           lb->newLine("- Hash value " + std::to_string(hashValue) + " selects % option " +
                       std::to_string(index + 1) + " (" + std::to_string(width) + "%), '" +
                       settingValueToLogString(optValue) + "'.");
@@ -925,8 +925,7 @@ SettingResult evaluateSetting(EvalContext& ctx, const std::string& key, const js
   ctx.currentKey = &key;
 
   const json* tJson = findObject(setting, "t");
-  const int settingType =
-      (tJson != nullptr && tJson->is_number_integer()) ? tJson->get<int>() : -1;
+  const int settingType = (tJson != nullptr && tJson->is_number_integer()) ? tJson->get<int>() : -1;
 
   // 1. Targeting rules — first-match-wins (US1).
   const json* rules = findObject(setting, "r");
@@ -1065,10 +1064,9 @@ static EvalResult evaluateImpl(const nlohmann::json* config, const std::string& 
       }
     }
 
-    EvalContext ctx{&(*fIt),       segments,   std::move(configSalt),
-                    user,          &visitedFlags, &evalError,
-                    &missingUserLogged, &traceLog, lbPtr,
-                    &key};
+    EvalContext ctx{&(*fIt),       segments,   std::move(configSalt), user,
+                    &visitedFlags, &evalError, &missingUserLogged,    &traceLog,
+                    lbPtr,         &key};
     const SettingResult resolved = evaluateSetting(ctx, key, setting);
 
     // Select the typed value by `t`; an absent / wrong-typed slot is "missing".
@@ -1093,8 +1091,8 @@ static EvalResult evaluateImpl(const nlohmann::json* config, const std::string& 
     }
     if (!typeOk) {
       // Preserve the pre-existing differentiated codes for the boolean slot.
-      return fail(defaultValue, settingType == kSettingTypeBool ? "VALUE_NOT_BOOL"
-                                                                : "MALFORMED_VALUE");
+      return fail(defaultValue,
+                  settingType == kSettingTypeBool ? "VALUE_NOT_BOOL" : "MALFORMED_VALUE");
     }
 
     EvalResult out;

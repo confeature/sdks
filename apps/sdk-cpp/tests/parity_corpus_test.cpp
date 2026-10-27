@@ -202,8 +202,7 @@ TEST_CASE("parity corpus typed — 13 tuples byte-identical across SDKs", "[pari
         REQUIRE(v == expected.get<int>());
       }
     } else if (expected.is_number_float()) {
-      const double def =
-          defaultJson.is_number() ? defaultJson.get<double>() : 0.0;
+      const double def = defaultJson.is_number() ? defaultJson.get<double>() : 0.0;
       if (defaultJson.is_number()) {
         const auto v = snapshot.getValue<double>(key, def, user.get());
         REQUIRE(v == expected.get<double>());

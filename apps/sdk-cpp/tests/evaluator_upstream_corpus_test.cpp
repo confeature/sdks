@@ -28,8 +28,8 @@
 // exercises the comparator conversion path with the values the conversion
 // driver intends (NaN / +/-Infinity / exponential numbers, JSON arrays).
 
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -49,9 +49,9 @@
 #include "workspace_root.h"
 
 using confeature::User;
+using confeature::internal::EvalResult;
 using confeature::internal::evaluate;
 using confeature::internal::evaluateTraced;
-using confeature::internal::EvalResult;
 using confeature::tests::upstreamPath;
 using nlohmann::json;
 
@@ -492,9 +492,7 @@ std::unique_ptr<User> userFromRow(const std::vector<std::string>& cols,
   if (cols.empty() || cols[0] == kNullToken) {
     return nullptr;
   }
-  auto setOrNull = [](const std::string& v) -> bool {
-    return !(v.empty() || v == kNullToken);
-  };
+  auto setOrNull = [](const std::string& v) -> bool { return !(v.empty() || v == kNullToken); };
   const std::string identifier = !cols[0].empty() ? cols[0] : std::string();
   auto user = std::make_unique<User>(identifier);
   if (cols.size() > 1 && setOrNull(cols[1])) {
@@ -846,8 +844,8 @@ TEST_CASE("upstream corpus — matched targeting rule + no-user fallback", "[ups
   REQUIRE(matching != nullptr);
   REQUIRE(noUser != nullptr);
 
-  const EvalResult m = evaluate(matching->config.get(), matching->key, json("default"),
-                                matching->user.get());
+  const EvalResult m =
+      evaluate(matching->config.get(), matching->key, json("default"), matching->user.get());
   REQUIRE(m.value == json("Dog"));
   REQUIRE(m.hasMatchedRule);
   REQUIRE_FALSE(m.hasMatchedOption);
@@ -897,7 +895,7 @@ TEST_CASE("upstream corpus — percentage bucketing is repeat-invariant", "[upst
   REQUIRE(withUser != nullptr);
   const int type = settingType(*withUser->config, withUser->key);
   const json def = withUser->defaultValue.is_null() ? defaultFor(withUser->expected, type)
-                                                     : coerceDefault(withUser->defaultValue, type);
+                                                    : coerceDefault(withUser->defaultValue, type);
   const EvalResult first =
       evaluate(withUser->config.get(), withUser->key, def, withUser->user.get());
   for (int i = 0; i < 20; ++i) {
@@ -1144,10 +1142,10 @@ TEST_CASE("upstream corpus — attribute conversion (NaN/Inf/exp/array)", "[upst
       {"dateToStringConversionNegativeInf", json(-inf), "5"},
       {"stringArrayToStringConversion", json::array({"read", "Write", " eXecute "}), "4"},
       {"stringArrayToStringConversionEmpty", json::array(), "5"},
-      {"stringArrayToStringConversionSpecialChars",
-       json::array({std::string("+<>%\"'\\/\t\r\n")}), "3"},
-      {"stringArrayToStringConversionUnicode",
-       json::array({std::string("äöüÄÖÜçéèñışğâ¢™✓😀")}), "2"},
+      {"stringArrayToStringConversionSpecialChars", json::array({std::string("+<>%\"'\\/\t\r\n")}),
+       "3"},
+      {"stringArrayToStringConversionUnicode", json::array({std::string("äöüÄÖÜçéèñışğâ¢™✓😀")}),
+       "2"},
   };
 
   std::vector<std::string> failures;
@@ -1175,12 +1173,26 @@ struct TrimCase {
 
 std::vector<TrimCase> attributeTrimmingDriver() {
   std::vector<TrimCase> out;
-  for (const char* k :
-       {"isoneof", "isnotoneof", "isoneofhashed", "isnotoneofhashed", "equalshashed",
-        "notequalshashed", "arraycontainsanyofhashed", "arraynotcontainsanyofhashed", "equals",
-        "notequals", "startwithanyof", "notstartwithanyof", "endswithanyof", "notendswithanyof",
-        "arraycontainsanyof", "arraynotcontainsanyof", "startwithanyofhashed",
-        "notstartwithanyofhashed", "endswithanyofhashed", "notendswithanyofhashed"}) {
+  for (const char* k : {"isoneof",
+                        "isnotoneof",
+                        "isoneofhashed",
+                        "isnotoneofhashed",
+                        "equalshashed",
+                        "notequalshashed",
+                        "arraycontainsanyofhashed",
+                        "arraynotcontainsanyofhashed",
+                        "equals",
+                        "notequals",
+                        "startwithanyof",
+                        "notstartwithanyof",
+                        "endswithanyof",
+                        "notendswithanyof",
+                        "arraycontainsanyof",
+                        "arraynotcontainsanyof",
+                        "startwithanyofhashed",
+                        "notstartwithanyofhashed",
+                        "endswithanyofhashed",
+                        "notendswithanyofhashed"}) {
     out.push_back({k, "no trim"});
   }
   out.push_back({"semverisoneof", "4 trim"});
@@ -1204,13 +1216,28 @@ std::vector<TrimCase> attributeTrimmingDriver() {
 
 std::vector<TrimCase> valueTrimmingDriver() {
   std::vector<TrimCase> out;
-  for (const char* k :
-       {"isoneof", "isnotoneof", "containsanyof", "notcontainsanyof", "isoneofhashed",
-        "isnotoneofhashed", "equalshashed", "notequalshashed", "arraycontainsanyofhashed",
-        "arraynotcontainsanyofhashed", "equals", "notequals", "startwithanyof", "notstartwithanyof",
-        "endswithanyof", "notendswithanyof", "arraycontainsanyof", "arraynotcontainsanyof",
-        "startwithanyofhashed", "notstartwithanyofhashed", "endswithanyofhashed",
-        "notendswithanyofhashed"}) {
+  for (const char* k : {"isoneof",
+                        "isnotoneof",
+                        "containsanyof",
+                        "notcontainsanyof",
+                        "isoneofhashed",
+                        "isnotoneofhashed",
+                        "equalshashed",
+                        "notequalshashed",
+                        "arraycontainsanyofhashed",
+                        "arraynotcontainsanyofhashed",
+                        "equals",
+                        "notequals",
+                        "startwithanyof",
+                        "notstartwithanyof",
+                        "endswithanyof",
+                        "notendswithanyof",
+                        "arraycontainsanyof",
+                        "arraynotcontainsanyof",
+                        "startwithanyofhashed",
+                        "notstartwithanyofhashed",
+                        "endswithanyofhashed",
+                        "notendswithanyofhashed"}) {
     out.push_back({k, "no trim"});
   }
   out.push_back({"semverisoneof", "4 trim"});
@@ -1289,9 +1316,9 @@ TEST_CASE("upstream corpus — native numeric attr matches string form", "[upstr
     std::string expected;
   };
   std::vector<NCase> cases = {
-      {"native-int-pass", json(21), "match"},     {"native-float-pass", json(18.0), "match"},
-      {"native-int-fail", json(17), "no-match"},  {"native-float-fail", json(17.999), "no-match"},
-      {"string-int-pass", json("21"), "match"},   {"string-float-pass", json("18.0"), "match"},
+      {"native-int-pass", json(21), "match"},      {"native-float-pass", json(18.0), "match"},
+      {"native-int-fail", json(17), "no-match"},   {"native-float-fail", json(17.999), "no-match"},
+      {"string-int-pass", json("21"), "match"},    {"string-float-pass", json("18.0"), "match"},
       {"string-int-fail", json("17"), "no-match"},
   };
 

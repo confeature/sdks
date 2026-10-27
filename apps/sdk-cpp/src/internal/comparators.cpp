@@ -2,11 +2,10 @@
 
 #include "internal/comparators.h"
 
-#include <nlohmann/json.hpp>
-
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <regex>
 #include <string>
@@ -106,8 +105,7 @@ bool sensitiveTextIsOneOf(const std::string& text, const std::vector<std::string
   return found != negate;
 }
 
-bool sensitiveTextSliceEqualsAnyOf(const std::string& text,
-                                   const std::vector<std::string>& values,
+bool sensitiveTextSliceEqualsAnyOf(const std::string& text, const std::vector<std::string>& values,
                                    const std::string& configSalt, const std::string& contextSalt,
                                    bool startsWith, bool negate) {
   for (const auto& item : values) {
@@ -286,7 +284,8 @@ NumberConvert attributeAsNumber(const std::string& attr, const std::string& valu
   if (trim(value) == "NaN") {
     return NumberConvert{true, std::nan(""), std::string()};
   }
-  return NumberConvert{false, 0, invalidAttr(attr, "'" + value + "' is not a valid decimal number")};
+  return NumberConvert{false, 0,
+                       invalidAttr(attr, "'" + value + "' is not a valid decimal number")};
 }
 
 NumberConvert attributeAsUnixTimeSeconds(const std::string& attr, const std::string& value) {

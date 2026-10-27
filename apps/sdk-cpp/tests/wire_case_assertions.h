@@ -97,7 +97,9 @@ inline std::optional<std::string> firstUnknownField(const json& block,
 
 // A request target's PATH (still escaped, query excluded), so #807's query
 // parameter never breaks a path pin.
-inline std::string pathOf(const std::string& target) { return target.substr(0, target.find('?')); }
+inline std::string pathOf(const std::string& target) {
+  return target.substr(0, target.find('?'));
+}
 
 // Loads the wire-cases corpus from the shared fixtures package (see
 // wire-cases.json's $schema for the authoritative shape).
@@ -162,9 +164,9 @@ inline void assertRequest(const json& wireCase, const std::string& sdkKey,
   // case's host is not routable from a test.
   REQUIRE(given.contains("baseUrl") == expected.contains("requestUrlPrefix"));
   if (given.contains("baseUrl")) {
-    const confeature::internal::ConfigFetcher custom(
-        sdkKey, "0.0.0-wire-test", given["baseUrl"].get<std::string>(), std::chrono::seconds(1),
-        nullptr);
+    const confeature::internal::ConfigFetcher custom(sdkKey, "0.0.0-wire-test",
+                                                     given["baseUrl"].get<std::string>(),
+                                                     std::chrono::seconds(1), nullptr);
     const auto url = confeature::tests::requireValue(custom.url(), "the custom base url");
     const auto prefix = expected["requestUrlPrefix"].get<std::string>();
     INFO("url=" << url << " prefix=" << prefix);
@@ -211,8 +213,7 @@ inline void assertOutcome(const json& wireCase, const confeature::internal::Fetc
 
 // Judges one fetch of a case — the request it sent and the result it
 // returned — by the corpus's expectations.
-inline void assertWireCase(const json& wireCase, const std::string& sdkKey,
-                           const SentRequest& sent,
+inline void assertWireCase(const json& wireCase, const std::string& sdkKey, const SentRequest& sent,
                            const confeature::internal::FetchResult& result) {
   assertRequest(wireCase, sdkKey, sent);
   assertOutcome(wireCase, result);

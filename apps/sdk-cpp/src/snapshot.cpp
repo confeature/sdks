@@ -168,8 +168,7 @@ EvaluationDetails<T> Snapshot::getValueDetails(const std::string& key, const T& 
   return details;
 }
 
-std::unordered_map<std::string, nlohmann::json> Snapshot::getAllValues(
-    const User* /*user*/) const {
+std::unordered_map<std::string, nlohmann::json> Snapshot::getAllValues(const User* /*user*/) const {
   // Bulk evaluator — walks the override + cache branches directly
   // rather than routing each key through `getValueJson`, which is
   // typed-default driven and would TYPE_MISMATCH against a `null`
@@ -302,7 +301,8 @@ template EvaluationDetails<int> Snapshot::getValueDetails<int>(const std::string
 template EvaluationDetails<double> Snapshot::getValueDetails<double>(const std::string&,
                                                                      const double&,
                                                                      const User*) const;
-template EvaluationDetails<std::string> Snapshot::getValueDetails<std::string>(
-    const std::string&, const std::string&, const User*) const;
+template EvaluationDetails<std::string> Snapshot::getValueDetails<std::string>(const std::string&,
+                                                                               const std::string&,
+                                                                               const User*) const;
 
 }  // namespace confeature

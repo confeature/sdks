@@ -14,10 +14,10 @@
 
 #include "confeature/confeature.h"
 
-using nlohmann::json;
 using confeature::ConfeatureClient;
 using confeature::FlagOverrides;
 using confeature::MapOverrideDataSource;
+using nlohmann::json;
 
 namespace {
 

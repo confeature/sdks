@@ -105,8 +105,7 @@ class ConfeatureClient : public std::enable_shared_from_this<ConfeatureClient> {
   // Mirrors ConfigCat-cpp's `ConfigCatClient::getAllValues` shape,
   // using `nlohmann::json` as the heterogeneous value container.
   // Closed clients return an empty map.
-  std::unordered_map<std::string, nlohmann::json> getAllValues(
-      const User* user = nullptr) const;
+  std::unordered_map<std::string, nlohmann::json> getAllValues(const User* user = nullptr) const;
 
   // Triggers an immediate synchronous fetch + cache update. Returns
   // true on success, false if the fetch failed (the reason is logged).

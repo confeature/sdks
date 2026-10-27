@@ -24,8 +24,7 @@ constexpr std::uint64_t kMaxSafeInteger = 9007199254740991ULL;
 const std::regex& fullRe() {
   static const std::string num = "0|[1-9]\\d*";
   static const std::string nonNum = "\\d*[a-zA-Z-][a-zA-Z0-9-]*";
-  static const std::string mainVer =
-      "(" + num + ")\\.(" + num + ")\\.(" + num + ")";
+  static const std::string mainVer = "(" + num + ")\\.(" + num + ")\\.(" + num + ")";
   static const std::string preId = "(?:" + num + "|" + nonNum + ")";
   static const std::string pre = "(?:-(" + preId + "(?:\\." + preId + ")*))";
   static const std::string buildId = "[0-9A-Za-z-]+";
