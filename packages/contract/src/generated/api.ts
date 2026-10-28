@@ -773,7 +773,7 @@ export interface paths {
     };
     /**
      * List the settings carrying a tag
-     * @description Returns the feature flags and settings that carry the tag, in ConfigCat's SettingModel shape. Confeature cannot assign a tag to a setting yet, so the list is always empty. Aligned with ConfigCat's get-settings-by-tag.
+     * @description Returns the feature flags and settings that carry the tag, in ConfigCat's SettingModel shape, each with its full tag list. Only the settings of the tag's own product are listed. Aligned with ConfigCat's get-settings-by-tag. A management token needs both `tag:read` and `setting:read`: the list is selected by tag and answers settings.
      */
     get: operations["getSettingsByTag"];
     put?: never;
@@ -867,7 +867,7 @@ export interface paths {
     head?: never;
     /**
      * Update a setting's metadata
-     * @description Partial update of a Setting's mutable metadata — `name` and `hint` (ConfigCat `SettingModel.name`/`SettingModel.hint`). Only the fields present in the request body are written; omitted fields are left untouched. The setting's `key` and `type` are IMMUTABLE and are NEVER accepted on this body — its per-environment VALUE is edited via the separate per-environment value endpoint (`setSettingValue`), not here.
+     * @description Partial update of a Setting's mutable metadata — `name`, `hint` and `tags` (ConfigCat `SettingModel.name`/`SettingModel.hint`/ `SettingModel.tags`). Only the fields present in the request body are written; omitted fields are left untouched. The setting's `key` and `type` are IMMUTABLE and are NEVER accepted on this body — its per-environment VALUE is edited via the separate per-environment value endpoint (`setSettingValue`), not here.
      */
     patch: operations["updateSetting"];
     trace?: never;
@@ -1887,7 +1887,7 @@ export interface components {
      * @enum {string}
      */
     SettingType: "boolean" | "string" | "int" | "double";
-    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags`, `predefinedVariations`, `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
+    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags` assigns tags to the new setting (#1009). `predefinedVariations`, `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
     CreateSettingRequest: {
       key: components["schemas"]["SettingKey"];
       /** @description Human-readable display label (ConfigCat SettingModel.name). */
@@ -1898,7 +1898,7 @@ export interface components {
       type?: components["schemas"]["SettingType"];
       /** @description The setting's value in each environment named, one entry per environment. Written with the setting, or not at all. */
       initialValues?: components["schemas"]["InitialValue"][] | null;
-      /** @description Not supported yet (#821); accepted only when empty. */
+      /** @description The IDs of the tags attached to the setting (ConfigCat's `CreateSettingInitialValues.tags`). Absent, null or empty assigns none; a repeated id counts once. Each tag must belong to the config's product. The assignments are written with the setting, or not at all. Confeature divergences, enforced by the api rather than stated as schema bounds: at most 100 distinct tags per setting, and every refusal (a tag of another product or org, an id that does not exist or is out of range, more than 100 distinct ids) answers the same fixed 400 body, which names no id, so a foreign tag is indistinguishable from a missing one. */
       tags?: number[] | null;
       /** @description Not supported yet (#821); accepted only when empty. */
       predefinedVariations?: Record<string, never>[] | null;
@@ -1923,16 +1923,18 @@ export interface components {
       environmentId: string;
       value: boolean | string | number;
     };
-    /** @description Partial update of a Setting's mutable METADATA only. Every field is optional and only the fields present in the body are written (mirrors `UpdateConfigRequest`). `name`/`hint` map 1:1 to ConfigCat's `SettingModel.name`/`SettingModel.hint`. The setting's `key` and `type` are IMMUTABLE — they are NOT on this body; its per-environment VALUE is edited via the per-environment value endpoint, not here. */
+    /** @description Partial update of a Setting's mutable METADATA only. Every field is optional and only the fields present in the body are written (mirrors `UpdateConfigRequest`). `name`/`hint`/`tags` map 1:1 to ConfigCat's `SettingModel.name`/`SettingModel.hint`/`SettingModel.tags`. The setting's `key` and `type` are IMMUTABLE — they are NOT on this body; its per-environment VALUE is edited via the per-environment value endpoint, not here. */
     UpdateSettingRequest: {
       /** @description Human-readable display label (ConfigCat SettingModel.name). */
       name?: string;
       /** @description Optional operator-facing hint (ConfigCat SettingModel.hint). */
       hint?: string | null;
+      /** @description The IDs of the tags the setting carries after the update: the full new set, replacing the current one. Absent or null leaves the tags unchanged; an empty list removes them all; a repeated id counts once. A Confeature divergence: ConfigCat edits `tags` through the JSON Patch body of update-setting, which Confeature does not accept yet (#892); a full set is its one-call equivalent. As on create, each tag must belong to the setting's product, at most 100 distinct tags are allowed, and every refusal answers the same fixed 400 body, which names no id. */
+      tags?: number[] | null;
       /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
       reason?: string;
     };
-    /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` and `predefinedVariations` are always empty in Confeature. */
+    /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` lists the tags assigned to the setting, by assignment order (#1009). `predefinedVariations` is always empty in Confeature. */
     SettingModel: {
       /**
        * Format: int32
@@ -1957,8 +1959,8 @@ export interface components {
       configName: string;
       /** Format: date-time */
       createdAt: string | null;
-      /** @description Tags are not supported yet; always empty. */
-      tags: Record<string, never>[];
+      /** @description The tags attached to the Feature Flag or Setting. */
+      tags: components["schemas"]["TagModel"][];
       /** @description Predefined variations are not supported yet; always empty. */
       predefinedVariations: Record<string, never>[];
     };
@@ -2153,6 +2155,23 @@ export interface components {
       /** @description The configured color of the Tag. */
       color: string | null;
     };
+    /** @description A tag as a setting's value carries it, as ConfigCat's `SettingTagModel` (#1009): the assignment's identifier and the tag's identifier, name and color, without the tag's product. */
+    SettingTagModel: {
+      /**
+       * Format: int64
+       * @description Identifier of the assignment of the Tag to the setting.
+       */
+      settingTagId: number;
+      /**
+       * Format: int64
+       * @description Identifier of the Tag.
+       */
+      tagId: number;
+      /** @description Name of the Tag. */
+      name: string;
+      /** @description The configured color of the Tag. */
+      color: string | null;
+    };
     /** @description A new tag, as ConfigCat's model. */
     CreateTagModel: {
       /** @description Name of the Tag. */
@@ -2297,7 +2316,8 @@ export interface components {
       lastUpdaterUserEmail: string | null;
       lastUpdaterUserFullName: string | null;
       integrationLinks: Record<string, never>[];
-      settingTags: Record<string, never>[];
+      /** @description The tags attached to the Feature Flag or Setting, by assignment order. */
+      settingTags: components["schemas"]["SettingTagModel"][];
       /** @description The settings whose targeting rules in this environment have this setting as a prerequisite, by ascending id. */
       settingIdsWherePrerequisite: number[];
       /** Format: int32 */
@@ -2334,7 +2354,8 @@ export interface components {
       lastUpdaterUserEmail: string | null;
       lastUpdaterUserFullName: string | null;
       integrationLinks: Record<string, never>[];
-      settingTags: Record<string, never>[];
+      /** @description The tags attached to the Feature Flag or Setting, by assignment order. */
+      settingTags: components["schemas"]["SettingTagModel"][];
       /** @description The settings whose targeting rules in this environment have this setting as a prerequisite, by ascending id. */
       settingIdsWherePrerequisite: number[];
       /** Format: int32 */
@@ -5787,7 +5808,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description The token lacks tag:read. */
+      /** @description The token lacks tag:read or setting:read. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -6182,7 +6203,7 @@ export interface operations {
           "application/json": components["schemas"]["SettingModel"];
         };
       };
-      /** @description Invalid request body: `settingType` and `type` disagree, an initial value does not fit the setting type, an environment is named twice, a field Confeature does not support yet is not empty, or a change note is required. */
+      /** @description Invalid request body: `settingType` and `type` disagree, an initial value does not fit the setting type, an environment is named twice, a tag cannot be assigned (one fixed body, see `CreateSettingRequest.tags`), a field Confeature does not support yet is not empty, or a change note is required. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -6388,7 +6409,7 @@ export interface operations {
           "application/json": components["schemas"]["SettingModel"];
         };
       };
-      /** @description Invalid request body. */
+      /** @description Invalid request body, or a tag cannot be assigned (one fixed body, see `UpdateSettingRequest.tags`). */
       400: {
         headers: {
           [name: string]: unknown;
