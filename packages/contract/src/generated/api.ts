@@ -872,6 +872,28 @@ export interface paths {
     patch: operations["updateSetting"];
     trace?: never;
   };
+  "/v1/configs/{configId}/deleted-settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List deleted settings
+     * @description The Feature Flags and Settings deleted from the config, for the code scanner (`configcat scan`), in ConfigCat's `DeletedSettingModel[]` shape. Only a setting delete (the per-key DELETE) adds an entry; deleting the config removes its entries with it, and deleting a product removes those of its configs.
+     *
+     *     The list is in delete order, oldest first. A key deleted, re-created and deleted again appears once per delete, and a key re-created after a delete keeps its earlier entries. The list is not paginated: it answers every entry of the config. Settings deleted before this endpoint shipped are absent: nothing was recorded for them.
+     */
+    get: operations["getDeletedSettings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/configs/{configId}/environments/{environmentId}": {
     parameters: {
       query?: never;
@@ -1963,6 +1985,16 @@ export interface components {
       tags: components["schemas"]["TagModel"][];
       /** @description Predefined variations are not supported yet; always empty. */
       predefinedVariations: Record<string, never>[];
+    };
+    /** @description A Feature Flag or Setting deleted from its config, as the deleted-settings list answers it. Aligned 1:1 with ConfigCat's `DeletedSettingModel` (get-deleted-settings): exactly its four fields, all required. Closed (`additionalProperties: false`), which ConfigCat's document does not state: Confeature answers no other field, so a ConfigCat client reads the same body. */
+    DeletedSettingModel: {
+      /** @description Key of the Feature Flag or Setting. */
+      key: string;
+      /** @description Name of the Feature Flag or Setting. */
+      name: string;
+      /** @description Description of the Feature Flag or Setting. */
+      hint: string | null;
+      settingType: components["schemas"]["SettingType"];
     };
     /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. The creator fields are always null: Confeature does not return member identities through this model. */
     SettingDataV2Model: {
@@ -6447,6 +6479,58 @@ export interface operations {
         };
       };
       429: components["responses"]["RateLimited"];
+    };
+  };
+  getDeletedSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Config id (UUID). */
+        configId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The config's deleted settings, as ConfigCat's `DeletedSettingModel[]`, oldest delete first. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeletedSettingModel"][];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks the setting:read scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Config not found. A config the caller may not access answers the same body. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
     };
   };
   getSdkKeys: {

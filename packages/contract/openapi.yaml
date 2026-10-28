@@ -3375,6 +3375,78 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /v1/configs/{configId}/deleted-settings:
+    # ConfigCat `get-deleted-settings`, copied 1:1: path, method, tag
+    # and the closed `DeletedSettingModel`. Its operationId is written in the
+    # contract's camelCase convention, as `getTags`. ConfigCat documents
+    # neither the order nor what a re-created key does; both choices are
+    # stated in the description below. ConfigCat's `400` is not declared: the
+    # only input is the uuid path parameter, which no sibling config route
+    # declares a 400 for either (a malformed one answers the `Error` 400).
+    get:
+      operationId: getDeletedSettings
+      summary: List deleted settings
+      description: >
+        The Feature Flags and Settings deleted from the config, for the code
+        scanner (`configcat scan`), in ConfigCat's `DeletedSettingModel[]`
+        shape. Only a setting delete (the per-key DELETE) adds an entry;
+        deleting the config removes its entries with it, and deleting a
+        product removes those of its configs.
+
+
+        The list is in delete order, oldest first. A key deleted, re-created
+        and deleted again appears once per delete, and a key re-created after
+        a delete keeps its earlier entries. The list is not paginated: it
+        answers every entry of the config. Settings deleted before this
+        endpoint shipped are absent: nothing was recorded for them.
+      tags: [Audit logs]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      parameters:
+        - in: path
+          name: configId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Config id (UUID).
+      responses:
+        "200":
+          description: >
+            The config's deleted settings, as ConfigCat's
+            `DeletedSettingModel[]`, oldest delete first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeletedSettingModel"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks the setting:read scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            Config not found. A config the caller may not access answers the
+            same body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /v1/configs/{configId}/environments/{environmentId}:
     get:
       operationId: getSdkKeys
@@ -6500,6 +6572,34 @@ components:
           description: Predefined variations are not supported yet; always empty.
           items:
             type: object
+    DeletedSettingModel:
+      type: object
+      description: >
+        A Feature Flag or Setting deleted from its config, as the
+        deleted-settings list answers it. Aligned 1:1 with
+        ConfigCat's `DeletedSettingModel` (get-deleted-settings): exactly its
+        four fields, all required. Closed (`additionalProperties: false`),
+        which ConfigCat's document does not state: Confeature answers no
+        other field, so a ConfigCat client reads the same body.
+      additionalProperties: false
+      required:
+        - key
+        - name
+        - hint
+        - settingType
+      properties:
+        key:
+          type: string
+          description: Key of the Feature Flag or Setting.
+        name:
+          type: string
+          description: Name of the Feature Flag or Setting.
+        hint:
+          type: string
+          nullable: true
+          description: Description of the Feature Flag or Setting.
+        settingType:
+          $ref: "#/components/schemas/SettingType"
     SettingDataV2Model:
       type: object
       description: >
