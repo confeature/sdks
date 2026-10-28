@@ -894,6 +894,76 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/code-references": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload References
+     * @description Stores one code-reference report: the references the scanner (`configcat scan --upload`) found on one branch of one repository, scanned against one config. ConfigCat publishes no operationId for this operation; `uploadCodeReferences` is Confeature's.
+     *
+     *     A re-scan replaces the branch's report: the report of the same config, `repository` and `branch` is deleted and the new one stored, with a new `codeReferenceId`, in one transaction. When `activeBranches` is present (an empty array included), every other report of that config and repository whose branch is not in it is deleted too, never the uploaded branch (it may simply not be pushed yet). When `activeBranches` is absent or null, no branch is pruned. An empty or absent `flagReferences` still stores the report: the branch was scanned and nothing was found.
+     *
+     *     References whose `settingId` is neither a setting of the config nor a deleted setting of the config are dropped, and the rest of the upload is stored: references to an unknown `settingId` are dropped, and references to a deleted setting are kept (it may have been deleted between the scanner's read and its upload). Unknown properties are ignored. The body is accepted as `application/json` only (ConfigCat also lists `text/json` and `application/*+json`; the scanner sends `application/json`). A `commitUrl` or `fileUrl` must be an `http:` or `https:` URL. Bounds ConfigCat does not document, the same for every organization: at most 10 lines in each `preLines` and `postLines`, 150 references per Feature Flag or Setting (across all of its `FlagReference` entries), 10,000 references per upload, 5,000 `activeBranches` (1 MiB serialised), a body of 8 MiB, and 100 reports per config.
+     *
+     *     The upload spends the organization's write budget by its size: one token, plus one per full 64 KiB of `Content-Length` (a body sent without `Content-Length` is charged as 8 MiB).
+     */
+    post: operations["uploadCodeReferences"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/code-references/delete-reports": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete Reference reports
+     * @description Deletes the code-reference reports of one repository of one config, only those of `branch` when it is set. ConfigCat publishes no operationId for this operation; `deleteCodeReferenceReports` is Confeature's.
+     *
+     *     With `settingId`, only that setting's references in those reports are deleted, and the reports stay (a branch scanned with no reference to the setting). A `settingId` that is not in those reports matches nothing. Nothing to delete is still 200. The body is accepted as `application/json` only (ConfigCat also lists `text/json` and `application/*+json`).
+     */
+    post: operations["deleteCodeReferenceReports"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/settings/{settingId}/code-references": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get References for Feature Flag or Setting
+     * @description The code-reference reports of the setting's config that hold at least one reference to the setting, each with that setting's references only, in ConfigCat's `CodeReferenceModel[]` shape. ConfigCat publishes no operationId for this operation; `getCodeReferences` is Confeature's.
+     *
+     *     The reports are ordered by `repository`, then `branch`; each report's references are in upload order. The list is not paginated, as ConfigCat's. A deleted setting answers 404, as a missing one.
+     */
+    get: operations["getCodeReferences"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/configs/{configId}/environments/{environmentId}": {
     parameters: {
       query?: never;
@@ -1995,6 +2065,124 @@ export interface components {
       /** @description Description of the Feature Flag or Setting. */
       hint: string | null;
       settingType: components["schemas"]["SettingType"];
+    };
+    /** @description One code-reference report, as the scanner uploads it. Aligned 1:1 with ConfigCat's `CodeReferenceRequest`: its eight fields, its required list and its lengths (counted in UTF-16 code units, as ConfigCat's). Open: unknown properties are ignored. Divergences, each stated on its field: `activeBranches` and `flagReferences` admit null (read as absent, which is what ConfigCat's scanner sends instead), the counts Confeature bounds, and the `http:` / `https:` rule on `commitUrl`. */
+    CodeReferenceRequest: {
+      /**
+       * Format: uuid
+       * @description The Config's identifier the scanning was performed against.
+       */
+      configId: string;
+      /** @description The source control repository that contains the scanned code. */
+      repository: string;
+      /** @description The source control branch on where the scan was performed. */
+      branch: string;
+      /** @description The related commit's URL. When not empty, it must be an absolute URL whose scheme is `http:` or `https:` (a dashboard renders it as a link); ConfigCat documents no such rule. */
+      commitUrl?: string | null;
+      /** @description The related commit's hash. */
+      commitHash?: string | null;
+      /** @description The scanning tool's name. */
+      uploader?: string | null;
+      /** @description The currently active branches of the repository. Each previously uploaded report of this config and repository whose branch is not in the list is deleted, never the uploaded branch's. Absent or null: nothing is pruned. At most 5,000 entries of 1 to 255 characters, and at most 1 MiB serialised as UTF-8 JSON; ConfigCat documents no bound. */
+      activeBranches?: string[] | null;
+      /** @description The actual code reference collection. At most 10,000 references in total across all entries; ConfigCat documents no bound. A `settingId` may appear more than once; each entry is stored in array order. */
+      flagReferences?: components["schemas"]["FlagReference"][] | null;
+    };
+    /** @description The references to one Feature Flag or Setting. Aligned 1:1 with ConfigCat's `FlagReference`. */
+    FlagReference: {
+      /**
+       * Format: int32
+       * @description The identifier of the Feature Flag or Setting the code reference belongs to.
+       */
+      settingId: number;
+      /** @description The actual references to the given Feature Flag or Setting. At most 150, the most ConfigCat's scanner uploads per flag, counted across every entry for the same setting; ConfigCat documents no bound. */
+      references: components["schemas"]["ReferenceLinesRequest"][];
+    };
+    /** @description One reference: the file, the line and the lines around it. Aligned 1:1 with ConfigCat's `ReferenceLinesRequest`. */
+    ReferenceLinesRequest: {
+      /** @description The file's name in where the code reference has been found. */
+      file: string;
+      /** @description The file's url. When not empty, it must be an absolute URL whose scheme is `http:` or `https:` (a dashboard renders it as a link); ConfigCat documents no such rule. */
+      fileUrl?: string | null;
+      /** @description The lines before the actual reference line. At most 10, the most ConfigCat's scanner sends (`--line-count`); ConfigCat documents no bound. */
+      preLines?: components["schemas"]["ReferenceLineRequest"][];
+      /** @description The lines after the actual reference line. At most 10, the most ConfigCat's scanner sends (`--line-count`); ConfigCat documents no bound. */
+      postLines?: components["schemas"]["ReferenceLineRequest"][];
+      referenceLine: components["schemas"]["ReferenceLineRequest"];
+    };
+    /** @description Determines a code reference line. Aligned 1:1 with ConfigCat's `ReferenceLineRequest`. */
+    ReferenceLineRequest: {
+      /**
+       * Format: int32
+       * @description The line number.
+       */
+      lineNumber: number;
+      /** @description The content of the reference line. */
+      lineText?: string | null;
+    };
+    /** @description Which code-reference reports to delete. Aligned 1:1 with ConfigCat's `DeleteRepositoryReportsRequest`. */
+    DeleteRepositoryReportsRequest: {
+      /**
+       * Format: uuid
+       * @description The Config's identifier from where the reports should be deleted.
+       */
+      configId: string;
+      /** @description The source control repository which's reports should be deleted. */
+      repository: string;
+      /** @description If it's set, only this branch's reports belonging to the given repository will be deleted. */
+      branch?: string | null;
+      /**
+       * Format: int32
+       * @description If it's set, only this setting's references in the matching reports are deleted; the reports stay.
+       */
+      settingId?: number | null;
+    };
+    /** @description One code-reference report, with the references to one Feature Flag or Setting. Aligned 1:1 with ConfigCat's `CodeReferenceModel`: its eight fields, all required, with ConfigCat's nullability. Confeature answers null only for `commitUrl`, `commitHash` and `uploader` when the upload left them out, and `[]` for no references. */
+    CodeReferenceModel: {
+      /**
+       * Format: uuid
+       * @description The identifier of the reference report.
+       */
+      codeReferenceId: string;
+      /** @description The source control repository that contains the scanned code. */
+      repository: string | null;
+      /** @description The source control branch on where the scan was performed. */
+      branch: string | null;
+      /** @description The related commit's URL. */
+      commitUrl: string | null;
+      /** @description The related commit's hash. */
+      commitHash: string | null;
+      /** @description The code reference scanning tool's name. */
+      uploader: string | null;
+      /**
+       * Format: date-time
+       * @description The date and time when the reference report was uploaded (UTC).
+       */
+      syncedAt: string;
+      /** @description The actual references to the given Feature Flag or Setting, in upload order. */
+      references: components["schemas"]["ReferenceLinesModel"][] | null;
+    };
+    /** @description One stored reference. Aligned 1:1 with ConfigCat's `ReferenceLinesModel`: its five fields, all required. `preLines` and `postLines` are `[]` when the upload sent none. */
+    ReferenceLinesModel: {
+      /** @description The file's name in where the code reference has been found. */
+      file: string;
+      /** @description The file's url. */
+      fileUrl: string | null;
+      /** @description The lines before the actual reference line. */
+      preLines: components["schemas"]["ReferenceLineModel"][];
+      /** @description The lines after the actual reference line. */
+      postLines: components["schemas"]["ReferenceLineModel"][];
+      referenceLine: components["schemas"]["ReferenceLineModel"];
+    };
+    /** @description Determines a code reference line. Aligned 1:1 with ConfigCat's `ReferenceLineModel`. */
+    ReferenceLineModel: {
+      /**
+       * Format: int32
+       * @description The line number.
+       */
+      lineNumber: number;
+      /** @description The content of the reference line. */
+      lineText: string | null;
     };
     /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. The creator fields are always null: Confeature does not return member identities through this model. */
     SettingDataV2Model: {
@@ -6522,6 +6710,187 @@ export interface operations {
         };
       };
       /** @description Config not found. A config the caller may not access answers the same body. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  uploadCodeReferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CodeReferenceRequest"];
+      };
+    };
+    responses: {
+      /** @description The report is stored. No body, as ConfigCat. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description `bad_request`: the body is not JSON, misses a required field, or breaks a length, a bound or the URL rule of `CodeReferenceRequest`. `code_reference_report_limit`: the upload would create the 101st report of the config, counted after its own replace and prune; a config holds at most 100 reports (one per repository and branch). ConfigCat documents no such limit; it answers 400, the only status of the ones ConfigCat documents for this operation that fits. Nothing is written in either case, not even the prune. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks the code-reference:write scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Config not found. A config the caller may not access answers the same body. Nothing is written. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The request body is larger than 8 MiB (8,388,608 bytes), with or without `Content-Length`. ConfigCat documents no bound. Nothing is written. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  deleteCodeReferenceReports: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeleteRepositoryReportsRequest"];
+      };
+    };
+    responses: {
+      /** @description The matching reports or references are deleted. No body, as ConfigCat. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description `bad_request`: the body is not JSON, misses a required field, or breaks a length of `DeleteRepositoryReportsRequest`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks the code-reference:write scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Config not found. A config the caller may not access answers the same body. Nothing is deleted. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  getCodeReferences: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Feature Flag or Setting. */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The setting's code references, as ConfigCat's `CodeReferenceModel[]`. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CodeReferenceModel"][];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks the code-reference:read scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting not found. A setting the caller may not access answers the same body. */
       404: {
         headers: {
           [name: string]: unknown;
