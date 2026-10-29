@@ -964,6 +964,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/settings/{settingId}/predefined-variations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get predefined variations
+     * @description The predefined variations of a Feature Flag or Setting, in their order, with their usages in the Environments, as ConfigCat's `PredefinedVariationsWithUsagesModel`. `environments` lists every Environment of the setting's product; Confeature has no environment-specific Feature Management permission, so each has `accessType: full`.
+     *
+     *     Confeature divergences: `usages` is always empty and `usagesInOtherEnvironments` is 0 until a setting value can name a predefined variation, and `changeRequestUsages` is always empty and `changeRequestUsagesInOtherEnvironments` 0 until change requests ship. `maxPredefinedVariations` is Confeature's technical maximum, 100, the same for every plan. A deleted setting answers 404, as a missing one. Reading this never answers 402.
+     */
+    get: operations["getPredefinedVariations"];
+    /**
+     * Update predefined variations
+     * @description Replaces the whole list of the setting's predefined variations, in the request's order, and answers the stored list as ConfigCat's `PredefinedVariationsModel`. An entry with a `predefinedVariationId` updates that variation of the setting; an entry without one creates a variation with a new id; a stored variation absent from the request is deleted. Every value must match the setting's type and stay in its value domain (an int32, the string length limit, a finite double), and the served values of one setting are distinct. A predefined variation's value can only be updated, and the variation deleted, if it is not used anywhere in your feature flags; its name and hint can always be updated. The variations never change what the SDKs are served: nothing is published and no config is re-projected.
+     *
+     *     Confeature divergences, each the same for every plan: at most 100 variations per setting (Confeature's technical maximum, reported as `maxPredefinedVariations`), the whole ordered list at most 900,000 bytes of UTF-8 JSON (400), and a body of at most 1 MiB (413). The optional `reason` is a Confeature addition: the change note for the audit log, required when the product requires a reason for changes; a ConfigCat client omits it. The body is accepted as `application/json` only (ConfigCat also lists `text/json` and `application/*+json`), as on every other write of this contract. A change is audited as `predefinedVariationsChanged`; Confeature has no `settingConvertedToPredefinedVariations` event, because a setting needs no conversion to hold variations. This never answers 402.
+     */
+    put: operations["updatePredefinedVariations"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/configs/{configId}/environments/{environmentId}": {
     parameters: {
       query?: never;
@@ -1153,7 +1181,7 @@ export interface paths {
     };
     /**
      * Get Organization limitations
-     * @description ConfigCat's `get-organization-limitations`: the limits the Organization's feature flag values and targeting are held to. Every field shared with `FeatureFlagLimitations` is the value a v2 setting value read reports for the same Organization, from the one source. A count the plan leaves unlimited reports the technical maximum, the largest a write can hold anyway, because every field is a required integer. `maxPredefinedVariations` is 0: Confeature does not support predefined variations yet. Reading this never answers 402. Credentials and the 404 rule are those of `getOrganizationUsageAndQuota`.
+     * @description ConfigCat's `get-organization-limitations`: the limits the Organization's feature flag values and targeting are held to. Every field shared with `FeatureFlagLimitations` is the value a v2 setting value read reports for the same Organization, from the one source. A count the plan leaves unlimited reports the technical maximum, the largest a write can hold anyway, because every field is a required integer. `maxPredefinedVariations` is Confeature's technical maximum, 100, the same for every plan. Reading this never answers 402. Credentials and the 404 rule are those of `getOrganizationUsageAndQuota`.
      */
     get: operations["getOrganizationLimitations"];
     put?: never;
@@ -1979,7 +2007,7 @@ export interface components {
      * @enum {string}
      */
     SettingType: "boolean" | "string" | "int" | "double";
-    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags` assigns tags to the new setting (#1009). `predefinedVariations`, `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
+    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags` assigns tags to the new setting (#1009). `predefinedVariations` gives the new setting its predefined variations, written with the setting or not at all. `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
     CreateSettingRequest: {
       key: components["schemas"]["SettingKey"];
       /** @description Human-readable display label (ConfigCat SettingModel.name). */
@@ -1992,8 +2020,8 @@ export interface components {
       initialValues?: components["schemas"]["InitialValue"][] | null;
       /** @description The IDs of the tags attached to the setting (ConfigCat's `CreateSettingInitialValues.tags`). Absent, null or empty assigns none; a repeated id counts once. Each tag must belong to the config's product. The assignments are written with the setting, or not at all. Confeature divergences, enforced by the api rather than stated as schema bounds: at most 100 distinct tags per setting, and every refusal (a tag of another product or org, an id that does not exist or is out of range, more than 100 distinct ids) answers the same fixed 400 body, which names no id, so a foreign tag is indistinguishable from a missing one. */
       tags?: number[] | null;
-      /** @description Not supported yet (#821); accepted only when empty. */
-      predefinedVariations?: Record<string, never>[] | null;
+      /** @description The new setting's predefined variations, in order, held to the rules of `updatePredefinedVariations`: values that match `settingType` and are distinct, at most 100 variations, the whole list at most 900,000 bytes of UTF-8 JSON (400), and a body of at most 1 MiB (413). Confeature divergences, the same for every plan; this never answers 402. Null or absent creates none. */
+      predefinedVariations?: components["schemas"]["CreatePredefinedVariationModel"][] | null;
       /**
        * Format: int32
        * @description Not supported yet (#818): settings are ordered by creation. Accepted only when null.
@@ -2026,7 +2054,7 @@ export interface components {
       /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
       reason?: string;
     };
-    /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` lists the tags assigned to the setting, by assignment order (#1009). `predefinedVariations` is always empty in Confeature. */
+    /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` lists the tags assigned to the setting, by assignment order (#1009). `predefinedVariations` lists the setting's predefined variations, in their order. */
     SettingModel: {
       /**
        * Format: int32
@@ -2053,8 +2081,8 @@ export interface components {
       createdAt: string | null;
       /** @description The tags attached to the Feature Flag or Setting. */
       tags: components["schemas"]["TagModel"][];
-      /** @description Predefined variations are not supported yet; always empty. */
-      predefinedVariations: Record<string, never>[];
+      /** @description The Feature Flag or Setting's Variations, in their order. */
+      predefinedVariations: components["schemas"]["PredefinedVariationModel"][];
     };
     /** @description A Feature Flag or Setting deleted from its config, as the deleted-settings list answers it. Aligned 1:1 with ConfigCat's `DeletedSettingModel` (get-deleted-settings): exactly its four fields, all required. Closed (`additionalProperties: false`), which ConfigCat's document does not state: Confeature answers no other field, so a ConfigCat client reads the same body. */
     DeletedSettingModel: {
@@ -2199,8 +2227,186 @@ export interface components {
       createdAt: string | null;
       creatorEmail: string | null;
       creatorFullName: string | null;
-      predefinedVariations: Record<string, never>[];
+      /** @description A collection of Variations for a Feature Flag or Setting, in their order. */
+      predefinedVariations: components["schemas"]["PredefinedVariationModel"][];
       isWatching: boolean;
+    };
+    /** @description A Predefined Variation, as ConfigCat's `PredefinedVariationModel`. */
+    PredefinedVariationModel: {
+      value: components["schemas"]["PredefinedVariationValueModel"];
+      /** @description The name of the Predefined Variation, shown on the Dashboard UI. If not set, the Value will be shown. */
+      name: string | null;
+      /** @description The hint of the Predefined Variation: a longer description of what it serves, shown on the Dashboard UI. */
+      hint: string | null;
+      /**
+       * Format: uuid
+       * @description The Predefined Variation's identifier.
+       */
+      predefinedVariationId: string;
+    };
+    /** @description Represents the value of a Predefined Variation: exactly the field that matches the setting's type is non-null. */
+    PredefinedVariationValueModel: {
+      /** @description The served value in case of a boolean Feature Flag. */
+      boolValue: boolean | null;
+      /** @description The served value in case of a text Setting. */
+      stringValue: string | null;
+      /**
+       * Format: int32
+       * @description The served value in case of a whole number Setting.
+       */
+      intValue: number | null;
+      /**
+       * Format: double
+       * @description The served value in case of a decimal number Setting.
+       */
+      doubleValue: number | null;
+    };
+    /** @description The body of an update of a setting's predefined variations, as ConfigCat's `UpdatePredefinedVariationsRequest`, plus Confeature's optional `reason`. */
+    UpdatePredefinedVariationsRequest: {
+      /** @description A collection of Predefined Variations: the whole list, in order. */
+      predefinedVariations: components["schemas"]["UpdatePredefinedVariationModel"][];
+      /** @description The change note for the audit log, at most 1000 characters as for every bounded reason. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
+      reason?: string | null;
+    };
+    /** @description A Predefined Variation to keep or add, as ConfigCat's `UpdatePredefinedVariationModel`. */
+    UpdatePredefinedVariationModel: {
+      value: components["schemas"]["UpdatePredefinedVariationValueModel"];
+      /** @description The name of the Predefined Variation, shown on the Dashboard UI. If not set, the Value will be shown. */
+      name?: string | null;
+      /** @description The hint of the Predefined Variation: a longer description of what it serves, shown on the Dashboard UI. */
+      hint?: string | null;
+      /**
+       * Format: uuid
+       * @description The Predefined Variation's identifier to update. Omit the value if you want to add a new predefined variation.
+       */
+      predefinedVariationId?: string | null;
+    };
+    /** @description Represents the value of a Predefined Variation: exactly one field, the one matching the setting's type, is non-null. */
+    UpdatePredefinedVariationValueModel: {
+      /** @description The served value in case of a boolean Feature Flag. */
+      boolValue?: boolean | null;
+      /** @description The served value in case of a text Setting. */
+      stringValue?: string | null;
+      /**
+       * Format: int32
+       * @description The served value in case of a whole number Setting.
+       */
+      intValue?: number | null;
+      /**
+       * Format: double
+       * @description The served value in case of a decimal number Setting.
+       */
+      doubleValue?: number | null;
+    };
+    /** @description A setting's predefined variations, as ConfigCat's `PredefinedVariationsModel`. */
+    PredefinedVariationsModel: {
+      /** @description The Feature Flag or Setting's Variations. */
+      predefinedVariations: components["schemas"]["PredefinedVariationModel"][];
+      /**
+       * Format: int32
+       * @description The maximum number of predefined variations allowed for the Feature Flag or Setting: Confeature's technical maximum, 100, the same for every plan.
+       */
+      maxPredefinedVariations: number;
+    };
+    /** @description A setting's predefined variations with their usages, as ConfigCat's `PredefinedVariationsWithUsagesModel`. */
+    PredefinedVariationsWithUsagesModel: {
+      /** @description Key of the Feature Flag or Setting. */
+      settingKey: string;
+      settingType: components["schemas"]["SettingType"];
+      /** @description The Feature Flag or Setting's Variations. */
+      predefinedVariations: components["schemas"]["PredefinedVariationWithUsagesModel"][];
+      /** @description The Environment descriptors for the Variations' usages. */
+      environments: components["schemas"]["PredefinedVariationEnvironmentModel"][];
+      /**
+       * Format: int32
+       * @description The maximum number of predefined variations allowed for the Feature Flag or Setting: Confeature's technical maximum, 100, the same for every plan.
+       */
+      maxPredefinedVariations: number;
+    };
+    /** @description A Predefined Variation with its usages, as ConfigCat's `PredefinedVariationWithUsagesModel`. In Confeature `usages` and `changeRequestUsages` are always empty, and both counts are 0: no setting value can name a predefined variation yet, and there are no change requests. */
+    PredefinedVariationWithUsagesModel: {
+      value: components["schemas"]["PredefinedVariationValueModel"];
+      /** @description The name of the Predefined Variation, shown on the Dashboard UI. If not set, the Value will be shown. */
+      name: string | null;
+      /** @description The hint of the Predefined Variation: a longer description of what it serves, shown on the Dashboard UI. */
+      hint: string | null;
+      /**
+       * Format: uuid
+       * @description The Predefined Variation's identifier.
+       */
+      predefinedVariationId: string;
+      /** @description The Feature Flag or Setting Variation's usages in the given Environments. */
+      usages: components["schemas"]["PredefinedVariationUsageModel"][];
+      /**
+       * Format: int32
+       * @description The Feature Flag or Setting Variation's usages in the Environments you don't have access to.
+       */
+      usagesInOtherEnvironments: number;
+      /** @description The Feature Flag or Setting Variation's usages in the given Change Requests. */
+      changeRequestUsages: components["schemas"]["PredefinedVariationChangeRequestUsageModel"][];
+      /**
+       * Format: int32
+       * @description The Feature Flag or Setting Variation's usages in the Change Requests you don't have access to.
+       */
+      changeRequestUsagesInOtherEnvironments: number;
+    };
+    /** @description A setting value that serves the variation, as ConfigCat's `PredefinedVariationUsageModel`. */
+    PredefinedVariationUsageModel: {
+      /** Format: int32 */
+      settingId: number;
+      /** Format: uuid */
+      environmentId: string;
+    };
+    /** @description A change request that serves the variation, as ConfigCat's `PredefinedVariationChangeRequestUsageModel`. */
+    PredefinedVariationChangeRequestUsageModel: {
+      /** Format: int64 */
+      changeRequestId: number;
+      changeRequestTitle: string;
+      /** Format: int32 */
+      settingId: number;
+      /** Format: uuid */
+      environmentId: string;
+    };
+    /** @description An Environment of the setting's product, as ConfigCat's `PredefinedVariationEnvironmentModel`. */
+    PredefinedVariationEnvironmentModel: {
+      /**
+       * Format: uuid
+       * @description The identifier of the Environment.
+       */
+      environmentId: string;
+      /** @description The name of the Environment. */
+      name: string;
+      accessType: components["schemas"]["EnvironmentAccessType"];
+    };
+    /**
+     * @description Represent the environment specific Feature Management permission, as ConfigCat's `EnvironmentAccessType`. Confeature has no environment-specific permission and answers `full`.
+     * @enum {string}
+     */
+    EnvironmentAccessType: "full" | "readOnly" | "none";
+    /** @description A Predefined Variation of a new setting, as ConfigCat's `CreatePredefinedVariationModel`. It has no `predefinedVariationId`: the id is minted, and a body naming one, or any other field, is refused (400). */
+    CreatePredefinedVariationModel: {
+      value: components["schemas"]["CreatePredefinedVariationValueModel"];
+      /** @description The name of the Predefined Variation, shown on the Dashboard UI. If not set, the Value will be shown. */
+      name?: string | null;
+      /** @description The hint of the Predefined Variation: a longer description of what it serves, shown on the Dashboard UI. */
+      hint?: string | null;
+    };
+    /** @description Represents the value of a Predefined Variation: exactly one field, the one matching the setting's type, is non-null. */
+    CreatePredefinedVariationValueModel: {
+      /** @description The served value in case of a boolean Feature Flag. */
+      boolValue?: boolean | null;
+      /** @description The served value in case of a text Setting. */
+      stringValue?: string | null;
+      /**
+       * Format: int32
+       * @description The served value in case of a whole number Setting.
+       */
+      intValue?: number | null;
+      /**
+       * Format: double
+       * @description The served value in case of a decimal number Setting.
+       */
+      doubleValue?: number | null;
     };
     /** @description A typed value, as ConfigCat's `ValueModel`: exactly the field that matches the setting's type is non-null. */
     ValueModel: {
@@ -2883,7 +3089,7 @@ export interface components {
       name: string;
       count: number;
     };
-    /** @description ConfigCat's `OrganizationLimitations`: the limits the Organization's feature flag values and targeting are held to. The fields shared with `FeatureFlagLimitations` are its values for the same Organization. `maxPredefinedVariations` is 0: predefined variations are not supported yet. */
+    /** @description ConfigCat's `OrganizationLimitations`: the limits the Organization's feature flag values and targeting are held to. The fields shared with `FeatureFlagLimitations` are its values for the same Organization. `maxPredefinedVariations` is Confeature's technical maximum, 100, the same for every plan. */
     OrganizationLimitations: {
       /** Format: int32 */
       maxPercentageOptionCount: number;
@@ -3004,6 +3210,7 @@ export interface components {
       | "settingDeleted"
       | "settingsReordered"
       | "settingValueChanged"
+      | "predefinedVariationsChanged"
       | "webHookCreated"
       | "webHookChanged"
       | "webHookDeleted"
@@ -6469,6 +6676,15 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      /** @description The request body is larger than 1 MiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       429: components["responses"]["RateLimited"];
       /** @description The setting and its initial values are saved, but an initial value is not live yet. The edge update is retried automatically; a PUT of the value makes it live at once. Retrying this POST answers 409. */
       503: {
@@ -6900,6 +7116,141 @@ export interface operations {
         };
       };
       429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  getPredefinedVariations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Setting. */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The setting's predefined variations, as ConfigCat's `PredefinedVariationsWithUsagesModel`. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PredefinedVariationsWithUsagesModel"];
+        };
+      };
+      /** @description The `settingId` is not an int32. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks the setting:read scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting not found. A setting the caller may not access answers the same body. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  updatePredefinedVariations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Setting. */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdatePredefinedVariationsRequest"];
+      };
+    };
+    responses: {
+      /** @description The setting's predefined variations as stored, as ConfigCat's `PredefinedVariationsModel`. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PredefinedVariationsModel"];
+        };
+      };
+      /** @description The body is invalid; or a reason is required for this change and none is given (`reason_required`); or there are more than 100 variations; or the ordered list is over 900,000 bytes; or a value does not match the setting's type or its value domain; or two variations have the same served value; or a `predefinedVariationId` is not a variation of this setting; or a variation in use would be deleted or have its value changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid bearer token. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The token lacks the setting:write scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Setting not found. A setting the caller may not access answers the same body. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The request body is larger than 1 MiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
     };
   };
   getSdkKeys: {

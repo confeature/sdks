@@ -3104,6 +3104,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "413":
+          description: The request body is larger than 1 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
         "503":
@@ -3687,6 +3693,187 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyAttempts"
+  /v1/settings/{settingId}/predefined-variations:
+    # ConfigCat's "Get predefined variations" and "Update predefined
+    # variations", copied 1:1: path, methods, tag, int32 `settingId`, no query
+    # parameter, and the request and response models field for field. The
+    # operationIds are ConfigCat's `get-predefined-variations` and
+    # `update-predefined-variations` in the contract's camelCase convention.
+    # ConfigCat declares no 401 or 403; they are declared here as on every
+    # sibling. The tag is `Settings`, as on every other setting operation of
+    # this contract, not ConfigCat's "Feature Flags & Settings".
+    get:
+      operationId: getPredefinedVariations
+      summary: Get predefined variations
+      description: >
+        The predefined variations of a Feature Flag or Setting, in their
+        order, with their usages in the Environments, as ConfigCat's
+        `PredefinedVariationsWithUsagesModel`. `environments` lists every
+        Environment of the setting's product; Confeature has no
+        environment-specific Feature Management permission, so each has
+        `accessType: full`.
+
+
+        Confeature divergences: `usages` is always empty and
+        `usagesInOtherEnvironments` is 0 until a setting value can name a
+        predefined variation, and `changeRequestUsages` is always empty and
+        `changeRequestUsagesInOtherEnvironments` 0 until change requests
+        ship. `maxPredefinedVariations` is Confeature's technical maximum,
+        100, the same for every plan. A deleted setting answers 404, as a
+        missing one. Reading this never answers 402.
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      parameters:
+        - in: path
+          name: settingId
+          required: true
+          schema:
+            type: integer
+            format: int32
+          description: The identifier of the Setting.
+      responses:
+        "200":
+          description: >
+            The setting's predefined variations, as ConfigCat's
+            `PredefinedVariationsWithUsagesModel`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PredefinedVariationsWithUsagesModel"
+        "400":
+          description: The `settingId` is not an int32.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks the setting:read scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            Setting not found. A setting the caller may not access answers the
+            same body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+    put:
+      operationId: updatePredefinedVariations
+      summary: Update predefined variations
+      description: >
+        Replaces the whole list of the setting's predefined variations, in the
+        request's order, and answers the stored list as ConfigCat's
+        `PredefinedVariationsModel`. An entry with a `predefinedVariationId`
+        updates that variation of the setting; an entry without one creates a
+        variation with a new id; a stored variation absent from the request
+        is deleted. Every value must match the setting's type and stay in its
+        value domain (an int32, the string length limit, a finite double), and
+        the served values of one setting are distinct. A predefined
+        variation's value can only be updated, and the variation deleted, if
+        it is not used anywhere in your feature flags; its name and hint can
+        always be updated. The variations never change what the SDKs are
+        served: nothing is published and no config is re-projected.
+
+
+        Confeature divergences, each the same for every plan: at most 100
+        variations per setting (Confeature's technical maximum, reported as
+        `maxPredefinedVariations`), the whole ordered list at most 900,000
+        bytes of UTF-8 JSON (400), and a body of at most 1 MiB (413). The
+        optional `reason` is a Confeature addition: the change note for the
+        audit log, required when the product requires a reason for changes;
+        a ConfigCat client omits it. The body is accepted as
+        `application/json` only (ConfigCat also lists `text/json` and
+        `application/*+json`), as on every other write of this contract. A
+        change is audited as `predefinedVariationsChanged`; Confeature has no
+        `settingConvertedToPredefinedVariations` event, because a setting
+        needs no conversion to hold variations. This never answers 402.
+      tags: [Settings]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      parameters:
+        - in: path
+          name: settingId
+          required: true
+          schema:
+            type: integer
+            format: int32
+          description: The identifier of the Setting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePredefinedVariationsRequest"
+      responses:
+        "200":
+          description: >
+            The setting's predefined variations as stored, as ConfigCat's
+            `PredefinedVariationsModel`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PredefinedVariationsModel"
+        "400":
+          description: >
+            The body is invalid; or a reason is required for this change and
+            none is given (`reason_required`); or there are more than 100
+            variations; or the ordered list is over 900,000 bytes; or a value
+            does not match the setting's type or its value domain; or two
+            variations have the same served value; or a
+            `predefinedVariationId` is not a variation of this setting; or a
+            variation in use would be deleted or have its value changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: The token lacks the setting:write scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            Setting not found. A setting the caller may not access answers the
+            same body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The request body is larger than 1 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/environments/{environmentId}:
     get:
       operationId: getSdkKeys
@@ -4267,8 +4454,8 @@ paths:
         value read reports for the same Organization, from the one source. A
         count the plan leaves unlimited reports the technical maximum, the
         largest a write can hold anyway, because every field is a required
-        integer. `maxPredefinedVariations` is 0: Confeature does not support
-        predefined variations yet. Reading this never answers 402. Credentials
+        integer. `maxPredefinedVariations` is Confeature's technical maximum,
+        100, the same for every plan. Reading this never answers 402. Credentials
         and the 404 rule are those of `getOrganizationUsageAndQuota`.
       tags: [Organizations]
       parameters:
@@ -6605,8 +6792,9 @@ components:
         the same type. An environment not named in `initialValues` is seeded
         with the type's zero value (`boolean → false`, `string → ""`,
         `int → 0`, `double → 0`). `tags` assigns tags to the new setting
-        (#1009). `predefinedVariations`, `order`, `isJson` and
-        `settingIdToInitFrom` are ConfigCat fields Confeature does not
+        (#1009). `predefinedVariations` gives the new setting its predefined
+        variations, written with the setting or not at all. `order`, `isJson`
+        and `settingIdToInitFrom` are ConfigCat fields Confeature does not
         support yet: each is accepted when empty or null and refused with a
         400 naming its ticket otherwise.
       required:
@@ -6658,8 +6846,14 @@ components:
           type: array
           nullable: true
           items:
-            type: object
-          description: Not supported yet (#821); accepted only when empty.
+            $ref: "#/components/schemas/CreatePredefinedVariationModel"
+          description: >
+            The new setting's predefined variations, in order, held to the
+            rules of `updatePredefinedVariations`: values that match
+            `settingType` and are distinct, at most 100 variations, the whole
+            list at most 900,000 bytes of UTF-8 JSON (400), and a body of at
+            most 1 MiB (413). Confeature divergences, the same for every plan;
+            this never answers 402. Null or absent creates none.
         order:
           type: integer
           format: int32
@@ -6754,7 +6948,8 @@ components:
         with ConfigCat's `SettingModel` (get-settings). It carries no value: a
         value is per-environment (`SettingFormulaModel`). `tags` lists the
         tags assigned to the setting, by assignment order (#1009).
-        `predefinedVariations` is always empty in Confeature.
+        `predefinedVariations` lists the setting's predefined variations, in
+        their order.
       required:
         - settingId
         - key
@@ -6808,10 +7003,9 @@ components:
             $ref: "#/components/schemas/TagModel"
         predefinedVariations:
           type: array
-          maxItems: 0
-          description: Predefined variations are not supported yet; always empty.
+          description: The Feature Flag or Setting's Variations, in their order.
           items:
-            type: object
+            $ref: "#/components/schemas/PredefinedVariationModel"
     DeletedSettingModel:
       type: object
       description: >
@@ -7190,11 +7384,396 @@ components:
           nullable: true
         predefinedVariations:
           type: array
-          maxItems: 0
+          description: >
+            A collection of Variations for a Feature Flag or Setting, in their
+            order.
           items:
-            type: object
+            $ref: "#/components/schemas/PredefinedVariationModel"
         isWatching:
           type: boolean
+    PredefinedVariationModel:
+      type: object
+      description: >
+        A Predefined Variation, as ConfigCat's `PredefinedVariationModel`.
+      required:
+        - value
+        - name
+        - hint
+        - predefinedVariationId
+      properties:
+        value:
+          $ref: "#/components/schemas/PredefinedVariationValueModel"
+        name:
+          type: string
+          minLength: 0
+          maxLength: 255
+          nullable: true
+          description: >
+            The name of the Predefined Variation, shown on the Dashboard UI. If
+            not set, the Value will be shown.
+        hint:
+          type: string
+          minLength: 0
+          maxLength: 1000
+          nullable: true
+          description: >
+            The hint of the Predefined Variation: a longer description of what
+            it serves, shown on the Dashboard UI.
+        predefinedVariationId:
+          type: string
+          format: uuid
+          description: The Predefined Variation's identifier.
+    PredefinedVariationValueModel:
+      type: object
+      description: >
+        Represents the value of a Predefined Variation: exactly the field that
+        matches the setting's type is non-null.
+      required:
+        - boolValue
+        - stringValue
+        - intValue
+        - doubleValue
+      properties:
+        boolValue:
+          type: boolean
+          nullable: true
+          description: The served value in case of a boolean Feature Flag.
+        stringValue:
+          type: string
+          nullable: true
+          description: The served value in case of a text Setting.
+        intValue:
+          type: integer
+          format: int32
+          nullable: true
+          description: The served value in case of a whole number Setting.
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+          description: The served value in case of a decimal number Setting.
+    UpdatePredefinedVariationsRequest:
+      type: object
+      description: >
+        The body of an update of a setting's predefined variations, as
+        ConfigCat's `UpdatePredefinedVariationsRequest`, plus Confeature's
+        optional `reason`.
+      required:
+        - predefinedVariations
+      properties:
+        predefinedVariations:
+          type: array
+          description: >
+            A collection of Predefined Variations: the whole list, in order.
+          items:
+            $ref: "#/components/schemas/UpdatePredefinedVariationModel"
+        reason:
+          type: string
+          nullable: true
+          writeOnly: true
+          maxLength: 1000
+          description: >
+            The change note for the audit log, at most 1000 characters as for
+            every bounded reason. Required (400 reason_required) when the
+            product requires a reason for changes. A Confeature addition: a
+            ConfigCat client omits it.
+    UpdatePredefinedVariationModel:
+      type: object
+      description: >
+        A Predefined Variation to keep or add, as ConfigCat's
+        `UpdatePredefinedVariationModel`.
+      required:
+        - value
+      properties:
+        value:
+          $ref: "#/components/schemas/UpdatePredefinedVariationValueModel"
+        name:
+          type: string
+          minLength: 0
+          maxLength: 255
+          nullable: true
+          description: >
+            The name of the Predefined Variation, shown on the Dashboard UI. If
+            not set, the Value will be shown.
+        hint:
+          type: string
+          minLength: 0
+          maxLength: 1000
+          nullable: true
+          description: >
+            The hint of the Predefined Variation: a longer description of what
+            it serves, shown on the Dashboard UI.
+        predefinedVariationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The Predefined Variation's identifier to update. Omit the value if
+            you want to add a new predefined variation.
+    UpdatePredefinedVariationValueModel:
+      type: object
+      description: >
+        Represents the value of a Predefined Variation: exactly one field, the
+        one matching the setting's type, is non-null.
+      properties:
+        boolValue:
+          type: boolean
+          nullable: true
+          description: The served value in case of a boolean Feature Flag.
+        stringValue:
+          type: string
+          nullable: true
+          description: The served value in case of a text Setting.
+        intValue:
+          type: integer
+          format: int32
+          nullable: true
+          description: The served value in case of a whole number Setting.
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+          description: The served value in case of a decimal number Setting.
+    PredefinedVariationsModel:
+      type: object
+      description: >
+        A setting's predefined variations, as ConfigCat's
+        `PredefinedVariationsModel`.
+      required:
+        - predefinedVariations
+        - maxPredefinedVariations
+      properties:
+        predefinedVariations:
+          type: array
+          description: The Feature Flag or Setting's Variations.
+          items:
+            $ref: "#/components/schemas/PredefinedVariationModel"
+        maxPredefinedVariations:
+          type: integer
+          format: int32
+          description: >
+            The maximum number of predefined variations allowed for the
+            Feature Flag or Setting: Confeature's technical maximum, 100, the
+            same for every plan.
+    PredefinedVariationsWithUsagesModel:
+      type: object
+      description: >
+        A setting's predefined variations with their usages, as ConfigCat's
+        `PredefinedVariationsWithUsagesModel`.
+      required:
+        - settingKey
+        - settingType
+        - predefinedVariations
+        - environments
+        - maxPredefinedVariations
+      properties:
+        settingKey:
+          type: string
+          description: Key of the Feature Flag or Setting.
+        settingType:
+          $ref: "#/components/schemas/SettingType"
+        predefinedVariations:
+          type: array
+          description: The Feature Flag or Setting's Variations.
+          items:
+            $ref: "#/components/schemas/PredefinedVariationWithUsagesModel"
+        environments:
+          type: array
+          description: The Environment descriptors for the Variations' usages.
+          items:
+            $ref: "#/components/schemas/PredefinedVariationEnvironmentModel"
+        maxPredefinedVariations:
+          type: integer
+          format: int32
+          description: >
+            The maximum number of predefined variations allowed for the
+            Feature Flag or Setting: Confeature's technical maximum, 100, the
+            same for every plan.
+    PredefinedVariationWithUsagesModel:
+      type: object
+      description: >
+        A Predefined Variation with its usages, as ConfigCat's
+        `PredefinedVariationWithUsagesModel`. In Confeature `usages` and
+        `changeRequestUsages` are always empty, and both counts are 0: no
+        setting value can name a predefined variation yet, and there are no
+        change requests.
+      required:
+        - value
+        - name
+        - hint
+        - predefinedVariationId
+        - usages
+        - usagesInOtherEnvironments
+        - changeRequestUsages
+        - changeRequestUsagesInOtherEnvironments
+      properties:
+        value:
+          $ref: "#/components/schemas/PredefinedVariationValueModel"
+        name:
+          type: string
+          minLength: 0
+          maxLength: 255
+          nullable: true
+          description: >
+            The name of the Predefined Variation, shown on the Dashboard UI. If
+            not set, the Value will be shown.
+        hint:
+          type: string
+          minLength: 0
+          maxLength: 1000
+          nullable: true
+          description: >
+            The hint of the Predefined Variation: a longer description of what
+            it serves, shown on the Dashboard UI.
+        predefinedVariationId:
+          type: string
+          format: uuid
+          description: The Predefined Variation's identifier.
+        usages:
+          type: array
+          description: >
+            The Feature Flag or Setting Variation's usages in the given
+            Environments.
+          items:
+            $ref: "#/components/schemas/PredefinedVariationUsageModel"
+        usagesInOtherEnvironments:
+          type: integer
+          format: int32
+          description: >
+            The Feature Flag or Setting Variation's usages in the Environments
+            you don't have access to.
+        changeRequestUsages:
+          type: array
+          description: >
+            The Feature Flag or Setting Variation's usages in the given Change
+            Requests.
+          items:
+            $ref: "#/components/schemas/PredefinedVariationChangeRequestUsageModel"
+        changeRequestUsagesInOtherEnvironments:
+          type: integer
+          format: int32
+          description: >
+            The Feature Flag or Setting Variation's usages in the Change
+            Requests you don't have access to.
+    PredefinedVariationUsageModel:
+      type: object
+      description: >
+        A setting value that serves the variation, as ConfigCat's
+        `PredefinedVariationUsageModel`.
+      required:
+        - settingId
+        - environmentId
+      properties:
+        settingId:
+          type: integer
+          format: int32
+        environmentId:
+          type: string
+          format: uuid
+    PredefinedVariationChangeRequestUsageModel:
+      type: object
+      description: >
+        A change request that serves the variation, as ConfigCat's
+        `PredefinedVariationChangeRequestUsageModel`.
+      required:
+        - changeRequestId
+        - changeRequestTitle
+        - settingId
+        - environmentId
+      properties:
+        changeRequestId:
+          type: integer
+          format: int64
+        changeRequestTitle:
+          type: string
+        settingId:
+          type: integer
+          format: int32
+        environmentId:
+          type: string
+          format: uuid
+    PredefinedVariationEnvironmentModel:
+      type: object
+      description: >
+        An Environment of the setting's product, as ConfigCat's
+        `PredefinedVariationEnvironmentModel`.
+      required:
+        - environmentId
+        - name
+        - accessType
+      properties:
+        environmentId:
+          type: string
+          format: uuid
+          description: The identifier of the Environment.
+        name:
+          type: string
+          description: The name of the Environment.
+        accessType:
+          $ref: "#/components/schemas/EnvironmentAccessType"
+    EnvironmentAccessType:
+      type: string
+      enum:
+        - full
+        - readOnly
+        - none
+      description: >
+        Represent the environment specific Feature Management permission, as
+        ConfigCat's `EnvironmentAccessType`. Confeature has no
+        environment-specific permission and answers `full`.
+    CreatePredefinedVariationModel:
+      type: object
+      additionalProperties: false
+      description: >
+        A Predefined Variation of a new setting, as ConfigCat's
+        `CreatePredefinedVariationModel`. It has no
+        `predefinedVariationId`: the id is minted, and a body naming one, or
+        any other field, is refused (400).
+      required:
+        - value
+      properties:
+        value:
+          $ref: "#/components/schemas/CreatePredefinedVariationValueModel"
+        name:
+          type: string
+          minLength: 0
+          maxLength: 255
+          nullable: true
+          description: >
+            The name of the Predefined Variation, shown on the Dashboard UI. If
+            not set, the Value will be shown.
+        hint:
+          type: string
+          minLength: 0
+          maxLength: 1000
+          nullable: true
+          description: >
+            The hint of the Predefined Variation: a longer description of what
+            it serves, shown on the Dashboard UI.
+    CreatePredefinedVariationValueModel:
+      type: object
+      description: >
+        Represents the value of a Predefined Variation: exactly one field, the
+        one matching the setting's type, is non-null.
+      properties:
+        boolValue:
+          type: boolean
+          nullable: true
+          description: The served value in case of a boolean Feature Flag.
+        stringValue:
+          type: string
+          nullable: true
+          description: The served value in case of a text Setting.
+        intValue:
+          type: integer
+          format: int32
+          nullable: true
+          description: The served value in case of a whole number Setting.
+        doubleValue:
+          type: number
+          format: double
+          nullable: true
+          description: The served value in case of a decimal number Setting.
     ValueModel:
       type: object
       description: >
@@ -8861,8 +9440,8 @@ components:
         ConfigCat's `OrganizationLimitations`: the limits the Organization's
         feature flag values and targeting are held to. The fields shared with
         `FeatureFlagLimitations` are its values for the same Organization.
-        `maxPredefinedVariations` is 0: predefined variations are not supported
-        yet.
+        `maxPredefinedVariations` is Confeature's technical maximum, 100, the
+        same for every plan.
       required:
         - maxPercentageOptionCount
         - maxTargetingRuleCount
@@ -9063,6 +9642,7 @@ components:
         - settingDeleted
         - settingsReordered
         - settingValueChanged
+        - predefinedVariationsChanged
         - webHookCreated
         - webHookChanged
         - webHookDeleted
