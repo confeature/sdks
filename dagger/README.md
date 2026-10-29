@@ -143,7 +143,9 @@ pnpm dagger:wire      # wire-cases corpus subset across sdk-node + sdk-browser-j
 pnpm dagger:harness-live   # the live-contract harness's own test:live (harness-live-test)
 
 # One SDK's live wire-cases against the harness (#918): its manifest
-# liveSuite.runner, on its own toolchain, the step its sdk-gates.yml leg runs
+# liveSuite.runner, in the container its liveSuite.toolchain names (a
+# LIVE_TOOLCHAINS recipe of src/index.ts, never defaulted), the step its
+# sdk-gates.yml leg runs
 bash tools/dagger-call/dagger-call.sh live-suite --sdk node
 bash tools/dagger-call/dagger-call.sh live-suite --sdk python
 

@@ -169,7 +169,11 @@ const fixture = () => ({
   sdks: [
     { name: "a", daggerFn: "a-test" },
     { name: "b", daggerFn: "b-test" },
-    { name: "live", daggerFn: "live-test", liveSuite: { runner: `${LIVE_WRAPPER}node run` } },
+    {
+      name: "live",
+      daggerFn: "live-test",
+      liveSuite: { runner: `${LIVE_WRAPPER}node run`, toolchain: "js" },
+    },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
     {
@@ -356,6 +360,44 @@ describe("the manifest's CI shape", () => {
       { name: "x", daggerFn: "x-test", liveExempt: "" },
       /liveExempt/,
     ],
+    // M8: a Dagger live suite names the live toolchain recipe that builds its
+    // container (liveSuite.toolchain), never defaulted; a native SDK runs on
+    // its own job's toolchain, so it never names one.
+    [
+      "a Dagger live suite with no toolchain",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}r` } },
+      /has a liveSuite and a daggerFn but no liveSuite\.toolchain/,
+    ],
+    [
+      "a toolchain on a macOS SDK",
+      {
+        name: "x",
+        daggerFn: null,
+        ci: { native: "macos" },
+        liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: "swift" },
+      },
+      /liveSuite\.toolchain on an SDK with no Dagger leg/,
+    ],
+    ...[
+      ["a toolchain id with a space", "a b"],
+      ["a toolchain id that is not a string", 42],
+      ["an empty toolchain id", ""],
+    ].map(([name, id]) => [
+      name,
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: id } },
+      /liveSuite\.toolchain .* is not a toolchain id/,
+    ]),
+    [
+      // NAME-shaped, so only the Object.prototype check refuses it: a lookup
+      // of it in a plain object would find Object itself, not a recipe.
+      "the toolchain id constructor, an Object.prototype key",
+      {
+        name: "x",
+        daggerFn: "x-test",
+        liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: "constructor" },
+      },
+      /liveSuite\.toolchain "constructor" is a key every object has/,
+    ],
     ["a name with a capital", { name: "X", daggerFn: "x-test" }, /name/],
     ["a name with a space", { name: "a b", daggerFn: "x-test" }, /name/],
     ["a duplicate name", { name: "a", daggerFn: "a-test" }, /twice/],
@@ -364,6 +406,30 @@ describe("the manifest's CI shape", () => {
       expect.stringMatching(re),
     );
   });
+  it("M8: refuses every Object.prototype key as a toolchain id", () => {
+    for (const id of Object.getOwnPropertyNames(Object.prototype)) {
+      const live = { runner: `${LIVE_WRAPPER}r`, toolchain: id };
+      expect(
+        manifestProblems(withEntry({ name: "x", daggerFn: "x-test", liveSuite: live })).map(
+          (p) => p.why,
+        ),
+        id,
+      ).toContainEqual(expect.stringMatching(/liveSuite\.toolchain/));
+    }
+  });
+  // M8 on the real manifest: every Linux live SDK names its toolchain, and
+  // deleting any one of them is refused for that SDK.
+  it.each(REAL.sdks.filter((s) => s.daggerFn && s.liveSuite !== undefined).map((s) => s.name))(
+    "refuses the real manifest with %s's liveSuite.toolchain deleted",
+    (name) => {
+      const m = structuredClone(REAL);
+      delete m.sdks.find((s) => s.name === name).liveSuite.toolchain;
+      expect(manifestProblems(m)).toContainEqual({
+        sdk: name,
+        why: expect.stringMatching(/no liveSuite\.toolchain/),
+      });
+    },
+  );
   it("refuses a manifest with no sdks[]", () =>
     expect(manifestProblems({}).map((p) => p.why)).toContainEqual(
       expect.stringMatching(/no sdks/),
@@ -377,7 +443,13 @@ describe("the manifest's CI shape", () => {
 // a `bash -c '… && …'` argument is the wrapped command, and stays legal.
 describe("a liveSuite.runner carries no shell operator outside the wrapped command (#926 A4)", () => {
   const runner = (tail) => ({
-    sdks: [{ name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}${tail}` } }],
+    sdks: [
+      {
+        name: "x",
+        daggerFn: "x-test",
+        liveSuite: { runner: `${LIVE_WRAPPER}${tail}`, toolchain: "x" },
+      },
+    ],
   });
   const whys = (tail) => manifestProblems(runner(tail)).map((p) => p.why);
 

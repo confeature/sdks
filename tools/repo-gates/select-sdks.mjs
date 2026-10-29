@@ -204,6 +204,14 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * macOS job (#924), and runs through LIVE_WRAPPER with no shell operator after
  * it (shellOperatorsOutsideQuotes, #926 A4); an SDK has a liveSuite or a
  * `liveExempt` reason, never both.
+ * A Dagger SDK's liveSuite names its container's recipe in
+ * `liveSuite.toolchain`: a NAME-shaped id of a live toolchain recipe in
+ * dagger/src/index.ts, required and never defaulted, so a new live SDK is
+ * refused here, before CI, until the manifest says what runs it. The id is
+ * never a key every object has (`constructor`), which a lookup would find in
+ * Object.prototype. A native SDK's suite runs on its own job's toolchain, so
+ * it names none. Whether the id is a recipe is the Dagger module's to refuse,
+ * the one place the recipes are known.
  * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
 export function manifestProblems(manifest) {
@@ -259,6 +267,24 @@ export function manifestProblems(manifest) {
             `liveSuite.runner has a shell operator or substitution outside the wrapped command (${[...new Set(operators)].join(" ")}): bash runs it outside the harness wrapper, so its exit code, not the wrapper's, would be the leg's (quote it inside the command, e.g. bash -c '…')`,
           );
       }
+      const toolchain = live?.toolchain;
+      if (dagger) {
+        if (toolchain === undefined)
+          add(
+            "has a liveSuite and a daggerFn but no liveSuite.toolchain: name the live toolchain recipe (dagger/src/index.ts) that builds its live container; it is never defaulted",
+          );
+        else if (typeof toolchain !== "string" || !NAME.test(toolchain))
+          add(
+            `liveSuite.toolchain ${JSON.stringify(toolchain)} is not a toolchain id (${NAME.source})`,
+          );
+        else if (toolchain in Object.prototype)
+          add(
+            `liveSuite.toolchain ${JSON.stringify(toolchain)} is a key every object has (Object.prototype), not a toolchain id`,
+          );
+      } else if (toolchain !== undefined)
+        add(
+          "liveSuite.toolchain on an SDK with no Dagger leg: only a Dagger live suite runs in a live toolchain recipe's container, a native one on its job's own toolchain",
+        );
       const runsLive = dagger || KINDS.some((k) => k.native === ci?.native && k.live);
       if (!runsLive)
         add(

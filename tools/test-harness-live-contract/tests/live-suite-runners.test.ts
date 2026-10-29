@@ -12,8 +12,10 @@
  * An SDK without a `liveSuite` carries a `liveExempt` reason (#918, plan 867
  * FR-016); the transitional "no live suite yet" state ended with #924. The
  * manifest's structure (a runner present, a liveSuite only where a Dagger leg
- * runs it, never beside a liveExempt) is tools/repo-gates/select-sdks.mjs's
- * manifestProblems, checked on every verify; it is not restated here.
+ * runs it, never beside a liveExempt, and the `liveSuite.toolchain` each
+ * Dagger live suite's container is built from) is
+ * tools/repo-gates/select-sdks.mjs's manifestProblems, checked on every
+ * verify; it is not restated here, and nothing here reads dagger/src/index.ts.
  *
  * A test runner exits 0 when it skips a case, so most runners read their own
  * report after the suite and refuse a run in which a case was skipped or none
@@ -50,19 +52,6 @@ const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { sdks: Sdk[
 const live = manifest.sdks.filter((s) => s.liveSuite !== undefined);
 const WRAPPER = "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
 
-/**
- * The keys of `LIVE_TOOLCHAINS` in dagger/src/index.ts, read from its source:
- * the Dagger module is not importable here (it needs the engine's SDK), and
- * without this an SDK given a `liveSuite` but no toolchain passes every local
- * check and is refused only once its leg runs `live-suite` in CI (#919).
- */
-function liveToolchainKeys(): string[] {
-  const src = readFileSync(pathResolve(repoRoot, "dagger/src/index.ts"), "utf-8");
-  const body = /const LIVE_TOOLCHAINS\b.*=\s*\{\n([\s\S]*?)\n\};/.exec(src)?.[1];
-  if (body === undefined) throw new Error("dagger/src/index.ts: LIVE_TOOLCHAINS not found");
-  return [...body.matchAll(/^\s*"?([\w-]+)"?\s*:/gm)].map((m) => m[1]!);
-}
-
 describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
   it("declares at least one live suite", () => {
     expect(live.length).toBeGreaterThan(0);
@@ -85,11 +74,6 @@ describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
       expect(suite.runner).toContain(suite.path!.slice(sdkDir.length));
     },
   );
-
-  it("every Linux SDK with a liveSuite has its toolchain in LIVE_TOOLCHAINS, and no other", () => {
-    const linuxLive = live.filter((s) => s.ci?.native === undefined).map((s) => s.name);
-    expect(liveToolchainKeys().sort()).toEqual(linuxLive.sort());
-  });
 
   it.each(manifest.sdks.filter((s) => s.liveExempt !== undefined).map((s) => [s.name, s] as const))(
     "%s's liveExempt is a real reason",

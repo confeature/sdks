@@ -460,19 +460,25 @@ function deployedHarness(source: Directory, platform?: Platform): Directory {
     .directory("/harness-deploy");
 }
 
+/** How a live container is built: the builder, and whether it already carries Node and the harness. */
+type LiveToolchain = { build: (source: Directory) => Container; node?: true };
+
 /**
- * Which toolchain container runs each SDK's live suite (#918, FR-015): the
- * SDK's own builder, the one its `*Test` function uses, so the live suite runs
- * on exactly the toolchain the suite does. The single home of the map; an SDK
- * with a `liveSuite.runner` and no entry here is refused, never defaulted.
- * `node: true` marks a builder that already has the pinned Node runtime and a
- * built harness (the JS family's `jsWorkspace`).
+ * The recipes a Dagger live suite's container is built from, keyed by
+ * toolchain id. Each recipe is an SDK builder, the one its `*Test` function
+ * uses, so a live suite runs on exactly the toolchain its suite does.
+ *
+ * This is a recipe table, not an SDK list. An SDK reaches a recipe only
+ * through its `liveSuite.toolchain` in dagger/sdk-manifest.json, the one SDK
+ * list, never by its own name, and nothing enumerates these keys to find
+ * SDKs. That 12 of the ids are spelled like the one SDK they serve is
+ * naming, not a second list; `js` serves the whole JS family. An id with no
+ * recipe is refused by liveContainer, never defaulted. `node: true` marks a
+ * builder that already has the pinned Node runtime and a built harness
+ * (`jsWorkspace`), and is set here only.
  */
-const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container; node?: true }> = {
-  node: { build: jsWorkspace, node: true },
-  "browser-js": { build: jsWorkspace, node: true },
-  bun: { build: jsWorkspace, node: true },
-  deno: { build: jsWorkspace, node: true },
+const LIVE_TOOLCHAINS: Record<string, LiveToolchain> = {
+  js: { build: jsWorkspace, node: true },
   python: { build: pythonToolchain },
   ruby: { build: rubyToolchain },
   php: { build: phpToolchain },
@@ -507,8 +513,10 @@ function nativeHarnessCheck(platform: Platform): string {
 }
 
 /**
- * The container an SDK's live suite runs in, at the repository root: its
- * toolchain, plus (outside the JS family) the pinned Node runtime copied from
+ * The container an SDK's live suite runs in, at the repository root: the
+ * LIVE_TOOLCHAINS recipe its manifest `liveSuite.toolchain` names, read from
+ * `source` (an SDK with no id, or an id with no recipe, is refused naming
+ * both; `Object.hasOwn`, so no Object.prototype key passes), plus (outside the JS family) the pinned Node runtime copied from
  * `NODE_IMAGE`'s `/usr/local` — every toolchain image is glibc Debian or
  * Ubuntu — and the deployed harness mounted where the runner names it.
  *
@@ -521,11 +529,15 @@ function nativeHarnessCheck(platform: Platform): string {
  * platform mismatch fails as one, not as a suite that cannot boot its harness.
  */
 async function liveContainer(source: Directory, sdk: string): Promise<Container> {
-  const toolchain = LIVE_TOOLCHAINS[sdk];
-  if (toolchain === undefined)
+  const { sdks } = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
+    sdks: Array<{ name: string; liveSuite?: { toolchain?: unknown } }>;
+  };
+  const id = sdks.find((s) => s.name === sdk)?.liveSuite?.toolchain;
+  if (typeof id !== "string" || !Object.hasOwn(LIVE_TOOLCHAINS, id))
     throw new Error(
-      `dagger/src/index.ts LIVE_TOOLCHAINS has no toolchain for ${sdk}: add its builder there`,
+      `dagger/sdk-manifest.json: ${sdk}'s liveSuite.toolchain ${JSON.stringify(id ?? null)} is not a LIVE_TOOLCHAINS recipe of dagger/src/index.ts`,
     );
+  const toolchain = LIVE_TOOLCHAINS[id];
   const base = toolchain.build(source);
   if (toolchain.node) return base.withWorkdir("/work");
   const platform = await base.platform();

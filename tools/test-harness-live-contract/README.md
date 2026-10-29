@@ -133,8 +133,10 @@ bindings, loopback only) it is safe inside the Dagger sandbox.
 Each SDK's live suite runs inside that SDK's leg of `.github/workflows/sdk-gates.yml`, as a step
 after its suite (`live-suite --sdk <name>`), so a red live suite reddens the leg (#918; the
 release-time `contract-live.yml` matrix it replaces is retired). **To add an SDK**, give it a
-`liveSuite` in `dagger/sdk-manifest.json` (`runner` + `path`) and its builder in `LIVE_TOOLCHAINS`
-in `dagger/src/index.ts`: no workflow edit. Swift, which no Dagger container can build, runs
+`liveSuite` in `dagger/sdk-manifest.json` (`runner`, `path`, and `toolchain`: the id of the live
+toolchain recipe in `dagger/src/index.ts` that builds its container, adding a recipe there when
+none fits): no workflow edit. `pnpm run verify` refuses a Dagger SDK's live suite that names no
+`toolchain`. Swift, which no Dagger container can build, runs
 its `runner` natively in the macOS job after its precheck, through
 `tools/repo-gates/run-live-suite.mjs` (#924): the harness starts there on the darwin workerd the
 workspace install brings. Every `runner` goes through the harness wrapper
