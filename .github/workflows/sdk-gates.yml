@@ -228,7 +228,9 @@ jobs:
 
   # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
   # the same script the local pre-push runs, which fails closed under CI when
-  # swift or swift-format is missing. Xcode is selected by exact path. Then,
+  # swift or swift-format is missing. The script holds the Xcode pin: it
+  # selects the pinned Xcode, fails the job when that Xcode is not the one
+  # installed, and exports it through GITHUB_ENV to the steps after it. Then,
   # when the manifest gives the SDK a liveSuite.runner (select-sdks.mjs sets
   # live, #924), its live wire-cases natively: no Dagger container has
   # Apple's toolchain, so the harness runs here, on loopback, on the runner.
@@ -242,8 +244,6 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.swift) }}
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

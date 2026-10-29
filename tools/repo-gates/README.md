@@ -10,6 +10,12 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
 - `lockfile-versions.test.mjs` fails if `pnpm-lock.yaml` resolves more than
   one `@types/node` (or none): two versions make Node's global types depend
   on which one pnpm hoists.
+- `swift-precheck.test.mjs` holds `scripts/swift-precheck.sh`, the one home of
+  the Xcode the Swift SDK is judged with: in CI mode (`CI` non-empty or
+  `GITHUB_ACTIONS=true`) anything but the pinned Xcode is red, and the pin is
+  handed to the job's later steps through `GITHUB_ENV`; locally a missing pin
+  is a loud WARN. It runs a sandbox copy against fake Apple tools, so it runs
+  on Linux too.
 - The `*.test.mjs` files run under `pnpm vp run -F @confeature/repo-gates test`.
 
 ## Row snapshots

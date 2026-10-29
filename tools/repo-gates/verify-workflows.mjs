@@ -124,9 +124,13 @@
  *      with no shell operator outside the wrapped command (manifestProblems). Each Dagger leg runs its suite, then
  *      its live suite when the leg is `live` (daggerLegProblems); the macOS
  *      job does the same natively, through run-live-suite.mjs (#924,
- *      nativeLegProblems). Rules 2 and 18 already read every
- *      workflow; continueOnErrorFindings and rule 3's cache rules read it
- *      because it is listed (CACHE_FREE_WORKFLOWS, SDK_GATES_WORKFLOW).
+ *      nativeLegProblems). No env: map of the workflow, a job or a step
+ *      sets DEVELOPER_DIR, CI, GITHUB_ACTIONS or TOOLCHAINS, and no value
+ *      names /Applications/Xcode: the Xcode Swift is judged with, and what
+ *      counts as CI for it, are scripts/swift-precheck.sh's. Rules 2 and 18
+ *      already read every workflow; continueOnErrorFindings and rule 3's
+ *      cache rules read it because it is listed (CACHE_FREE_WORKFLOWS,
+ *      SDK_GATES_WORKFLOW).
  *  20. JSR TARGETS (#935). Every `registry: "jsr"` entry of publish[] and its
  *      `<path>/jsr.json` pass tools/sdk-pack/jsr-unit.mjs (jsrFindings): it
  *      rides along a primary entry of the same name (one tag, one version),
@@ -3152,7 +3156,23 @@ export const LIVE_SCRIPT = "tools/repo-gates/run-live-suite.mjs";
 const DAILY_CRON = /^\d{1,2} \d{1,2} \* \* \*$/;
 /** Dagger's cloud and cache switches, in any env (a cache a pull request writes, a trace sent away). */
 const DAGGER_CLOUD_OR_CACHE = /DAGGER_(?:CLOUD|CACHE)/i;
+/**
+ * What scripts/swift-precheck.sh alone decides: the Xcode Swift is
+ * judged with (DEVELOPER_DIR, TOOLCHAINS) and whether it runs in CI mode (CI,
+ * GITHUB_ACTIONS). A workflow env: setting one would select another Xcode, or
+ * turn the script's red into a local WARN.
+ */
+const PRECHECK_ENV = ["DEVELOPER_DIR", "CI", "GITHUB_ACTIONS", "TOOLCHAINS"];
+/** An Xcode path in a workflow value: a second home for the pin. */
+const XCODE_PATH = "/Applications/Xcode";
 const isMap = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+/** Every string value under a parsed node (keys are not values; comments are not parsed). */
+const stringsOf = (node) =>
+  typeof node === "string"
+    ? [node]
+    : node !== null && typeof node === "object"
+      ? Object.values(node).flatMap(stringsOf)
+      : [];
 const stepsOf = (job) => (Array.isArray(job?.steps) ? job.steps : []);
 /** The check-run name a job produces: its name:, or its id when it has none. */
 const checkName = (id, job) => (typeof job?.name === "string" ? job.name : id);
@@ -3371,9 +3391,22 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
     ]),
   ];
   for (const [where, map] of envMaps)
-    for (const k of Object.keys(map ?? {}))
+    for (const k of Object.keys(map ?? {})) {
       if (DAGGER_CLOUD_OR_CACHE.test(k))
         add(where, `sets ${k}: no Dagger cloud or cache configuration`);
+      if (PRECHECK_ENV.includes(k))
+        add(
+          where,
+          `sets ${k} in an env: the Xcode and its CI mode are scripts/swift-precheck.sh's`,
+        );
+    }
+  const valueSites = [
+    ["-", Object.entries(doc ?? {}).filter(([k]) => k !== "jobs")],
+    ...Object.entries(jobs),
+  ];
+  for (const [where, node] of valueSites)
+    if (stringsOf(node).some((v) => v.includes(XCODE_PATH)))
+      add(where, `a value names ${XCODE_PATH}: the Xcode pin is scripts/swift-precheck.sh's`);
   for (const [id, job] of Object.entries(jobs)) {
     if (job?.environment !== undefined) add(id, "binds an environment");
     if (!GATE_RUNNERS.includes(job?.["runs-on"]))

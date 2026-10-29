@@ -2033,6 +2033,34 @@ describe("19 the SDK gates' own shape (#793)", () => {
       ({ doc }) => void (doc.env._EXPERIMENTAL_DAGGER_CACHE_CONFIG = "type=gha"),
       /sets _EXPERIMENTAL_DAGGER_CACHE_CONFIG: no Dagger cloud or cache configuration/,
     ],
+    // M12: the Xcode pin is scripts/swift-precheck.sh's, and so is what counts
+    // as CI for it. No env: map of the workflow, a job or a step may select
+    // Xcode or change CI mode, and no value may name an Xcode path.
+    ...["DEVELOPER_DIR", "CI", "GITHUB_ACTIONS", "TOOLCHAINS"].flatMap((k) => {
+      const v = { DEVELOPER_DIR: "/Applications/Xcode.app/Contents/Developer", CI: "" }[k] ?? "x";
+      const env = (o) => void (o.env = { ...o.env, [k]: v });
+      const re = (where) => new RegExp(`sdk-gates\\.yml: ${where}: sets ${k} in an env:`);
+      return [
+        [`${k} in the workflow env:`, ({ doc }) => env(doc), re("-")],
+        [`${k} in a job env:`, ({ jobs }) => env(jobs.swift), re("swift")],
+        [`${k} in a step env:`, ({ jobs }) => env(precheck(jobs)), re("swift")],
+      ];
+    }),
+    [
+      "an Xcode path in a run: value",
+      ({ jobs }) =>
+        void jobs.swift.steps.splice(1, 0, {
+          name: "Select Xcode",
+          run: "sudo xcode-select -s /Applications/Xcode_0.app",
+        }),
+      /sdk-gates\.yml: swift: a value names \/Applications\/Xcode/,
+    ],
+    [
+      "an Xcode path in a with: value",
+      ({ jobs }) =>
+        void (step(jobs.gate, "Checkout").with.path = "/Applications/Xcode_0.app/Contents"),
+      /sdk-gates\.yml: gate: a value names \/Applications\/Xcode/,
+    ],
     // Listed, not restated: rule 3's caches and continueOnErrorFindings.
     [
       "a cache action",
