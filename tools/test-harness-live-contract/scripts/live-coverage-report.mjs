@@ -6,10 +6,13 @@
  * 115 / #150).
  *
  * Reads `dagger/sdk-manifest.json` only. Every SDK of the roster is one of:
- *   - live    : has a `liveSuite.runner`. Its leg in sdk-gates.yml runs it as
- *               a step after the suite (`live-suite --sdk <name>`), so whether
- *               it PASSES is that leg's result, judged on every push; this
- *               report says only that it runs;
+ *   - live    : has a `liveSuite.runner`, as select-sdks.mjs's hasLiveSuite
+ *               reads it, the same test that sets its leg's `live` (whether
+ *               the runner can run is manifestProblems', on every verify).
+ *               Its leg in sdk-gates.yml runs it as a step after the suite
+ *               (`live-suite --sdk <name>`), so whether it PASSES is that
+ *               leg's result, judged on every push; this report says only
+ *               that it runs;
  *   - exempt  : carries `liveExempt`, shown with its reason;
  *   - pending : neither — "no live suite yet". Counted in the denominator and
  *               listed, never shown as covered.
@@ -27,6 +30,7 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { hasLiveSuite } from "../../repo-gates/select-sdks.mjs";
 
 const LIVE = "runs on every push (its leg's live-suite step)";
 const PENDING = "▫ no live suite yet";
@@ -43,7 +47,7 @@ export function buildReport(manifest) {
   const total = manifest.sdks.length;
 
   for (const sdk of manifest.sdks) {
-    if (typeof sdk.liveSuite?.runner === "string" && sdk.liveSuite.runner.trim() !== "") {
+    if (hasLiveSuite(sdk)) {
       covered += 1;
       rows.push({ sdk: sdk.name, live: "yes", result: LIVE });
     } else if (typeof sdk.liveExempt === "string" && sdk.liveExempt.trim() !== "") {

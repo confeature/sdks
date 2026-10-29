@@ -5,9 +5,9 @@
  * manifest `liveSuite.runner`. Dagger's `live-suite --sdk` runs it inside the
  * live container and the macOS job runs it natively, so what these rows
  * refuse is refused on both paths. It runs the runner from the repository
- * root under `bash -euo pipefail`, passes its exit code through, and refuses,
- * red, anything it cannot run: a live step that exits 0 having run nothing
- * would report a live suite green. Whether a runner can run at all is
+ * root as `bash` under its runnerArgv, passes its exit code through, and
+ * refuses, red, anything it cannot run: a live step that exits 0 having run
+ * nothing would report a live suite green. Whether a runner can run at all is
  * select-sdks.mjs's manifestProblems, asked here, never restated.
  */
 
@@ -105,6 +105,14 @@ describe("runnerFor", () => {
   it("runs an SDK whose own entry is sound when another SDK's entry is not", () =>
     expect(runnerFor(manifest, "swift")).toBe(wrapped("echo live")));
 
+  // MUTATION: attribute findings by anything but the SDK's name and a second
+  // entry under the same name is run, whichever of the two is found first.
+  it("refuses an SDK the manifest lists twice", () => {
+    const twice = { sdks: [swift(wrapped("echo live")), swift(wrapped("echo other"))] };
+    expect(() => runnerFor(twice, "swift")).toThrow(RunLiveError);
+    expect(() => runnerFor(twice, "swift")).toThrow(/swift is listed twice/);
+  });
+
   // MUTATION: drop the `"-"` scope and a manifest whose sdks[] is not a list
   // is read anyway (a TypeError, not a refusal).
   it.each([
@@ -156,9 +164,12 @@ describe("the script", () => {
   // MUTATION: spawn bash with anything but runnerArgv and this exits 0. A
   // runner manifestProblems accepts is one simple command, so `-u` is the flag
   // that shows through the script; runnerArgv's own rows hold the rest.
+  // The status is bash's 1 with its own message, so a refusal (2) cannot pass for it.
   it("runs the runner with runnerArgv: an unset variable is red", () => {
     const root = checkout([swift(wrapped("bash -c 'touch ran.txt' $RUN_LIVE_TEST_UNSET"))]);
-    expect(run(root, { SDK: "swift" }).status).not.toBe(0);
+    const r = run(root, { SDK: "swift" });
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/RUN_LIVE_TEST_UNSET: unbound variable/);
     expect(() => readFileSync(join(root, "ran.txt"))).toThrow();
   });
 

@@ -17,11 +17,13 @@
 # swift resolving outside the pinned Xcode, `xcodebuild -version` naming
 # another version, or GITHUB_ACTIONS=true without GITHUB_ENV. The selection is
 # exported, and appended to GITHUB_ENV when there is one, so the job's later
-# steps run on the same Xcode.
+# steps run on the same Xcode. The suite then runs `xcrun swift`, so the swift
+# that builds and tests is the pinned Xcode's, whatever else is first on PATH.
 #
 # Locally the pin is used when it is installed. Otherwise a loud WARN names the
 # pin and the Xcode in use, and the gate goes on: CI is the judge of the pin.
-# An explicit DEVELOPER_DIR wins, with one note line.
+# An explicit DEVELOPER_DIR wins, with one note line. The suite runs the swift
+# on PATH (a non-macOS box has no xcrun).
 #
 # Behaviour:
 #   - swift absent: in CI mode, exit 1 (the gate is red); on a local non-macOS
@@ -49,6 +51,8 @@ ci_mode=false
 if [ -n "${CI:-}" ] || [ "${GITHUB_ACTIONS:-}" = true ]; then
   ci_mode=true
 fi
+# The swift the suite runs: the one on PATH, until CI mode has checked the pin.
+swift_cmd=(swift)
 
 # In CI mode a missing tool is a red gate, never a skip: a skip there would
 # report Swift green having run nothing. Only a local non-macOS machine may
@@ -95,6 +99,7 @@ if [ "$ci_mode" = true ]; then
     fail "GITHUB_ENV is unset: the job's later steps would not run on the pinned Xcode ${XCODE_PIN}."
   fi
   select_pin
+  swift_cmd=(xcrun swift)
 elif [ -n "${DEVELOPER_DIR:-}" ]; then
   say "note: DEVELOPER_DIR is set (${DEVELOPER_DIR}); using it, not the pinned Xcode ${XCODE_PIN}."
 elif [ -d "$XCODE_DEV" ]; then
@@ -110,17 +115,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/apps/sdk-swift"
 
 echo "[swift-precheck] swift build…"
-swift build
+"${swift_cmd[@]}" build
 echo "[swift-precheck] swift test…"
-swift test
+"${swift_cmd[@]}" test
 # swift-format: the standalone binary, or the `swift format` subcommand the
 # Swift 6 toolchain (Xcode 16) ships.
 if command -v swift-format >/dev/null 2>&1; then
   echo "[swift-precheck] swift-format lint…"
   swift-format lint --strict --recursive Sources Tests
-elif swift format --version >/dev/null 2>&1; then
+elif "${swift_cmd[@]}" format --version >/dev/null 2>&1; then
   echo "[swift-precheck] swift format lint…"
-  swift format lint --strict --recursive Sources Tests
+  "${swift_cmd[@]}" format lint --strict --recursive Sources Tests
 elif [ "$ci_mode" = true ]; then
   fail "no swift-format under CI — the format lint cannot run."
 else

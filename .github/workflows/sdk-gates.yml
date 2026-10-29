@@ -241,10 +241,10 @@ jobs:
         if: matrix.sdk.live
         run: pnpm --filter @confeature/test-harness-live-contract build
 
-      # The SDK's manifest liveSuite.runner, run as Dagger's live-suite runs
-      # it (repository root, bash -euo pipefail); a red live suite reddens
-      # the leg.
-      - name: Run the live suite (tools/repo-gates/run-live-suite.mjs)
+      # The SDK's manifest liveSuite.runner, run by the script Dagger's
+      # live-suite runs (repository root, under its runnerArgv); a red live
+      # suite reddens the leg.
+      - name: Run the live suite
         if: matrix.sdk.live
         env:
           SDK: ${{ matrix.sdk.name }}

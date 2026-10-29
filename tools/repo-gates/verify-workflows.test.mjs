@@ -15,6 +15,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   CREDENTIALED_COMMANDS,
   GATE_WORKFLOWS,
+  LIVE_SCRIPT,
   MANIFEST,
   SETTINGS,
   allFindings,
@@ -1841,8 +1842,7 @@ describe("19 the SDK gates' own shape (#793)", () => {
 
   const precheck = (jobs) =>
     jobs.swift.steps.find((x) => x.run === "bash scripts/swift-precheck.sh");
-  const nativeLive = (jobs) =>
-    jobs.swift.steps.find((x) => x.run === "node tools/repo-gates/run-live-suite.mjs");
+  const nativeLive = (jobs) => jobs.swift.steps.find((x) => x.run === `node ${LIVE_SCRIPT}`);
 
   it("control: the real tree is clean", () => expect(after(() => {})).toEqual([]));
 
@@ -2464,6 +2464,15 @@ describe("19 the SDK gates' own shape (#793)", () => {
       once("    runs-on: macos-15\n", "    runs-on: &dagger-leg macos-15\n"),
       [/-: defines the anchor &dagger-leg 2 times/],
     ],
+    [
+      "a << merge key that merges the leg's own anchor",
+      G,
+      once("    timeout-minutes: 15\n", "    <<: *dagger-leg\n    timeout-minutes: 15\n"),
+      [
+        /smoke: has a << merge key at jobs\.smoke/,
+        /smoke: uses the alias \*dagger-leg at jobs\.smoke\.<<; the one alias/,
+      ],
+    ],
   ])("refuses %s", (_name, file, edit, res) => {
     const got = afterText(edit, file);
     for (const re of res)
@@ -2471,6 +2480,29 @@ describe("19 the SDK gates' own shape (#793)", () => {
         got.some((g) => re.test(g)),
         `${re}\n${got.join("\n")}`,
       ).toBe(true);
+  });
+  // Text a parsed tree cannot be built from (parseYaml throws on both), so
+  // only the source is edited: rule 21 reads it through allFindings, and the
+  // other rules judge the real tree.
+  it.each([
+    [
+      "a workflow that does not parse as one YAML document",
+      (t) => `${t}x-broken: "never closed\n`,
+      `${G}: -: does not parse as one YAML document`,
+    ],
+    [
+      "a dangling alias, whose anchor is defined nowhere",
+      (t) => `${t}x-dangling: *nowhere\n`,
+      `${G}: -: uses the alias *nowhere at x-dangling; the one alias`,
+    ],
+  ])("refuses %s, read from its text", (_name, edit, want) => {
+    const t = structuredClone(REAL);
+    t.sources[G] = edit(t.sources[G]);
+    const got = report(t);
+    expect(
+      got.some((g) => g.startsWith(want)),
+      `${want}\n${got.join("\n")}`,
+    ).toBe(true);
   });
   it("is fed the workflows' text, and refuses to run blind without it", () => {
     expect(

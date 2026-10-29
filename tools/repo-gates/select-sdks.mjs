@@ -129,14 +129,24 @@ export const GATE_PREFIXES = [
 export const LIVE_WRAPPER =
   "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
 /**
+ * Whether an SDK has a live suite to run: its `liveSuite.runner` is a string
+ * (#918). The one test of it: a leg's `live`, and the live-coverage report's
+ * "live" row, both ask this. Whether that runner CAN run (not blank, through
+ * LIVE_WRAPPER, no operator outside it) is manifestProblems', never this.
+ */
+export function hasLiveSuite(sdk) {
+  return typeof sdk?.liveSuite?.runner === "string";
+}
+/**
  * The shell operators and substitutions in `text` that bash would act on, in
  * the order they appear, read with bash's quoting: nothing inside single
  * quotes, only `$(` and backticks inside double quotes, nothing a backslash
  * escapes. `unterminated` is true when a quote never closes.
  *
- * Why (#926 A4): every liveSuite.runner is run as `bash -euo pipefail -c
- * "<runner>"`, so an operator after the wrapped command runs OUTSIDE the
- * harness wrapper, and its exit code, not the wrapper's, is the leg's:
+ * Why (#926 A4): every liveSuite.runner is run as one `bash -c "<runner>"`
+ * (run-live-suite.mjs's runnerArgv), so an operator after the wrapped command
+ * runs OUTSIDE the harness wrapper, and its exit code, not the wrapper's, is
+ * the leg's:
  * `<wrapper> -- cmd || true` is green whatever the suite did. A `bash -c
  * '… && …'` argument is the wrapped command itself, quoted, so it is never
  * read here. A substitution is refused too: it runs a command bash starts
@@ -442,9 +452,7 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
     const s = byName.get(name);
     if (s?.ci?.native !== undefined) {
       const kind = KINDS.find((k) => k.native === s.ci.native);
-      out[kind.output].push(
-        kind.live ? { name, live: typeof s.liveSuite?.runner === "string" } : name,
-      );
+      out[kind.output].push(kind.live ? { name, live: hasLiveSuite(s) } : name);
       continue;
     }
     if (typeof s?.daggerFn !== "string" || !DAGGER_FN.test(s.daggerFn))
@@ -452,7 +460,7 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
         `${name}: daggerFn ${JSON.stringify(s?.daggerFn)} is not one Dagger function name (${DAGGER_FN.source})`,
       );
     const ticket = waiver(name);
-    const leg = { name, daggerFn: s.daggerFn, live: typeof s.liveSuite?.runner === "string" };
+    const leg = { name, daggerFn: s.daggerFn, live: hasLiveSuite(s) };
     if (ticket === null) out.gate.push(leg);
     else out.known_red.push({ ...leg, ticket });
   }

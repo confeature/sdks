@@ -7,9 +7,10 @@
  * would pass with nothing asserted: the false green #783 removed. These
  * strings are run verbatim by tools/repo-gates/run-live-suite.mjs, the one
  * implementation, which Dagger's `live-suite --sdk <name>` runs in the live
- * container and the macOS job runs natively. select-sdks.mjs's
- * manifestProblems refuses the same on every verify (#793 review) and in that
- * script, and the wrapper itself fails a suite that asked the harness nothing.
+ * container and the macOS job runs natively. Whether a runner can run, the
+ * wrapper included, is select-sdks.mjs's manifestProblems (#793 review): this
+ * file asks it about the real manifest and expects no finding, and the
+ * wrapper itself fails a suite that asked the harness nothing.
  *
  * An SDK without a `liveSuite` carries a `liveExempt` reason (#918, plan 867
  * FR-016); the transitional "no live suite yet" state ended with #924. The
@@ -45,7 +46,7 @@ import { buildReport } from "../scripts/live-coverage-report.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
 import { runnerArgv } from "../../repo-gates/run-live-suite.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
-import { LIVE_WRAPPER } from "../../repo-gates/select-sdks.mjs";
+import { LIVE_WRAPPER, manifestProblems } from "../../repo-gates/select-sdks.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
 import { LIVE_SCRIPT } from "../../repo-gates/verify-workflows.mjs";
 import { OUTCOMES, RUNNER_COUNT_FAKES, type Fake, type Outcome } from "./live-runner-fakes.js";
@@ -67,13 +68,12 @@ describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
     expect(live.length).toBeGreaterThan(0);
   });
 
-  it.each(live.map((s) => [s.name, s.liveSuite!.runner] as const))(
-    "%s runs through the harness wrapper",
-    (_name, runner) => {
-      expect(runner.startsWith(WRAPPER)).toBe(true);
-      expect(runner.slice(WRAPPER.length).trim()).not.toBe("");
-    },
-  );
+  // MUTATION: strip the wrapper from one runner in dagger/sdk-manifest.json
+  // and this goes red, with manifestProblems' own message: the check is asked
+  // of its one home, never restated here.
+  it("the real manifest has no manifestProblems finding", () => {
+    expect(manifestProblems(manifest)).toEqual([]);
+  });
 
   it.each(live.map((s) => [s.name, s.liveSuite!] as const))(
     "%s's liveSuite.path exists and is a file its runner runs",

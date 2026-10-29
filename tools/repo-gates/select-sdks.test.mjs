@@ -418,8 +418,12 @@ describe("the manifest's CI shape", () => {
     }
   });
   // M8 on the real manifest: every Linux live SDK names its toolchain, and
-  // deleting any one of them is refused for that SDK.
-  it.each(REAL.sdks.filter((s) => s.daggerFn && s.liveSuite !== undefined).map((s) => s.name))(
+  // deleting any one of them is refused for that SDK. An empty set would run
+  // no row at all, so it is asserted first.
+  const LINUX_LIVE = REAL.sdks.filter((s) => s.daggerFn && s.liveSuite !== undefined);
+  it("the real manifest has Linux live SDKs for the next rows to judge", () =>
+    expect(LINUX_LIVE.length).toBeGreaterThan(0));
+  it.each(LINUX_LIVE.map((s) => s.name))(
     "refuses the real manifest with %s's liveSuite.toolchain deleted",
     (name) => {
       const m = structuredClone(REAL);
@@ -436,8 +440,8 @@ describe("the manifest's CI shape", () => {
     ));
 });
 
-// #926 A4: a runner is run as `bash -euo pipefail -c "<runner>"` (Dagger's
-// live-suite and run-live-suite.mjs), so a shell operator after the wrapped
+// #926 A4: a runner is run as one `bash -c "<runner>"` (run-live-suite.mjs's
+// runnerArgv, on both paths), so a shell operator after the wrapped
 // command runs OUTSIDE the wrapper: `<wrapper> -- cmd || true` is green
 // whatever the wrapper says. Only the runner's own unquoted text is refused;
 // a `bash -c '… && …'` argument is the wrapped command, and stays legal.
@@ -868,7 +872,10 @@ describe("legProblem — the one statement of a leg's shape (#927 B4)", () => {
       known_red: { ...GO, ticket: "#1" },
       swift: { name: "swift", live: true },
     };
-    for (const k of KINDS.filter((x) => x.live)) {
+    const liveKinds = KINDS.filter((x) => x.live);
+    // A loop over no kind asserts nothing: the live kinds are exactly the fixtures.
+    expect(liveKinds.map((k) => k.output).sort()).toEqual(Object.keys(shape).sort());
+    for (const k of liveKinds) {
       const leg = shape[k.output];
       expect(leg, `a fixture leg for ${k.output}`).toBeDefined();
       expect(legProblem(k, leg), k.output).toBe(false);
