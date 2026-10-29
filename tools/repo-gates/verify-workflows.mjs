@@ -121,8 +121,12 @@
  *      release-settings.json is produced by exactly one job across every
  *      workflow, and every manifest SDK has exactly one of daggerFn or
  *      ci.native, and every liveSuite.runner runs through the harness wrapper
- *      with no shell operator outside the wrapped command (manifestProblems). Each Dagger leg runs its suite, then
- *      its live suite when the leg is `live` (daggerLegProblems); the macOS
+ *      with no shell operator outside the wrapped command (manifestProblems).
+ *      Each Dagger leg (gate and gate-known-red, each judged on its own parsed
+ *      steps) runs its suite, then its live suite when the leg is `live`, and
+ *      one summary step, exactly: always(), SDK, TICKET and STATUS through
+ *      env:, the known-red line when TICKET is set and the plain line
+ *      otherwise (daggerLegProblems); the macOS
  *      job does the same natively, through run-live-suite.mjs (#924,
  *      nativeLegProblems). No env: map of the workflow, a job or a step
  *      sets DEVELOPER_DIR, CI, GITHUB_ACTIONS or TOOLCHAINS, and no value
@@ -136,6 +140,12 @@
  *      rides along a primary entry of the same name (one tag, one version),
  *      and jsr.json's name, license, exports, imports and version (the drift
  *      guard) are the unit's. Read from disk, so it runs in verifyWorkflows.
+ *  21. ONE ANCHOR, ONE ALIAS. Read from each workflow's YAML node
+ *      tree (anchorFindings): sdk-gates.yml anchors jobs.gate.steps as
+ *      `&dagger-leg` and jobs.gate-known-red.steps is `*dagger-leg`, both
+ *      required (LEG_ANCHOR). No other anchor or alias, no `<<` merge key and
+ *      no anchor name defined twice, in any workflow: where this rule's
+ *      parser and GitHub's could read one file two ways.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
@@ -144,7 +154,14 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import {
+  isAlias,
+  isMap as isYamlMap,
+  isScalar,
+  isSeq,
+  parse as parseYaml,
+  parseDocument,
+} from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
 import { lexStrict } from "./strict-shell.mjs";
 import { jsrProblems } from "../sdk-pack/jsr-unit.mjs";
@@ -3068,18 +3085,31 @@ export function readLocalActions(root) {
   return out;
 }
 
+/**
+ * Every workflow of the repository at `root`, by file name: its parsed tree
+ * (`workflows`), which every rule reads, and its text (`sources`), which only
+ * the anchor rule reads, since a parsed tree has no anchors left in it. One
+ * reader, so the two can never be of different files.
+ */
+export function readWorkflows(root) {
+  const workflows = {};
+  const sources = {};
+  for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n))) {
+    sources[f] = readFileSync(join(root, WORKFLOWS, f), "utf8");
+    workflows[f] = parseYaml(sources[f]);
+  }
+  return { workflows, sources };
+}
+
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
 export function verifyWorkflows(root) {
   const settings = JSON.parse(readFileSync(join(root, SETTINGS), "utf8"));
   const manifest = JSON.parse(readFileSync(join(root, MANIFEST), "utf8"));
-  const workflows = {};
-  for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
-    workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
   return [
     ...allFindings({
       settings,
       manifest,
-      workflows,
+      ...readWorkflows(root),
       scriptOutputs: readScriptOutputs(),
       actions: readLocalActions(root),
     }),
@@ -3105,8 +3135,16 @@ export function jsrFindings(manifest, root) {
  * share (round 10: the tests listed the rule functions themselves, so a rule
  * the gate forgot to run still passed its rows).
  */
-export function allFindings({ settings, manifest, workflows, scriptOutputs, actions = {} }) {
+export function allFindings({
+  settings,
+  manifest,
+  workflows,
+  sources,
+  scriptOutputs,
+  actions = {},
+}) {
   return [
+    ...anchorFindings(sources),
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
@@ -3119,6 +3157,99 @@ export function allFindings({ settings, manifest, workflows, scriptOutputs, acti
     ...daggerFnFindings(manifest),
     ...sdkGateFindings({ settings, manifest, workflows }),
   ];
+}
+
+/**
+ * The one YAML anchor and the one alias any workflow may hold (rule 21):
+ * sdk-gates.yml writes the Dagger leg's steps once, under `gate`, and
+ * `gate-known-red` runs that same list. Paths are key paths from the root.
+ */
+export const LEG_ANCHOR = {
+  file: SDK_GATES_WORKFLOW,
+  name: "dagger-leg",
+  anchor: ["jobs", "gate", "steps"],
+  alias: ["jobs", "gate-known-red", "steps"],
+};
+
+/** Every anchor, alias and `<<` key under a YAML node, each with its key path. */
+function yamlMarks(node, path = [], out = { anchors: [], aliases: [], merges: [] }) {
+  if (isAlias(node)) {
+    out.aliases.push({ name: node.source, path });
+    return out;
+  }
+  if (typeof node?.anchor === "string") out.anchors.push({ name: node.anchor, path });
+  if (isYamlMap(node))
+    for (const pair of node.items) {
+      const key = isScalar(pair.key) ? String(pair.key.value) : String(pair.key);
+      if (key === "<<") out.merges.push({ path });
+      yamlMarks(pair.key, [...path, `${key} (key)`], out);
+      yamlMarks(pair.value, [...path, key], out);
+    }
+  else if (isSeq(node)) node.items.forEach((item, i) => yamlMarks(item, [...path, String(i)], out));
+  return out;
+}
+
+/**
+ * Rule 21: the anchors and aliases of every workflow, read from the YAML node
+ * tree, since the parsed tree the other rules read has none left. Exactly
+ * LEG_ANCHOR is allowed, and required: `&dagger-leg` on jobs.gate.steps of
+ * sdk-gates.yml and `*dagger-leg` on jobs.gate-known-red.steps, so the Dagger
+ * leg cannot drift back into two copies. Any other anchor or alias, any `<<`
+ * merge key and any anchor name defined twice is refused: those are where
+ * this rule's parser and GitHub's could read one file two ways (the `yaml`
+ * package lets a redefined anchor win silently, and GitHub reads no merge
+ * keys), and rule 19 judges the tree this parser builds.
+ */
+export function anchorFindings(sources) {
+  if (!isMap(sources))
+    return [
+      { file: WORKFLOWS, job: "-", why: "no workflow source was given: rule 21 would run blind" },
+    ];
+  const out = [];
+  const same = (a, b) => a.join("\0") === b.join("\0");
+  const allowed = (kind, m, file) =>
+    file === LEG_ANCHOR.file && m.name === LEG_ANCHOR.name && same(m.path, LEG_ANCHOR[kind]);
+  for (const [file, text] of Object.entries(sources)) {
+    const add = (path, why) =>
+      out.push({ file, job: path[0] === "jobs" && path.length > 1 ? path[1] : "-", why });
+    const doc = parseDocument(String(text));
+    if (doc.errors.length > 0) {
+      add([], `does not parse as one YAML document (${doc.errors[0].message.split("\n")[0]})`);
+      continue;
+    }
+    const { anchors, aliases, merges } = yamlMarks(doc.contents);
+    const where = (m) => m.path.join(".") || "the root";
+    const pair = `${LEG_ANCHOR.anchor.join(".")} of ${LEG_ANCHOR.file}`;
+    for (const m of anchors.filter((x) => !allowed("anchor", x, file)))
+      add(
+        m.path,
+        `defines the anchor &${m.name} at ${where(m)}; the one anchor a workflow may define is &${LEG_ANCHOR.name} on ${pair}`,
+      );
+    for (const m of aliases.filter((x) => !allowed("alias", x, file)))
+      add(
+        m.path,
+        `uses the alias *${m.name} at ${where(m)}; the one alias a workflow may use is *${LEG_ANCHOR.name} on ${LEG_ANCHOR.alias.join(".")} of ${LEG_ANCHOR.file}`,
+      );
+    for (const m of merges)
+      add(m.path, `has a << merge key at ${where(m)}: GitHub reads no merge keys`);
+    const times = new Map();
+    for (const m of anchors) times.set(m.name, (times.get(m.name) ?? 0) + 1);
+    for (const [name, n] of times)
+      if (n > 1)
+        add([], `defines the anchor &${name} ${n} times: a later one would shadow the first`);
+    if (file !== LEG_ANCHOR.file) continue;
+    if (!anchors.some((x) => allowed("anchor", x, file)))
+      add(
+        LEG_ANCHOR.anchor,
+        `${LEG_ANCHOR.anchor.join(".")} is not anchored &${LEG_ANCHOR.name}: the Dagger leg's steps are written once, there`,
+      );
+    if (!aliases.some((x) => allowed("alias", x, file)))
+      add(
+        LEG_ANCHOR.alias,
+        `${LEG_ANCHOR.alias.join(".")} is not the alias *${LEG_ANCHOR.name}: ${LEG_ANCHOR.alias[1]} runs ${LEG_ANCHOR.anchor[1]}'s steps, never its own copy`,
+      );
+  }
+  return out;
 }
 
 /**
@@ -3230,18 +3361,62 @@ const LIVE_ARGS = "live-suite --sdk ${{ matrix.sdk.name }} --source=.";
 const LIVE_IF = "matrix.sdk.live";
 const isDaggerAction = (st) =>
   typeof st?.uses === "string" && /^dagger\/dagger-for-github@/i.test(st.uses.trim());
+/**
+ * The Dagger leg's one summary step, exactly (FR-002). A matrix job reports
+ * one combined result, so each leg names itself. The step decides nothing:
+ * it prints the known-red line when the leg has a ticket, which only a
+ * known-red leg may carry (select-sdks.mjs legProblem), and the plain line
+ * otherwise. The ticket reaches it through env: only, never inside run:.
+ */
+const SUMMARY_IF = "always()";
+const SUMMARY_ENV = {
+  SDK: "${{ matrix.sdk.name }}",
+  TICKET: "${{ matrix.sdk.ticket }}",
+  STATUS: "${{ job.status }}",
+};
+const SUMMARY_RUN = [
+  'if [ -n "${TICKET}" ]; then',
+  '  echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"',
+  "else",
+  '  echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"',
+  "fi",
+].join("\n");
+const writesSummary = (st) => /GITHUB_STEP_SUMMARY/.test(String(st?.run ?? ""));
 
 /**
  * Rule 19's half over a Dagger leg's steps (gate, gate-known-red; #918): it
  * runs exactly two Dagger steps, the SDK's suite (`<daggerFn> --source=.`,
  * unconditional) and then its live suite (`live-suite --sdk <name>`, only when
- * select-sdks.mjs marks the leg `live`), through the same action. How Dagger
- * is installed and pinned is engine-pin.test.mjs's, not restated here; which
- * SDK has a live suite is the manifest's, read by the selector.
+ * select-sdks.mjs marks the leg `live`), through the same action, and one
+ * summary step, exactly SUMMARY_RUN under SUMMARY_IF and SUMMARY_ENV. Each job
+ * is judged on its own parsed steps: the alias that makes the two lists one
+ * is rule 21's, never a sameness check here. How Dagger is installed and
+ * pinned is engine-pin.test.mjs's, not restated here; which SDK has a live
+ * suite is the manifest's, read by the selector.
  */
 function daggerLegProblems(job) {
   const out = [];
   const steps = stepsOf(job);
+  const summaries = steps.filter(writesSummary);
+  if (summaries.length !== 1)
+    out.push(
+      `has ${summaries.length} steps writing $GITHUB_STEP_SUMMARY, not exactly its one summary step`,
+    );
+  else {
+    const [sum] = summaries;
+    if (String(sum.if ?? "").trim() !== SUMMARY_IF)
+      out.push(`its summary step's if: is not exactly ${SUMMARY_IF}`);
+    if (canonical(sum.env ?? null) !== canonical(SUMMARY_ENV))
+      out.push(
+        `its summary step's env: is not exactly ${Object.entries(SUMMARY_ENV)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ")}`,
+      );
+    if (String(sum.run).trim() !== SUMMARY_RUN)
+      out.push(
+        "its summary step's run: is not exactly the known-red line when TICKET is set, else the plain line",
+      );
+  }
   const dagger = steps.filter(isDaggerAction);
   const args = (st) => String(st?.with?.args ?? "").trim();
   const suite = dagger.find((st) => args(st) === SUITE_ARGS && st.if === undefined);

@@ -851,4 +851,29 @@ describe("legProblem — the one statement of a leg's shape (#927 B4)", () => {
       true,
     );
   });
+  // M14: the Dagger leg's one summary step says "known red, not counted"
+  // exactly when the leg carries a ticket, so only a known-red leg may.
+  const GO = { name: "go", daggerFn: "go-test", live: false };
+  it.each([
+    ["a gate leg", "gate", { ...GO, ticket: "#1" }],
+    ["a gate leg, even an empty one", "gate", { ...GO, ticket: "" }],
+    ["a gate leg, even a null one", "gate", { ...GO, ticket: null }],
+    ["a macOS leg", "swift", { name: "swift", live: true, ticket: "#1" }],
+  ])("refuses a ticket on %s", (_, output, leg) =>
+    expect(legProblem(kind(output), leg)).toBe(true),
+  );
+  it("every kind but known_red is refused a ticket, and known_red alone is refused none", () => {
+    const shape = {
+      gate: GO,
+      known_red: { ...GO, ticket: "#1" },
+      swift: { name: "swift", live: true },
+    };
+    for (const k of KINDS.filter((x) => x.live)) {
+      const leg = shape[k.output];
+      expect(leg, `a fixture leg for ${k.output}`).toBeDefined();
+      expect(legProblem(k, leg), k.output).toBe(false);
+      const { ticket: _, ...bare } = leg;
+      expect(legProblem(k, { ...bare, ticket: "#1" }), k.output).toBe(k.output !== "known_red");
+    }
+  });
 });

@@ -5,11 +5,10 @@
 // attacker or a mistake would, and the real verifier, with the real settings,
 // manifest and per-environment command table, must report a new finding.
 
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ACTION_SURFACE,
@@ -38,6 +37,7 @@ import {
   exemptTokenFindings,
   idTokenExceptionFindings,
   ID_TOKEN_EXCEPTIONS,
+  readWorkflows,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
@@ -46,18 +46,22 @@ import { rowSnapshots } from "./row-snapshots.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const settings = JSON.parse(readFileSync(join(ROOT, SETTINGS), "utf8"));
 const manifest = JSON.parse(readFileSync(join(ROOT, MANIFEST), "utf8"));
-const BASE = {};
-for (const f of readdirSync(join(ROOT, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
-  BASE[f] = parseYaml(readFileSync(join(ROOT, WORKFLOWS, f), "utf8"));
+/** The real workflows, parsed, and their text, which rule 21 (anchors) reads. */
+const { workflows: BASE, sources: SOURCES } = readWorkflows(ROOT);
 const P = "sdk-publish.yml";
 const SCRIPTS = readScriptOutputs(ROOT);
 const ACTIONS = readLocalActions(ROOT);
 const C = "cli-release.yml";
 
 const all = (w) =>
-  allFindings({ settings, manifest, workflows: w, scriptOutputs: SCRIPTS, actions: ACTIONS }).map(
-    (f) => `${f.file}: ${f.job}: ${f.why}`,
-  );
+  allFindings({
+    settings,
+    manifest,
+    workflows: w,
+    sources: SOURCES,
+    scriptOutputs: SCRIPTS,
+    actions: ACTIONS,
+  }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
   const w = structuredClone(BASE);
@@ -391,7 +395,7 @@ describe("the values an exception trusts are pinned (round 5, MED)", () => {
       [
         "T2 cli upload: a job-level TAG",
         (w) => {
-          w[C].jobs.upload.env = { ...(w[C].jobs.upload.env ?? {}), TAG: "cli-v0.0.1" };
+          w[C].jobs.upload.env = { ...w[C].jobs.upload.env, TAG: "cli-v0.0.1" };
         },
         /TAG is cli-v0\.0\.1, not its pinned expression/,
       ],
@@ -512,7 +516,7 @@ describe("the reviewers' round-4 driver cases, each refused for its own reason",
         "M4 job env MAVEN_URL",
         (w) => {
           w[P].jobs["publish-maven"].env = {
-            ...(w[P].jobs["publish-maven"].env ?? {}),
+            ...w[P].jobs["publish-maven"].env,
             MAVEN_URL: "https://evil.example",
           };
         },
@@ -1117,7 +1121,7 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
         (w) => {
           const j = w[C].jobs.upload;
           const s = upload(w);
-          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          j.env = { ...j.env, R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
           delete s.env.R2_SECRET_ACCESS_KEY;
           j.environment = {
             name: "cli-release",
@@ -1131,7 +1135,7 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
         (w) => {
           const j = w[C].jobs.upload;
           const s = upload(w);
-          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          j.env = { ...j.env, R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
           delete s.env.R2_SECRET_ACCESS_KEY;
         },
         /the credential R2_SECRET_ACCESS_KEY is set in the job's env/,
@@ -1250,7 +1254,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
         "C2 rubygems gem-server to an attacker",
         (w) => {
           const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...(s.with ?? {}), "gem-server": "https://attacker.example" };
+          s.with = { ...s.with, "gem-server": "https://attacker.example" };
         },
         SURFACE,
       ],
@@ -1258,7 +1262,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
         "C2b rubygems audience override",
         (w) => {
           const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...(s.with ?? {}), audience: "attacker.example" };
+          s.with = { ...s.with, audience: "attacker.example" };
         },
         SURFACE,
       ],
@@ -1432,7 +1436,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
           const s = j(w, P_, "publish-go").steps.find(
             (x) => x.name === "Ask the Go proxy for the release",
           );
-          s.env = { ...(s.env ?? {}), DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+          s.env = { ...s.env, DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
           s.run = `# \${DEPLOY_KEY}\n${s.run}`;
         },
         /sets the credential DEPLOY_KEY but its run: does not read it/,
@@ -1716,7 +1720,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
         "X27 release: GH_TOKEN on the digest step",
         (w) => {
           const s = j(w, C, "release").steps.find((x) => /build job's digest/.test(x.name ?? ""));
-          s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
+          s.env = { ...s.env, GH_TOKEN: "${{ github.token }}" };
         },
         /sets the credential GH_TOKEN but its run: does not read it/,
       ],
@@ -2206,6 +2210,7 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
       settings,
       manifest: m,
       workflows: BASE,
+      sources: SOURCES,
       scriptOutputs: SCRIPTS,
       actions: ACTIONS,
     }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
@@ -2226,6 +2231,7 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
         settings,
         manifest: m,
         workflows: BASE,
+        sources: SOURCES,
         scriptOutputs: SCRIPTS,
         actions: ACTIONS,
       }).map((f) => f.why),
@@ -2500,7 +2506,7 @@ describe("continue-on-error in any workflow holding a credentialed job (round 11
         "COE cli-windows-install-verify: a secret makes a job credentialed, its continue-on-error refused",
         (w) => {
           const job = Object.values(w["cli-windows-install-verify.yml"].jobs)[0];
-          job.env = { ...(job.env ?? {}), T: "${{ secrets.X }}" };
+          job.env = { ...job.env, T: "${{ secrets.X }}" };
           job["continue-on-error"] = true;
         },
         /cli-windows-install-verify\.yml: \S+: sets continue-on-error: \(its failure would be reported green\)/,
@@ -2738,6 +2744,7 @@ describe("the Hex pair is held to every rule (#909)", () => {
       settings: s,
       manifest,
       workflows: BASE,
+      sources: SOURCES,
       scriptOutputs: SCRIPTS,
       actions: ACTIONS,
     }).map((f) => `${f.file}: ${f.job}: ${f.why}`);

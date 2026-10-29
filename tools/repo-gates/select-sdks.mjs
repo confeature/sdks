@@ -403,17 +403,24 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
  * native live kind, and `{ name, daggerFn, live }` for a Dagger leg, which
  * carries its waiver's `ticket` on the known-red output. The one statement of
  * the leg shape, read back by conclude-sdk-gates.mjs.
+ *
+ * Only a known-red leg may carry a `ticket` key, whatever its value: the
+ * Dagger leg's one summary step (sdk-gates.yml `&dagger-leg`) prints "known
+ * red, not counted" whenever the leg's ticket is non-empty, and decides
+ * nothing else, so a ticket on a counted leg would read as not counted.
  */
 export function legProblem(kind, x) {
   const leg =
     isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
   if (!kind.live) return typeof x !== "string" || !NAME.test(x);
+  const knownRed = kind.output === "known_red";
+  if (leg && !knownRed && Object.hasOwn(x, "ticket")) return true;
   if (kind.native !== undefined) return !leg;
   return (
     !leg ||
     typeof x.daggerFn !== "string" ||
     !DAGGER_FN.test(x.daggerFn) ||
-    (kind.output === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
+    (knownRed && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
   );
 }
 

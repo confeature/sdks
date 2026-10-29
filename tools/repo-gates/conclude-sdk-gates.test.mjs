@@ -170,6 +170,15 @@ describe("the aggregate", () => {
         void ((n.select.outputs.swift = '[{"name":"a b","live":true}]'),
         (n.swift.result = "success")),
     ],
+    // M14: a gate leg with a ticket would print the known-red summary line
+    // while its result is counted, so the leg shape refuses it (legProblem).
+    [
+      "a gate leg that carries a ticket",
+      (n) =>
+        void ((n.select.outputs.gate =
+          '[{"name":"node","daggerFn":"js-test","live":false,"ticket":"#1"}]'),
+        (n.gate.result = "success")),
+    ],
     [
       "a leg whose daggerFn is not one function name",
       (n) =>

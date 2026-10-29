@@ -138,6 +138,15 @@ function daggerJobs(node, out = []) {
 }
 
 /**
+ * Each step list of `doc` once, by identity. A YAML alias of a whole `steps:`
+ * list (sdk-gates.yml's `*dagger-leg`) is the same parsed array in two jobs:
+ * counted per job it would read as twice its physical `uses:` lines, and the
+ * raw side stays one count per line, independent of the parser. Checking the
+ * one array once checks every job that shares it.
+ */
+const stepLists = (doc) => [...new Set(daggerJobs(doc))];
+
+/**
  * A job's steps with each local `uses: ./…` replaced by its composite action's
  * steps (#868), recursively. Each expanded step records its action file in
  * `from`; the step answering the action's `version` output takes the calling
@@ -428,7 +437,7 @@ function audit(root) {
       violations.push(`${rel}: does not parse as YAML (${e.message.split("\n")[0]})`);
       continue;
     }
-    const jobs = daggerJobs(doc);
+    const jobs = stepLists(doc);
     const parsedCount = jobs.flat().filter(usesAction).length;
     if (parsedCount !== rawCount) {
       violations.push(
@@ -597,6 +606,72 @@ const job = (steps) => ({
 describe("the good fixture", () => {
   it("passes", () => {
     expect(audit(tree())).toEqual([]);
+  });
+});
+
+// sdk-gates.yml writes the Dagger leg once (`steps: &dagger-leg`) and its
+// second job aliases it (`steps: *dagger-leg`). The parser hands both jobs
+// the SAME array, so the parsed side counts each list once, by identity,
+// while the raw side keeps counting physical `uses:` lines.
+const RUN_LIVE = RUN_ACTION.replace("Run (Dagger)", "Run live (Dagger)");
+const LEG = `${CHECKOUT}${SETUP_STEP}${RUN_ACTION}${RUN_LIVE}`;
+const aliased = (leg = LEG) => `name: gate
+on: [push]
+jobs:
+  counted:
+    runs-on: ubuntu-latest
+    steps: &leg
+${leg}  waived:
+    runs-on: ubuntu-latest
+    steps: *leg
+`;
+const rawUses = (raw) => (raw.match(RAW_USES) ?? []).length;
+const parsedUses = (lists) => lists.flat().filter(usesAction).length;
+
+describe("a step list shared by a YAML alias", () => {
+  it("passes, its two Dagger steps counted once on each side", () => {
+    expect(audit(tree({ workflows: { "gate.yml": aliased() } }))).toEqual([]);
+    const doc = parse(aliased());
+    expect(doc.jobs.counted.steps).toBe(doc.jobs.waived.steps);
+    expect([rawUses(aliased()), parsedUses(stepLists(doc))]).toEqual([2, 2]);
+  });
+
+  it("M3: counted per job, not per array, the alias reads as 4 parsed vs 2 raw", () => {
+    const lists = daggerJobs(parse(aliased()));
+    expect(lists).toHaveLength(2);
+    expect(lists[0]).toBe(lists[1]);
+    expect([parsedUses(lists), rawUses(aliased())]).toEqual([4, 2]);
+  });
+
+  it("M3 on the real sdk-gates.yml: one shared list, 2 raw and 2 parsed, 4 without identity", () => {
+    const raw = readFileSync(join(ROOT, ".github/workflows/sdk-gates.yml"), "utf-8");
+    const doc = parse(raw);
+    expect(doc.jobs.gate.steps).toBe(doc.jobs["gate-known-red"].steps);
+    expect(rawUses(raw)).toBe(2);
+    expect(parsedUses(stepLists(doc))).toBe(2);
+    expect(parsedUses(daggerJobs(doc))).toBe(4);
+  });
+
+  it("M4: version: latest in the anchored list is refused, naming the step", () => {
+    const v = audit(
+      tree({
+        workflows: {
+          "gate.yml": aliased(LEG.replace(`version: ${PIN_EXPR}`, "version: latest")),
+        },
+      }),
+    );
+    expect(v).toEqual(['.github/workflows/gate.yml: step "Run (Dagger)": version: latest']);
+  });
+
+  it("a second job's own copy is still checked, step by step", () => {
+    // Only the second job's list is wrong: the finding can come from it alone.
+    const own = aliased().replace(
+      "    steps: *leg\n",
+      `    steps:\n${LEG.replace(`version: ${PIN_EXPR}`, "version: latest")}`,
+    );
+    expect(audit(tree({ workflows: { "gate.yml": own } }))).toEqual([
+      '.github/workflows/gate.yml: step "Run (Dagger)": version: latest',
+    ]);
   });
 });
 

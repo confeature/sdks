@@ -15,9 +15,13 @@
 #                   Dagger function, the one definition of its suite, shared
 #                   with the publish gate, release-gate.yml and the pre-push,
 #                   then, when the manifest gives it a liveSuite.runner, its
-#                   live wire-cases (`live-suite --sdk <name>`, #918).
-#   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
-#                   the BASE manifest (ci.knownRed): shown red, never counted.
+#                   live wire-cases (`live-suite --sdk <name>`, #918), then
+#                   one summary line naming the leg. Its steps are written
+#                   once, here (`&dagger-leg`).
+#   gate-known-red  the same steps, by alias (`*dagger-leg`), for an SDK whose
+#                   ticketed defect is waived in the BASE manifest
+#                   (ci.knownRed): shown red, never counted. Its leg carries
+#                   the ticket, so its summary line says so.
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
 #                   whose toolchain is Apple's, on a macos-15 runner; then its
 #                   live wire-cases natively (run-live-suite.mjs, #924).
@@ -37,6 +41,8 @@
 # three unfiltered triggers, the runner labels, a timeout on every job, the
 # concurrency key, fail-fast: false, the empty-matrix guards, and an
 # aggregate that needs every job, runs always() and runs the conclude script.
+# Rule 21 allows one YAML anchor and one alias, the Dagger leg's, and no
+# other anchor, alias or merge key, in this file or any other.
 
 name: sdk-gates
 
@@ -108,7 +114,10 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.gate) }}
-    steps:
+    # The Dagger leg, written once: gate-known-red runs this same list by
+    # alias. verify-workflows.mjs rule 21 allows this one anchor/alias pair
+    # and no other, and rule 19 holds the steps in both jobs.
+    steps: &dagger-leg
       # The leg runs the pull request's code inside Dagger and never pushes, so
       # the checkout keeps no GITHUB_TOKEN in .git/config.
       - name: Checkout
@@ -154,14 +163,22 @@ jobs:
           args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
           enable-github-summary: true
 
-      # A matrix job reports one combined result, so each leg names itself.
+      # A matrix job reports one combined result, so each leg names itself. The
+      # known-red line is printed when the leg has a ticket, which only a
+      # known-red leg carries (select-sdks.mjs legProblem); the ticket reaches
+      # the step through env: only.
       - name: Name the leg in its summary
         if: always()
         env:
           SDK: ${{ matrix.sdk.name }}
+          TICKET: ${{ matrix.sdk.ticket }}
           STATUS: ${{ job.status }}
         run: |
-          echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${TICKET}" ]; then
+            echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   gate-known-red:
     name: gate (${{ matrix.sdk.name }}, known red ${{ matrix.sdk.ticket }})
@@ -173,58 +190,7 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.known_red) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      # Dagger as every job sets it up (.github/actions/dagger-setup, #868):
-      # the engine version from dagger/dagger.json, the CLI verified against
-      # dagger/cli-checksums.txt, and the engine image by the digest in
-      # dagger/engine-digest.txt. tools/dagger-call/engine-pin.test.mjs
-      # follows the action into its action.yml and fails on any drift.
-      - name: Set up the pinned Dagger (.github/actions/dagger-setup)
-        id: pin
-        uses: ./.github/actions/dagger-setup
-
-      # The action is pinned by commit SHA (v8.4.1, the contract that supports
-      # verb/module/args/enable-github-summary) and the engine by `version:`,
-      # taken from the pin step. The action tag and the engine version are
-      # decoupled by design: never @v8 / @latest, never the action's `latest`
-      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
-      - name: Run ${{ matrix.sdk.daggerFn }} (Dagger)
-        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
-        with:
-          version: ${{ steps.pin.outputs.version }}
-          verb: call
-          module: ./dagger
-          args: ${{ matrix.sdk.daggerFn }} --source=.
-          enable-github-summary: true
-
-      # The SDK's live wire-cases against the reference origin (#918): its
-      # manifest liveSuite.runner, on its own toolchain, through the same
-      # verified CLI and pinned engine. After the suite, and only on a leg that
-      # has one (select-sdks.mjs sets live); a red live suite reddens the leg.
-      - name: Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)
-        if: matrix.sdk.live
-        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
-        with:
-          version: ${{ steps.pin.outputs.version }}
-          verb: call
-          module: ./dagger
-          args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
-          enable-github-summary: true
-
-      - name: Name the leg in its summary
-        if: always()
-        env:
-          SDK: ${{ matrix.sdk.name }}
-          TICKET: ${{ matrix.sdk.ticket }}
-          STATUS: ${{ job.status }}
-        run: |
-          echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+    steps: *dagger-leg
 
   # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
   # the same script the local pre-push runs, which fails closed under CI when
