@@ -26,6 +26,7 @@ import {
   SelectError,
   classifyPath,
   gateFiles,
+  hasLiveSuite,
   manifestProblems,
   routeSelection,
   selectNames,
@@ -420,7 +421,7 @@ describe("the manifest's CI shape", () => {
   // M8 on the real manifest: every Linux live SDK names its toolchain, and
   // deleting any one of them is refused for that SDK. An empty set would run
   // no row at all, so it is asserted first.
-  const LINUX_LIVE = REAL.sdks.filter((s) => s.daggerFn && s.liveSuite !== undefined);
+  const LINUX_LIVE = REAL.sdks.filter((s) => s.daggerFn && hasLiveSuite(s));
   it("the real manifest has Linux live SDKs for the next rows to judge", () =>
     expect(LINUX_LIVE.length).toBeGreaterThan(0));
   it.each(LINUX_LIVE.map((s) => s.name))(
@@ -504,7 +505,7 @@ describe("a liveSuite.runner carries no shell operator outside the wrapped comma
   });
 
   it("every real runner passes", () => {
-    for (const s of REAL.sdks.filter((x) => x.liveSuite !== undefined))
+    for (const s of REAL.sdks.filter((x) => hasLiveSuite(x)))
       expect(
         shellOperatorsOutsideQuotes(s.liveSuite.runner.slice(LIVE_WRAPPER.length)),
         s.name,
@@ -883,4 +884,19 @@ describe("legProblem — the one statement of a leg's shape (#927 B4)", () => {
       expect(legProblem(k, { ...bare, ticket: "#1" }), k.output).toBe(k.output !== "known_red");
     }
   });
+});
+
+describe("hasLiveSuite: an SDK has a live suite exactly when liveSuite.runner is a string", () => {
+  it.each([
+    ["a runner", { liveSuite: { runner: "x" } }, true],
+    [
+      "a blank runner (manifestProblems refuses it, but it is a live suite)",
+      { liveSuite: { runner: " " } },
+      true,
+    ],
+    ["no liveSuite", {}, false],
+    ["a liveSuite without a runner", { liveSuite: {} }, false],
+    ["a runner that is not a string", { liveSuite: { runner: 1 } }, false],
+    ["no entry at all", undefined, false],
+  ])("%s", (_why, sdk, expected) => expect(hasLiveSuite(sdk)).toBe(expected));
 });

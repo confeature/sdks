@@ -46,7 +46,7 @@ import { buildReport } from "../scripts/live-coverage-report.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
 import { runnerArgv } from "../../repo-gates/run-live-suite.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
-import { LIVE_WRAPPER, manifestProblems } from "../../repo-gates/select-sdks.mjs";
+import { hasLiveSuite, LIVE_WRAPPER, manifestProblems } from "../../repo-gates/select-sdks.mjs";
 // @ts-expect-error — plain .mjs repo-gates script, no type declarations
 import { LIVE_SCRIPT } from "../../repo-gates/verify-workflows.mjs";
 import { OUTCOMES, RUNNER_COUNT_FAKES, type Fake, type Outcome } from "./live-runner-fakes.js";
@@ -60,7 +60,7 @@ type Sdk = {
   ci?: { native?: string };
 };
 const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { sdks: Sdk[] };
-const live = manifest.sdks.filter((s) => s.liveSuite !== undefined);
+const live = manifest.sdks.filter((s) => hasLiveSuite(s));
 const WRAPPER = LIVE_WRAPPER as string;
 
 describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {

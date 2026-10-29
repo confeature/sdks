@@ -35,7 +35,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
-import { MANIFEST, manifestProblems, NAME } from "./select-sdks.mjs";
+import { hasLiveSuite, MANIFEST, manifestProblems, NAME } from "./select-sdks.mjs";
 
 /** A live suite this script cannot run: exit 2. */
 export class RunLiveError extends Error {}
@@ -65,10 +65,9 @@ export function runnerFor(manifest, sdk) {
     throw new RunLiveError(
       `${MANIFEST}: ${problems.map((p) => `${p.sdk === "-" ? "" : `${p.sdk} `}${p.why}`).join("; ")}`,
     );
-  const runner = manifest.sdks.find((s) => s?.name === sdk)?.liveSuite?.runner;
-  if (typeof runner !== "string")
-    throw new RunLiveError(`${MANIFEST} has no ${sdk} liveSuite.runner`);
-  return runner;
+  const entry = manifest.sdks.find((s) => s?.name === sdk);
+  if (!hasLiveSuite(entry)) throw new RunLiveError(`${MANIFEST} has no ${sdk} liveSuite.runner`);
+  return entry.liveSuite.runner;
 }
 
 function main() {
