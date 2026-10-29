@@ -222,20 +222,6 @@ function kotlinMpToolchain(source: Directory): Container {
 }
 
 /**
- * An SDK's `liveSuite.runner` from `dagger/sdk-manifest.json` — the one command
- * that runs its live wire-cases (#783, #918). Throws when the SDK has none: a
- * Dagger live gate with nothing to run must fail, not pass.
- */
-async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> {
-  const manifest = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
-    sdks: Array<{ name: string; liveSuite?: { runner: string } }>;
-  };
-  const runner = manifest.sdks.find((s) => s.name === sdk)?.liveSuite?.runner;
-  if (!runner) throw new Error(`dagger/sdk-manifest.json has no ${sdk} liveSuite.runner`);
-  return runner;
-}
-
-/**
  * Each native SDK's toolchain, with the SDK's directory as working directory:
  * the one definition of it, shared by that SDK's test function and its live
  * suite (#793 FR-007, FR-015). Every image is an exact version tag (FR-008).
@@ -1025,25 +1011,34 @@ export class Confeature {
    * Run one SDK's live wire-cases against the harness (#918, FR-015): the CLI's
    * `live-suite --sdk <name>`, a step of that SDK's leg in sdk-gates.yml.
    *
-   * The command is the SDK's `liveSuite.runner` from the manifest, its one
-   * home: the harness wrapper (`--corpus-seed --exec`) boots the reference
-   * origin through wrangler `unstable_dev` (in-process workerd, loopback only,
-   * so the loopback-guarded admin routes stay unreachable from the network),
-   * hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes its
-   * exit code through. One container, not a service binding: the harness
-   * binds 127.0.0.1 by design. The runner runs from the repository root under
-   * `bash -euo pipefail`.
+   * The container is liveContainer's, at the repository root; what runs in it
+   * is tools/repo-gates/run-live-suite.mjs, the one implementation that finds
+   * an SDK's `liveSuite.runner` and runs it, the same script the macOS job
+   * runs natively. So the SDK name, the runner and how bash is handed it are
+   * judged there, by manifestProblems, never here: `sdk` reaches no path,
+   * cache-volume name or argv in this module, only liveContainer's manifest
+   * lookup, the script's `SDK` and the messages.
+   * The runner's harness wrapper (`--corpus-seed --exec`) boots the reference
+   * origin through wrangler `unstable_dev` (in-process workerd, loopback
+   * only, so the loopback-guarded admin routes stay unreachable from the
+   * network) and hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`.
+   * One container, not a service binding: the harness binds 127.0.0.1 by
+   * design.
+   *
+   * The exec is the default `withExec`, so the script's exit code is the
+   * call's: its exit 2 on a refused runner, or the suite's own failure, fails
+   * the call and reddens the leg. Nothing here may soften that.
    *
    * @param source The workspace root.
    * @param sdk A manifest SDK name with a `liveSuite.runner`.
    */
   @func()
   async liveSuite(source: Directory, sdk: string): Promise<string> {
-    if (!/^[a-z][a-z0-9-]*$/.test(sdk))
-      throw new Error(`${JSON.stringify(sdk)} is not an SDK name`);
-    const runner = await liveSuiteRunner(source, sdk);
     const container = await liveContainer(source, sdk);
-    const result = await container.withExec(["bash", "-euo", "pipefail", "-c", runner]).stdout();
+    const result = await container
+      .withEnvVariable("SDK", sdk)
+      .withExec(["node", "tools/repo-gates/run-live-suite.mjs"])
+      .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (liveSuite ${sdk} #918)`;
   }

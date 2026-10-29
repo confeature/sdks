@@ -4,10 +4,12 @@
  * Every live suite runs through the harness wrapper (#783). A bare runner —
  * `vp test run …` with no wrapper — would run the suite without
  * `CONFEATURE_LIVE`, the suite would skip every test, exit 0, and its leg
- * would pass with nothing asserted: the false green #783 removed. Dagger's
- * `live-suite --sdk <name>` runs these strings verbatim (#918). select-sdks.mjs's
- * manifestProblems refuses the same on every verify (#793 review), and the
- * wrapper itself fails a suite that asked the harness nothing.
+ * would pass with nothing asserted: the false green #783 removed. These
+ * strings are run verbatim by tools/repo-gates/run-live-suite.mjs, the one
+ * implementation, which Dagger's `live-suite --sdk <name>` runs in the live
+ * container and the macOS job runs natively. select-sdks.mjs's
+ * manifestProblems refuses the same on every verify (#793 review) and in that
+ * script, and the wrapper itself fails a suite that asked the harness nothing.
  *
  * An SDK without a `liveSuite` carries a `liveExempt` reason (#918, plan 867
  * FR-016); the transitional "no live suite yet" state ended with #924. The
@@ -15,7 +17,9 @@
  * runs it, never beside a liveExempt, and the `liveSuite.toolchain` each
  * Dagger live suite's container is built from) is
  * tools/repo-gates/select-sdks.mjs's manifestProblems, checked on every
- * verify; it is not restated here, and nothing here reads dagger/src/index.ts.
+ * verify; it is not restated here. dagger/src/index.ts is read once, by a
+ * negative guard: its `liveSuite` must hand the runner to that script and
+ * hold no second way of running one.
  *
  * A test runner exits 0 when it skips a case, so most runners read their own
  * report after the suite and refuse a run in which a case was skipped or none
@@ -38,6 +42,12 @@ import { dirname, join, resolve as pathResolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain .mjs report script, no type declarations
 import { buildReport } from "../scripts/live-coverage-report.mjs";
+// @ts-expect-error — plain .mjs repo-gates script, no type declarations
+import { runnerArgv } from "../../repo-gates/run-live-suite.mjs";
+// @ts-expect-error — plain .mjs repo-gates script, no type declarations
+import { LIVE_WRAPPER } from "../../repo-gates/select-sdks.mjs";
+// @ts-expect-error — plain .mjs repo-gates script, no type declarations
+import { LIVE_SCRIPT } from "../../repo-gates/verify-workflows.mjs";
 import { OUTCOMES, RUNNER_COUNT_FAKES, type Fake, type Outcome } from "./live-runner-fakes.js";
 
 const repoRoot = pathResolve(fileURLToPath(import.meta.url), "../../../..");
@@ -50,7 +60,7 @@ type Sdk = {
 };
 const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as { sdks: Sdk[] };
 const live = manifest.sdks.filter((s) => s.liveSuite !== undefined);
-const WRAPPER = "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
+const WRAPPER = LIVE_WRAPPER as string;
 
 describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
   it("declares at least one live suite", () => {
@@ -97,8 +107,8 @@ describe("dagger/sdk-manifest.json live suites (#783, #918)", () => {
 
 /**
  * Run one live runner's `<cmd>` — the runner minus the wrapper, which only
- * boots the harness — the way Dagger's `live-suite` and run-live-suite.mjs
- * run a runner (`bash -euo pipefail -c`), in a sandbox laid out like the
+ * boots the harness — the way run-live-suite.mjs runs a runner (its
+ * `runnerArgv`, on both paths), in a sandbox laid out like the
  * repository, with `fake` standing in for the SDK's toolchain. The runner's
  * absolute scratch paths (`/tmp/…`, `/cache/…`) are moved into the sandbox so
  * nothing outside it is written; nothing else in the string is touched.
@@ -127,7 +137,7 @@ function runWithFake(
     .liveSuite!.runner.slice(WRAPPER.length)
     .replaceAll("/tmp/", `${box}/tmp/`)
     .replaceAll("/cache/", `${box}/cache/`);
-  const r = spawnSync("bash", ["-euo", "pipefail", "-c", cmd], {
+  const r = spawnSync("bash", runnerArgv(cmd) as string[], {
     cwd: box,
     encoding: "utf-8",
     env: { PATH: `${bin}:/usr/bin:/bin`, HOME: box, STUB_OUTCOME: outcome },
@@ -170,4 +180,127 @@ describe("each runner's count check refuses a skipped case and an empty run (#92
     if (outcome === "pass") expect(status, out).toBe(0);
     else expect(status, `${outcome} passed:\n${out}`).not.toBe(0);
   });
+});
+
+/**
+ * Dagger's `liveSuite` runs no runner of its own: it hands the SDK to
+ * tools/repo-gates/run-live-suite.mjs, the one implementation, and passes its
+ * exit code through. dagger/src/index.ts cannot be imported outside the
+ * engine, so this reads its text, as a negative guard: each finding names a
+ * second way of finding or running a runner, or a softened exec that would let
+ * the script's exit 2 (a refused runner) or a red suite pass. A new spelling
+ * can dodge a text guard; the positive proof is every Dagger live leg in CI.
+ * Comment lines are not code and are skipped.
+ */
+const DAGGER_MODULE = pathResolve(repoRoot, "dagger/src/index.ts");
+const LIVE_SUITE_HEAD = /async liveSuite\([^)]*\)[^{]*\{/g;
+const codeOf = (text: string): string =>
+  text
+    .split("\n")
+    .filter((line) => !/^\s*(?:\/\/|\/\*|\*)/.test(line))
+    .join("\n");
+
+/** `liveSuite`'s body in `src`, brace-matched; it must be declared exactly once. */
+function liveSuiteBody(src: string): string {
+  const heads = [...src.matchAll(LIVE_SUITE_HEAD)];
+  if (heads.length !== 1) throw new Error(`liveSuite is declared ${heads.length} times, not once`);
+  const open = heads[0]!.index + heads[0]![0].length - 1;
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return src.slice(open + 1, i);
+  }
+  throw new Error("liveSuite's body never closes");
+}
+
+/** Every way `src`'s liveSuite departs from "run the one script, exit code passed through". */
+function liveSuiteProblems(src: string): string[] {
+  const out: string[] = [];
+  const body = codeOf(liveSuiteBody(src));
+  const execs = [...body.matchAll(/withExec\(\s*\[([^\]]*)\]/g)].map((m) => {
+    try {
+      return JSON.stringify(JSON.parse(`[${m[1]}]`));
+    } catch {
+      return m[1]!.trim(); // not literal strings: never the script's argv
+    }
+  });
+  const script = JSON.stringify(["node", LIVE_SCRIPT]);
+  if (execs.length === 0 || execs.some((argv) => argv !== script))
+    out.push(`liveSuite execs something other than ${script}: ${execs.join(", ") || "nothing"}`);
+  if (/\.runner\b/.test(codeOf(src))) out.push("dagger/src/index.ts reads a .runner");
+  if (/pipefail/.test(body)) out.push("liveSuite hands bash a runner (-euo pipefail)");
+  for (const [word, re] of [
+    ["expect", /\bexpect\b/],
+    ["ReturnType", /\bReturnType\b/],
+    ["exitCode(", /\bexitCode\(/],
+    ["catch", /\bcatch\b/],
+  ] as const)
+    if (re.test(body)) out.push(`liveSuite softens its exec: ${word}`);
+  if (/\.test\(/.test(body)) out.push("liveSuite judges the SDK name itself");
+  return out;
+}
+
+describe("Dagger's liveSuite runs run-live-suite.mjs and nothing else (FR-006)", () => {
+  const src = readFileSync(DAGGER_MODULE, "utf-8");
+  const inBody = (from: string, to: string) => (text: string) => {
+    const body = liveSuiteBody(text);
+    return text.replace(body, body.replace(from, to));
+  };
+  const SCRIPT_EXEC = `.withExec(["node", "${LIVE_SCRIPT as string}"])`;
+
+  it("the real module has none of the findings, and execs exactly node LIVE_SCRIPT", () => {
+    expect(liveSuiteProblems(src)).toEqual([]);
+    expect(liveSuiteBody(src)).toContain(SCRIPT_EXEC);
+  });
+
+  // MUTATION M7, one row each: applied to a copy of the source, never committed.
+  it.each([
+    [
+      "the script literal is not LIVE_SCRIPT",
+      inBody(`"${LIVE_SCRIPT as string}"`, '"tools/repo-gates/run-live-suite.js"'),
+      /execs something other than/,
+    ],
+    [
+      "a runner lookup (.runner) anywhere in the module",
+      (t: string) => t.replace("@object()", "const r = sdks[0]?.liveSuite?.runner;\n@object()"),
+      /reads a \.runner/,
+    ],
+    [
+      "a runner bash pipefail argv in liveSuite (any spelling)",
+      inBody(".stdout()", '.withExec(["bash", "-eu", "-o", "pipefail", "-c", runner]).stdout()'),
+      /hands bash a runner/,
+    ],
+    [
+      "an exec with expect",
+      inBody(SCRIPT_EXEC, SCRIPT_EXEC.replace("])", '], { expect: "ANY" })')),
+      /softens its exec: expect$/,
+    ],
+    [
+      "a ReturnType in liveSuite",
+      inBody("const result", "void ReturnType;\n    const result"),
+      /softens its exec: ReturnType$/,
+    ],
+    ["an exitCode() read", inBody(".stdout()", ".exitCode()"), /softens its exec: exitCode\($/],
+    ["a catch", inBody(".stdout()", '.stdout().catch(() => "")'), /softens its exec: catch$/],
+    [
+      "an SDK-name check of its own",
+      inBody(
+        "const container",
+        'if (!/^[a-z]+$/.test(sdk)) throw new Error("no");\n    const container',
+      ),
+      /judges the SDK name itself/,
+    ],
+  ])("refuses %s", (_what, mutate, re) => {
+    const mutated = mutate(src);
+    expect(mutated, "the mutation did not apply").not.toBe(src);
+    expect(
+      liveSuiteProblems(mutated).some((p) => re.test(p)),
+      liveSuiteProblems(mutated).join("\n"),
+    ).toBe(true);
+  });
+
+  it("refuses a module where liveSuite cannot be found", () =>
+    expect(() => liveSuiteProblems(src.replace(LIVE_SUITE_HEAD, "async liveSuites() {"))).toThrow(
+      /declared 0 times/,
+    ));
 });

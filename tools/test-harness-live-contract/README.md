@@ -136,10 +136,10 @@ release-time `contract-live.yml` matrix it replaces is retired). **To add an SDK
 `liveSuite` in `dagger/sdk-manifest.json` (`runner`, `path`, and `toolchain`: the id of the live
 toolchain recipe in `dagger/src/index.ts` that builds its container, adding a recipe there when
 none fits): no workflow edit. `pnpm run verify` refuses a Dagger SDK's live suite that names no
-`toolchain`. Swift, which no Dagger container can build, runs
-its `runner` natively in the macOS job after its precheck, through
-`tools/repo-gates/run-live-suite.mjs` (#924): the harness starts there on the darwin workerd the
-workspace install brings. Every `runner` goes through the harness wrapper
+`toolchain`. Every `runner` is run by `tools/repo-gates/run-live-suite.mjs`, the one
+implementation: Dagger's `live-suite` runs it in the SDK's live container, and Swift, which no
+Dagger container can build, runs it natively in the macOS job after its precheck (#924), where the
+harness starts on the darwin workerd the workspace install brings. Every `runner` goes through the harness wrapper
 (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
 live suite never passes by skipping (#783). Its `--corpus-seed` declares the cases the suite must
 exercise, every seeded corpus case, and `--exec` fails a suite that exits 0 having sent no request
