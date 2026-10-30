@@ -1,0 +1,8 @@
+# The engine image CI runs (#868), by its OCI index digest: a moved tag cannot
+# swap the container that executes the suites. Its anchor is this repository.
+# Exactly one line, for the dagger/dagger.json engineVersion, as
+# `<engineVersion>  sha256:<64 hex>`. On an engine bump, replace it with the
+# new version's index digest (`docker buildx imagetools inspect
+# registry.dagger.io/engine:<version>`), cross-checked with `crane digest`.
+# .github/actions/dagger-setup hands it to the CLI as its runner host.
+v0.21.10  sha256:2a7c054e0864e297671c24a0726ebf1c9747d70291b8843b1726daaff200a334

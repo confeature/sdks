@@ -44,6 +44,14 @@ describe("findDuplicateKeys", () => {
   it("throws on a malformed object", () => {
     expect(() => findDuplicateKeys('{"a" 1}')).toThrow(/Expected ':'/);
   });
+
+  it("throws on input cut short, wherever it stops (#870 item 7)", () => {
+    // MUTATION (applied, #870): drop the final JSON.parse and every one of
+    // these reads as clean ([]) — the gate passed a truncated file.
+    for (const cut of ['{"a": 1', '{"a": "x', '{"a": [1, 2', '{"a": {"b": 1}', '{"a": 1,']) {
+      expect(() => findDuplicateKeys(cut), cut).toThrow();
+    }
+  });
 });
 
 describe("the CLI", () => {
@@ -61,9 +69,11 @@ describe("the CLI", () => {
     writeFileSync(join(dir, "ok.json"), '{"a": 1}');
     writeFileSync(join(dir, "dup.json"), '{"a": 1, "a": 2}');
     writeFileSync(join(dir, "bad.json"), '{"a" 1}');
+    writeFileSync(join(dir, "cut.json"), '{"scripts": {"a": "x"');
     expect(run("ok.json")).toBe(0);
     expect(run("ok.json", "dup.json")).toBe(1);
     expect(run("bad.json")).toBe(2);
+    expect(run("cut.json")).toBe(2);
     expect(run("missing.json")).toBe(2);
     expect(run()).toBe(2);
   });

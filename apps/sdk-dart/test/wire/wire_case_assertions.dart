@@ -43,16 +43,54 @@ const Set<String> _knownExpected = {
 String wireFixturesDir() =>
     '${findWorkspaceRoot()}/packages/test-fixtures-sdk-parity/fixtures';
 
-/// The corpus's cases, in file order. Throws when it carries none.
+/// The corpus's cases this reader runs, in file order. Throws when it
+/// carries none. A case pending for sdk-dart (`wire-cases-pending.json`,
+/// 1.4, #994) is left out BY NAME, under a proof that the entry is still
+/// true: this reader still cannot read it. The day it can, loading throws
+/// and the entry must go.
 List<Map<String, dynamic>> loadWireCases() {
   final raw = File('${wireFixturesDir()}/wire-cases.json').readAsStringSync();
   final corpus = jsonDecode(raw) as Map<String, dynamic>;
-  final cases = (corpus['cases'] as List).cast<Map<String, dynamic>>();
+  final all = (corpus['cases'] as List).cast<Map<String, dynamic>>();
+  final pending = pendingWireCases();
+  final ids = all.map((c) => c['id'] as String).toSet();
+  final missing = pending.keys.where((id) => !ids.contains(id)).toList();
+  if (missing.isNotEmpty) {
+    throw StateError(
+        'wire-cases-pending.json lists $missing for sdk-dart, not in the corpus');
+  }
+  for (final c in all.where((c) => pending.containsKey(c['id']))) {
+    if (unreadFields(c).isEmpty) {
+      throw StateError(
+          "${c['id']} is pending for sdk-dart (${pending[c['id']]}) but this "
+          'reader reads every field of it — remove it from wire-cases-pending.json and run it');
+    }
+  }
+  final cases = all.where((c) => !pending.containsKey(c['id'])).toList();
   if (cases.isEmpty) {
     throw StateError('wire-cases.json MUST ship at least one case');
   }
   return cases;
 }
+
+/// sdk-dart's entry of `wire-cases-pending.json`: case id -> ticket.
+Map<String, String> pendingWireCases() {
+  final raw =
+      File('${wireFixturesDir()}/wire-cases-pending.json').readAsStringSync();
+  final entry = ((jsonDecode(raw) as Map<String, dynamic>)['pending']
+      as Map<String, dynamic>)['sdk-dart'] as Map<String, dynamic>?;
+  if (entry == null) return {};
+  return {
+    for (final id in (entry['cases'] as List).cast<String>())
+      id: entry['ticket'] as String
+  };
+}
+
+/// The `given` / `expected` fields of a case this reader does not read.
+List<String> unreadFields(Map<String, dynamic> c) => [
+      ..._given(c).keys.toSet().difference(_knownGiven),
+      ..._expected(c).keys.toSet().difference(_knownExpected),
+    ];
 
 /// The request the fetcher sent, as the suite observed it.
 final class SentRequest {

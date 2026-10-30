@@ -88,14 +88,12 @@ bool sensitiveTextEquals(const std::string& text, const std::string& comparisonV
 bool sensitiveTextIsOneOf(const std::string& text, const std::vector<std::string>& values,
                           const std::string& configSalt, const std::string& contextSalt,
                           bool negate);
-bool sensitiveTextSliceEqualsAnyOf(const std::string& text,
-                                   const std::vector<std::string>& values,
+bool sensitiveTextSliceEqualsAnyOf(const std::string& text, const std::vector<std::string>& values,
                                    const std::string& configSalt, const std::string& contextSalt,
                                    bool startsWith, bool negate);
 
 // ── Semver ─────────────────────────────────────────────────────────────────
-bool semVerIsOneOf(const std::string& version, const std::vector<std::string>& values,
-                   bool negate);
+bool semVerIsOneOf(const std::string& version, const std::vector<std::string>& values, bool negate);
 bool semVerRelation(const std::string& version, int comparator, const std::string& comparisonValue);
 
 // ── Number ─────────────────────────────────────────────────────────────────

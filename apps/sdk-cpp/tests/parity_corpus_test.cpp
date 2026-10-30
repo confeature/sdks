@@ -192,8 +192,7 @@ TEST_CASE("parity corpus typed — 13 tuples byte-identical across SDKs", "[pari
       // tuple 8: defaultValue=1, expected=0 against a t=3 setting).
       // Pass the underlying double cast to int — the override-eval /
       // evaluator decision tree handles the type mismatch.
-      const int def = defaultJson.is_number() ? static_cast<int>(defaultJson.get<double>())
-                                              : (defaultJson.is_boolean() ? 0 : 0);
+      const int def = defaultJson.is_number() ? static_cast<int>(defaultJson.get<double>()) : 0;
       // Special-case TYPE_MISMATCH tuple where the default is a string
       // — getValue<int> would otherwise force-cast to 0, which the
       // expected value matches by coincidence. Skip the typed dispatch
@@ -203,8 +202,7 @@ TEST_CASE("parity corpus typed — 13 tuples byte-identical across SDKs", "[pari
         REQUIRE(v == expected.get<int>());
       }
     } else if (expected.is_number_float()) {
-      const double def =
-          defaultJson.is_number() ? defaultJson.get<double>() : 0.0;
+      const double def = defaultJson.is_number() ? defaultJson.get<double>() : 0.0;
       if (defaultJson.is_number()) {
         const auto v = snapshot.getValue<double>(key, def, user.get());
         REQUIRE(v == expected.get<double>());

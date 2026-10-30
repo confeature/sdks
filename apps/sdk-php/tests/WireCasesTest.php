@@ -80,6 +80,26 @@ final class WireCasesTest extends TestCase
     /**
      * @param array<string, mixed> $case
      */
+    /**
+     * A pending case is reported by name, never dropped (1.4, #994); its
+     * proof (this reader still cannot read it) runs in loadWireCases.
+     */
+    public function testPendingWireCasesAreNamed(): void
+    {
+        $pending = self::pendingWireCases();
+        self::loadWireCases();
+        if ($pending === []) {
+            self::assertSame([], $pending);
+
+            return;
+        }
+        self::markTestSkipped('pending: ' . implode(', ', array_map(
+            static fn (string $id, string $ticket): string => "{$id} ({$ticket})",
+            array_keys($pending),
+            $pending,
+        )));
+    }
+
     #[DataProvider('wireCases')]
     public function testWireCase(array $case): void
     {

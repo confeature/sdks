@@ -17,8 +17,7 @@ TEST_CASE("sha1Hex matches the known vector", "[hashing]") {
 }
 
 TEST_CASE("sha256Hex matches the known vector", "[hashing]") {
-  REQUIRE(sha256Hex("abc") ==
-          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  REQUIRE(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
 TEST_CASE("percentageBucket = parseInt(sha1(key+attr)[0..7],16) % 100", "[hashing]") {

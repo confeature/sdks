@@ -74,8 +74,7 @@ namespace {
 
 // ── 1. Sanity guard — the official SDK headers are on the test path ──
 
-TEST_CASE("configcat-cpp headers are on the test include path",
-          "[api_surface_conformance]") {
+TEST_CASE("configcat-cpp headers are on the test include path", "[api_surface_conformance]") {
   // Compile-time anchor: reference a configcat type so the include
   // path is not dead. If FetchContent ever drops the dependency, the
   // file fails to compile (this assertion is a runtime sentinel
@@ -99,8 +98,8 @@ TEST_CASE("configcat-cpp headers are on the test include path",
 // Confeature side — the four typed `getValue<T>` instantiations.
 using ConfeatureGetValueBool = bool (confeature::ConfeatureClient::*)(
     const std::string&, const bool&, const confeature::User*) const;
-using ConfeatureGetValueInt = int (confeature::ConfeatureClient::*)(
-    const std::string&, const int&, const confeature::User*) const;
+using ConfeatureGetValueInt = int (confeature::ConfeatureClient::*)(const std::string&, const int&,
+                                                                    const confeature::User*) const;
 using ConfeatureGetValueDouble = double (confeature::ConfeatureClient::*)(
     const std::string&, const double&, const confeature::User*) const;
 using ConfeatureGetValueString = std::string (confeature::ConfeatureClient::*)(
@@ -131,17 +130,13 @@ constexpr ConfeatureGetValueString kConfeatureGetValueString =
 // overload set at compile time without ever resolving a symbol the
 // linker needs. The configcat-cpp dependency stays header-only.
 using ConfigCatGetValueBool = bool (configcat::ConfigCatClient::*)(
-    const std::string&, bool,
-    const std::shared_ptr<configcat::ConfigCatUser>&) const;
+    const std::string&, bool, const std::shared_ptr<configcat::ConfigCatUser>&) const;
 using ConfigCatGetValueInt = int32_t (configcat::ConfigCatClient::*)(
-    const std::string&, int32_t,
-    const std::shared_ptr<configcat::ConfigCatUser>&) const;
+    const std::string&, int32_t, const std::shared_ptr<configcat::ConfigCatUser>&) const;
 using ConfigCatGetValueDouble = double (configcat::ConfigCatClient::*)(
-    const std::string&, double,
-    const std::shared_ptr<configcat::ConfigCatUser>&) const;
+    const std::string&, double, const std::shared_ptr<configcat::ConfigCatUser>&) const;
 using ConfigCatGetValueString = std::string (configcat::ConfigCatClient::*)(
-    const std::string&, const std::string&,
-    const std::shared_ptr<configcat::ConfigCatUser>&) const;
+    const std::string&, const std::string&, const std::shared_ptr<configcat::ConfigCatUser>&) const;
 
 // Pure type-only static_asserts — these never ODR-use the configcat
 // methods. The cast resolves the overload set at compile time; if the
@@ -172,23 +167,20 @@ static_assert(std::is_same_v<decltype(static_cast<ConfigCatGetValueString>(
 // (DIVERGENCE-BY-DESIGN: ConfigCat spells the refresh `forceRefresh`
 // too — so this is the rare case where the verbatim spelling matches).
 using ConfeatureForceRefresh = bool (confeature::ConfeatureClient::*)();
-using ConfigCatForceRefresh = configcat::RefreshResult (
-    configcat::ConfigCatClient::*)();
+using ConfigCatForceRefresh = configcat::RefreshResult (configcat::ConfigCatClient::*)();
 
 constexpr ConfeatureForceRefresh kConfeatureForceRefresh =
     &confeature::ConfeatureClient::forceRefresh;
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::forceRefresh),
-                             ConfigCatForceRefresh>,
-              "configcat::ConfigCatClient::forceRefresh signature drifted");
+static_assert(
+    std::is_same_v<decltype(&configcat::ConfigCatClient::forceRefresh), ConfigCatForceRefresh>,
+    "configcat::ConfigCatClient::forceRefresh signature drifted");
 
 // Snapshot — present on Confeature; ConfigCat has no direct analogue
 // (it exposes settings via `getKeyAndValue` / `getAllValues`).
 // Confeature's `Snapshot` is itself a DIVERGENCE-BY-DESIGN (spec 036 —
 // synchronous override correctness).
-using ConfeatureSnapshot =
-    confeature::Snapshot (confeature::ConfeatureClient::*)() const;
-constexpr ConfeatureSnapshot kConfeatureSnapshot =
-    &confeature::ConfeatureClient::snapshot;
+using ConfeatureSnapshot = confeature::Snapshot (confeature::ConfeatureClient::*)() const;
+constexpr ConfeatureSnapshot kConfeatureSnapshot = &confeature::ConfeatureClient::snapshot;
 
 // getAllKeys — Spec 077 / #269 — landed on both surfaces. ConfigCat
 // returns `std::vector<std::string>`; Confeature mirrors the same
@@ -197,12 +189,10 @@ constexpr ConfeatureSnapshot kConfeatureSnapshot =
 // via member-function-pointer aliases: the Confeature pointer is ODR-
 // used at runtime (kConfeatureGetAllKeys != nullptr) and the ConfigCat
 // pointer-type stays header-only via static_assert.
-using ConfeatureGetAllKeys =
-    std::vector<std::string> (confeature::ConfeatureClient::*)() const;
+using ConfeatureGetAllKeys = std::vector<std::string> (confeature::ConfeatureClient::*)() const;
 using ConfigCatGetAllKeysConforming =
     std::vector<std::string> (configcat::ConfigCatClient::*)() const;
-constexpr ConfeatureGetAllKeys kConfeatureGetAllKeys =
-    &confeature::ConfeatureClient::getAllKeys;
+constexpr ConfeatureGetAllKeys kConfeatureGetAllKeys = &confeature::ConfeatureClient::getAllKeys;
 static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getAllKeys),
                              ConfigCatGetAllKeysConforming>,
               "configcat::ConfigCatClient::getAllKeys signature drifted from "
@@ -226,21 +216,19 @@ constexpr ConfeatureClose kConfeatureClose = &confeature::ConfeatureClient::clos
 // `std::unordered_map<std::string, configcat::Value>` — both are
 // keyed-string heterogeneous-value maps (DIVERGENCE-BY-DESIGN: the
 // value-variant type is per-SDK idiomatic).
-using ConfeatureGetValueDetailsBool =
-    confeature::EvaluationDetails<bool> (confeature::ConfeatureClient::*)(
-        const std::string&, const bool&, const confeature::User*) const;
-using ConfeatureGetValueDetailsInt =
-    confeature::EvaluationDetails<int> (confeature::ConfeatureClient::*)(
-        const std::string&, const int&, const confeature::User*) const;
-using ConfeatureGetValueDetailsDouble =
-    confeature::EvaluationDetails<double> (confeature::ConfeatureClient::*)(
-        const std::string&, const double&, const confeature::User*) const;
-using ConfeatureGetValueDetailsString =
-    confeature::EvaluationDetails<std::string> (confeature::ConfeatureClient::*)(
-        const std::string&, const std::string&, const confeature::User*) const;
-using ConfeatureGetAllValues =
-    std::unordered_map<std::string, nlohmann::json> (
-        confeature::ConfeatureClient::*)(const confeature::User*) const;
+using ConfeatureGetValueDetailsBool = confeature::EvaluationDetails<bool> (
+    confeature::ConfeatureClient::*)(const std::string&, const bool&,
+                                     const confeature::User*) const;
+using ConfeatureGetValueDetailsInt = confeature::EvaluationDetails<int> (
+    confeature::ConfeatureClient::*)(const std::string&, const int&, const confeature::User*) const;
+using ConfeatureGetValueDetailsDouble = confeature::EvaluationDetails<double> (
+    confeature::ConfeatureClient::*)(const std::string&, const double&,
+                                     const confeature::User*) const;
+using ConfeatureGetValueDetailsString = confeature::EvaluationDetails<std::string> (
+    confeature::ConfeatureClient::*)(const std::string&, const std::string&,
+                                     const confeature::User*) const;
+using ConfeatureGetAllValues = std::unordered_map<std::string, nlohmann::json> (
+    confeature::ConfeatureClient::*)(const confeature::User*) const;
 
 constexpr ConfeatureGetValueDetailsBool kConfeatureGetValueDetailsBool =
     &confeature::ConfeatureClient::getValueDetails<bool>;
@@ -254,20 +242,18 @@ constexpr ConfeatureGetAllValues kConfeatureGetAllValues =
     &confeature::ConfeatureClient::getAllValues;
 
 // ConfigCat-side pins — type-only, header-only (no ODR-use).
-using ConfigCatGetValueDetailsBoolConforming =
-    configcat::EvaluationDetails<bool> (configcat::ConfigCatClient::*)(
-        const std::string&, bool,
-        const std::shared_ptr<configcat::ConfigCatUser>&) const;
-static_assert(
-    std::is_same_v<decltype(static_cast<ConfigCatGetValueDetailsBoolConforming>(
-                       &configcat::ConfigCatClient::getValueDetails)),
-                   ConfigCatGetValueDetailsBoolConforming>,
-    "configcat::ConfigCatClient::getValueDetails(string, bool, user) drifted "
-    "— re-evaluate the parity target");
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getAllValues),
-                             std::unordered_map<std::string, configcat::Value> (
-                                 configcat::ConfigCatClient::*)(
-                                 const std::shared_ptr<configcat::ConfigCatUser>&) const>,
+using ConfigCatGetValueDetailsBoolConforming = configcat::EvaluationDetails<bool> (
+    configcat::ConfigCatClient::*)(const std::string&, bool,
+                                   const std::shared_ptr<configcat::ConfigCatUser>&) const;
+static_assert(std::is_same_v<decltype(static_cast<ConfigCatGetValueDetailsBoolConforming>(
+                                 &configcat::ConfigCatClient::getValueDetails)),
+                             ConfigCatGetValueDetailsBoolConforming>,
+              "configcat::ConfigCatClient::getValueDetails(string, bool, user) drifted "
+              "— re-evaluate the parity target");
+static_assert(std::is_same_v<
+                  decltype(&configcat::ConfigCatClient::getAllValues),
+                  std::unordered_map<std::string, configcat::Value> (configcat::ConfigCatClient::*)(
+                      const std::shared_ptr<configcat::ConfigCatUser>&) const>,
               "configcat::ConfigCatClient::getAllValues signature drifted");
 
 TEST_CASE("Confeature client carries the core ConfigCat evaluation surface",
@@ -288,9 +274,10 @@ TEST_CASE("Confeature client carries the core ConfigCat evaluation surface",
   // static_cast<Alias>(&Class::method)), Alias>)` above. The asserts
   // ran at compile time; reaching this point already proves the
   // overload set resolves.
-  INFO("ConfigCat-side typed getValue<T> overloads — 4 overloads pinned via "
-       "compile-time static_assert (no symbol ODR-use → no link "
-       "dependency on configcat-cpp).");
+  INFO(
+      "ConfigCat-side typed getValue<T> overloads — 4 overloads pinned via "
+      "compile-time static_assert (no symbol ODR-use → no link "
+      "dependency on configcat-cpp).");
 
   // forceRefresh + snapshot + close (Confeature side, ODR-used).
   REQUIRE(kConfeatureForceRefresh != nullptr);
@@ -309,9 +296,10 @@ TEST_CASE("Confeature client carries the core ConfigCat evaluation surface",
   REQUIRE(kConfeatureGetValueDetailsString != nullptr);
   REQUIRE(kConfeatureGetAllValues != nullptr);
 
-  INFO("Core conformance: 4 typed getValue<T> + 4 typed getValueDetails<T> + "
-       "forceRefresh + snapshot + close + getAllKeys + getAllValues pinned "
-       "compile-time on both surfaces.");
+  INFO(
+      "Core conformance: 4 typed getValue<T> + 4 typed getValueDetails<T> + "
+      "forceRefresh + snapshot + close + getAllKeys + getAllValues pinned "
+      "compile-time on both surfaces.");
   SUCCEED();
 }
 
@@ -330,8 +318,7 @@ TEST_CASE("Confeature client carries the core ConfigCat evaluation surface",
 // design is per-instance with explicit polling-mode wiring; the
 // ConfigCat design is a global singleton registry.
 
-using ConfeatureCreate = std::shared_ptr<confeature::ConfeatureClient> (*)(
-    const std::string&);
+using ConfeatureCreate = std::shared_ptr<confeature::ConfeatureClient> (*)(const std::string&);
 using ConfeatureBuilder = confeature::ConfeatureClientBuilder (*)(std::string);
 using ConfigCatGet = std::shared_ptr<configcat::ConfigCatClient> (*)(
     const std::string&, const configcat::ConfigCatOptions*);
@@ -340,19 +327,19 @@ constexpr ConfeatureCreate kConfeatureCreate = &confeature::ConfeatureClient::cr
 constexpr ConfeatureBuilder kConfeatureBuilder = &confeature::ConfeatureClient::builder;
 
 // ConfigCat side — type-only pin (no ODR-use; header-only consumption).
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::get),
-                             ConfigCatGet>,
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::get), ConfigCatGet>,
               "configcat::ConfigCatClient::get(sdkKey, options*) signature "
               "drifted — re-evaluate the parity target");
 
 TEST_CASE("constructor shape diverges by design", "[api_surface_conformance]") {
   REQUIRE(kConfeatureCreate != nullptr);
   REQUIRE(kConfeatureBuilder != nullptr);
-  INFO("DIVERGENCE-BY-DESIGN: Confeature exposes "
-       "ConfeatureClient::create(sdkKey) + ConfeatureClient::builder(sdkKey); "
-       "ConfigCat exposes ConfigCatClient::get(sdkKey, options*) (pinned "
-       "compile-time via static_assert). The Confeature design is "
-       "per-instance with fluent wiring (spec 071 §research §R1).");
+  INFO(
+      "DIVERGENCE-BY-DESIGN: Confeature exposes "
+      "ConfeatureClient::create(sdkKey) + ConfeatureClient::builder(sdkKey); "
+      "ConfigCat exposes ConfigCatClient::get(sdkKey, options*) (pinned "
+      "compile-time via static_assert). The Confeature design is "
+      "per-instance with fluent wiring (spec 071 §research §R1).");
   SUCCEED();
 }
 
@@ -376,59 +363,51 @@ TEST_CASE("constructor shape diverges by design", "[api_surface_conformance]") {
 template <typename T, typename = void>
 struct has_get_all_value_details : std::false_type {};
 template <typename T>
-struct has_get_all_value_details<
-    T, std::void_t<decltype(std::declval<const T&>().getAllValueDetails(
-           std::declval<const confeature::User*>()))>> : std::true_type {};
+struct has_get_all_value_details<T,
+                                 std::void_t<decltype(std::declval<const T&>().getAllValueDetails(
+                                     std::declval<const confeature::User*>()))>> : std::true_type {
+};
 
 template <typename T, typename = void>
 struct has_get_key_and_value : std::false_type {};
 template <typename T>
-struct has_get_key_and_value<
-    T, std::void_t<decltype(std::declval<const T&>().getKeyAndValue(
-           std::declval<const std::string&>()))>> : std::true_type {};
+struct has_get_key_and_value<T, std::void_t<decltype(std::declval<const T&>().getKeyAndValue(
+                                    std::declval<const std::string&>()))>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_set_online : std::false_type {};
 template <typename T>
-struct has_set_online<
-    T, std::void_t<decltype(std::declval<T&>().setOnline())>>
-    : std::true_type {};
+struct has_set_online<T, std::void_t<decltype(std::declval<T&>().setOnline())>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_set_offline : std::false_type {};
 template <typename T>
-struct has_set_offline<
-    T, std::void_t<decltype(std::declval<T&>().setOffline())>>
-    : std::true_type {};
+struct has_set_offline<T, std::void_t<decltype(std::declval<T&>().setOffline())>> : std::true_type {
+};
 
 template <typename T, typename = void>
 struct has_is_offline : std::false_type {};
 template <typename T>
-struct has_is_offline<
-    T, std::void_t<decltype(std::declval<const T&>().isOffline())>>
+struct has_is_offline<T, std::void_t<decltype(std::declval<const T&>().isOffline())>>
     : std::true_type {};
 
 template <typename T, typename = void>
 struct has_set_default_user : std::false_type {};
 template <typename T>
-struct has_set_default_user<
-    T, std::void_t<decltype(std::declval<T&>().setDefaultUser(
-           std::declval<const std::shared_ptr<confeature::User>&>()))>>
+struct has_set_default_user<T, std::void_t<decltype(std::declval<T&>().setDefaultUser(
+                                   std::declval<const std::shared_ptr<confeature::User>&>()))>>
     : std::true_type {};
 
 template <typename T, typename = void>
 struct has_clear_default_user : std::false_type {};
 template <typename T>
-struct has_clear_default_user<
-    T, std::void_t<decltype(std::declval<T&>().clearDefaultUser())>>
+struct has_clear_default_user<T, std::void_t<decltype(std::declval<T&>().clearDefaultUser())>>
     : std::true_type {};
 
 template <typename T, typename = void>
 struct has_get_hooks : std::false_type {};
 template <typename T>
-struct has_get_hooks<
-    T, std::void_t<decltype(std::declval<T&>().getHooks())>>
-    : std::true_type {};
+struct has_get_hooks<T, std::void_t<decltype(std::declval<T&>().getHooks())>> : std::true_type {};
 
 // Compile-time pins — ABSENCE on confeature::ConfeatureClient.
 // NOTE: `getValueDetails<T>` + `getAllValues` ABSENT static_asserts removed
@@ -477,16 +456,13 @@ constexpr DivergenceEntry KNOWN_DIVERGENCES_264[] = {
     // confeature::ConfeatureClient and is pinned PRESENT via
     // `kConfeatureGetAllKeys` above.
     {"getAllValueDetails", "#264 — bulk evaluate all flags + details"},
-    {"getKeyAndValue",
-     "#264 — variation-ID → (key, value) reverse lookup"},
+    {"getKeyAndValue", "#264 — variation-ID → (key, value) reverse lookup"},
     // NOTE: `setOnline` / `setOffline` / `isOffline` moved out under spec
     // 096 / #267 slice 7/14 — all three landed on confeature::ConfeatureClient
     // and are pinned PRESENT via the `has_set_online` / `has_set_offline` /
     // `has_is_offline` static_asserts above.
-    {"setDefaultUser",
-     "#264 — mutable default-user (Confeature wires via builder.defaultUser)"},
-    {"clearDefaultUser",
-     "#264 — mutable default-user (Confeature wires via builder.defaultUser)"},
+    {"setDefaultUser", "#264 — mutable default-user (Confeature wires via builder.defaultUser)"},
+    {"clearDefaultUser", "#264 — mutable default-user (Confeature wires via builder.defaultUser)"},
     // NOTE: `getHooks` moved out under spec 111 / #268 slice 7 — the method landed on
     // confeature::ConfeatureClient and is pinned PRESENT via the `has_get_hooks` static_assert.
 };
@@ -504,30 +480,24 @@ constexpr std::size_t kKnownDivergencesCount =
 // ConfigCat removes a method or changes its signature, the static_cast
 // fails to type-check and the file fails to compile.
 using ConfigCatGetValueDetailsBool = configcat::EvaluationDetails<bool> (
-    configcat::ConfigCatClient::*)(
-    const std::string&, bool,
-    const std::shared_ptr<configcat::ConfigCatUser>&) const;
+    configcat::ConfigCatClient::*)(const std::string&, bool,
+                                   const std::shared_ptr<configcat::ConfigCatUser>&) const;
 // NOTE: `ConfigCatGetAllKeys` alias relocated to the conforming
 // section above (spec 077 / #269 — `getAllKeys` is no longer a
 // divergence).
-using ConfigCatGetAllValues =
-    std::unordered_map<std::string, configcat::Value> (
-        configcat::ConfigCatClient::*)(
-        const std::shared_ptr<configcat::ConfigCatUser>&) const;
-using ConfigCatGetAllValueDetails =
-    std::vector<configcat::EvaluationDetails<configcat::Value>> (
-        configcat::ConfigCatClient::*)(
-        const std::shared_ptr<configcat::ConfigCatUser>&) const;
-using ConfigCatGetKeyAndValue = std::optional<configcat::KeyValue> (
-    configcat::ConfigCatClient::*)(const std::string&) const;
+using ConfigCatGetAllValues = std::unordered_map<std::string, configcat::Value> (
+    configcat::ConfigCatClient::*)(const std::shared_ptr<configcat::ConfigCatUser>&) const;
+using ConfigCatGetAllValueDetails = std::vector<configcat::EvaluationDetails<configcat::Value>> (
+    configcat::ConfigCatClient::*)(const std::shared_ptr<configcat::ConfigCatUser>&) const;
+using ConfigCatGetKeyAndValue =
+    std::optional<configcat::KeyValue> (configcat::ConfigCatClient::*)(const std::string&) const;
 using ConfigCatSetOnline = void (configcat::ConfigCatClient::*)();
 using ConfigCatSetOffline = void (configcat::ConfigCatClient::*)();
 using ConfigCatIsOffline = bool (configcat::ConfigCatClient::*)() const;
-using ConfigCatSetDefaultUser = void (configcat::ConfigCatClient::*)(
-    const std::shared_ptr<configcat::ConfigCatUser>&);
+using ConfigCatSetDefaultUser =
+    void (configcat::ConfigCatClient::*)(const std::shared_ptr<configcat::ConfigCatUser>&);
 using ConfigCatClearDefaultUser = void (configcat::ConfigCatClient::*)();
-using ConfigCatGetHooks = std::shared_ptr<configcat::Hooks> (
-    configcat::ConfigCatClient::*)();
+using ConfigCatGetHooks = std::shared_ptr<configcat::Hooks> (configcat::ConfigCatClient::*)();
 
 static_assert(std::is_same_v<decltype(static_cast<ConfigCatGetValueDetailsBool>(
                                  &configcat::ConfigCatClient::getValueDetails)),
@@ -536,36 +506,29 @@ static_assert(std::is_same_v<decltype(static_cast<ConfigCatGetValueDetailsBool>(
               "— re-evaluate divergence list");
 // NOTE: ConfigCat-side `getAllKeys` static_assert relocated to the
 // conforming section above under spec 077 / #269.
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getAllValues),
-                             ConfigCatGetAllValues>,
-              "ConfigCat removed/drifted getAllValues(user)");
 static_assert(
-    std::is_same_v<decltype(&configcat::ConfigCatClient::getAllValueDetails),
-                   ConfigCatGetAllValueDetails>,
-    "ConfigCat removed/drifted getAllValueDetails(user)");
+    std::is_same_v<decltype(&configcat::ConfigCatClient::getAllValues), ConfigCatGetAllValues>,
+    "ConfigCat removed/drifted getAllValues(user)");
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getAllValueDetails),
+                             ConfigCatGetAllValueDetails>,
+              "ConfigCat removed/drifted getAllValueDetails(user)");
 static_assert(
-    std::is_same_v<decltype(&configcat::ConfigCatClient::getKeyAndValue),
-                   ConfigCatGetKeyAndValue>,
+    std::is_same_v<decltype(&configcat::ConfigCatClient::getKeyAndValue), ConfigCatGetKeyAndValue>,
     "ConfigCat removed/drifted getKeyAndValue(variationId)");
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::setOnline),
-                             ConfigCatSetOnline>,
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::setOnline), ConfigCatSetOnline>,
               "ConfigCat removed/drifted setOnline()");
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::setOffline),
-                             ConfigCatSetOffline>,
-              "ConfigCat removed/drifted setOffline()");
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::isOffline),
-                             ConfigCatIsOffline>,
+static_assert(
+    std::is_same_v<decltype(&configcat::ConfigCatClient::setOffline), ConfigCatSetOffline>,
+    "ConfigCat removed/drifted setOffline()");
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::isOffline), ConfigCatIsOffline>,
               "ConfigCat removed/drifted isOffline()");
 static_assert(
-    std::is_same_v<decltype(&configcat::ConfigCatClient::setDefaultUser),
-                   ConfigCatSetDefaultUser>,
+    std::is_same_v<decltype(&configcat::ConfigCatClient::setDefaultUser), ConfigCatSetDefaultUser>,
     "ConfigCat removed/drifted setDefaultUser(user)");
-static_assert(
-    std::is_same_v<decltype(&configcat::ConfigCatClient::clearDefaultUser),
-                   ConfigCatClearDefaultUser>,
-    "ConfigCat removed/drifted clearDefaultUser()");
-static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getHooks),
-                             ConfigCatGetHooks>,
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::clearDefaultUser),
+                             ConfigCatClearDefaultUser>,
+              "ConfigCat removed/drifted clearDefaultUser()");
+static_assert(std::is_same_v<decltype(&configcat::ConfigCatClient::getHooks), ConfigCatGetHooks>,
               "ConfigCat removed/drifted getHooks()");
 
 TEST_CASE("KNOWN DIVERGENCE (#264) — drift-guard against configcat-cpp v4.0.5",
@@ -587,19 +550,18 @@ TEST_CASE("KNOWN DIVERGENCE (#264) — drift-guard against configcat-cpp v4.0.5"
   // above). Reaching this point already proves every pin resolved at
   // compile time — if ConfigCat removed a method, the file would have
   // failed to compile.
-  INFO("ConfigCat-side surface — 10 #264 methods pinned via compile-time "
-       "static_assert (no symbol ODR-use → no link dependency on "
-       "configcat-cpp).");
+  INFO(
+      "ConfigCat-side surface — 10 #264 methods pinned via compile-time "
+      "static_assert (no symbol ODR-use → no link dependency on "
+      "configcat-cpp).");
 
   // Side D — log each divergence so CI summaries surface the gap loudly.
   for (const auto& entry : KNOWN_DIVERGENCES_264) {
-    INFO("KNOWN DIVERGENCE (#264): "
-         << entry.configcat_name << " — " << entry.note);
+    INFO("KNOWN DIVERGENCE (#264): " << entry.configcat_name << " — " << entry.note);
   }
-  INFO("KNOWN DIVERGENCES (#264): "
-       << kKnownDivergencesCount
-       << " methods absent on confeature::ConfeatureClient — "
-          "follow-on scope. (Spec 077 / #269 closed `getAllKeys`.)");
+  INFO("KNOWN DIVERGENCES (#264): " << kKnownDivergencesCount
+                                    << " methods absent on confeature::ConfeatureClient — "
+                                       "follow-on scope. (Spec 077 / #269 closed `getAllKeys`.)");
   SUCCEED();
 }
 
@@ -611,15 +573,15 @@ TEST_CASE("KNOWN DIVERGENCE (#264) — drift-guard against configcat-cpp v4.0.5"
 // one of these surfaces the alignment opportunity.
 
 using ConfeatureIsClosed = bool (confeature::ConfeatureClient::*)() const;
-constexpr ConfeatureIsClosed kConfeatureIsClosed =
-    &confeature::ConfeatureClient::isClosed;
+constexpr ConfeatureIsClosed kConfeatureIsClosed = &confeature::ConfeatureClient::isClosed;
 
 TEST_CASE("Confeature supersets recorded", "[api_surface_conformance]") {
   // Confeature: isClosed() — diagnostic accessor for the close()
   // idempotency contract. ConfigCat has no analogue.
   REQUIRE(kConfeatureIsClosed != nullptr);
-  INFO("Confeature superset: isClosed() (diagnostic for the close() "
-       "idempotency contract — no ConfigCat-cpp analogue).");
+  INFO(
+      "Confeature superset: isClosed() (diagnostic for the close() "
+      "idempotency contract — no ConfigCat-cpp analogue).");
   SUCCEED();
 }
 

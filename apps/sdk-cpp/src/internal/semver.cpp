@@ -2,6 +2,7 @@
 
 #include "internal/semver.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <optional>
@@ -23,8 +24,7 @@ constexpr std::uint64_t kMaxSafeInteger = 9007199254740991ULL;
 const std::regex& fullRe() {
   static const std::string num = "0|[1-9]\\d*";
   static const std::string nonNum = "\\d*[a-zA-Z-][a-zA-Z0-9-]*";
-  static const std::string mainVer =
-      "(" + num + ")\\.(" + num + ")\\.(" + num + ")";
+  static const std::string mainVer = "(" + num + ")\\.(" + num + ")\\.(" + num + ")";
   static const std::string preId = "(?:" + num + "|" + nonNum + ")";
   static const std::string pre = "(?:-(" + preId + "(?:\\." + preId + ")*))";
   static const std::string buildId = "[0-9A-Za-z-]+";
@@ -49,12 +49,8 @@ bool isAllDigits(const std::string& s) {
   if (s.empty()) {
     return false;
   }
-  for (const char c : s) {
-    if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
-      return false;
-    }
-  }
-  return true;
+  return std::all_of(s.begin(), s.end(),
+                     [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
 // Parse a `0|[1-9]\d*` core component to a uint64, rejecting > MAX_SAFE_INTEGER.

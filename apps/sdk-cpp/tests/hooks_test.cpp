@@ -7,6 +7,8 @@
 // Conformance lives in `api_surface_conformance_test.cpp`; this
 // file exercises behaviour.
 
+#include "confeature/hooks.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <string>
@@ -14,7 +16,6 @@
 
 #include "confeature/client.h"
 #include "confeature/flag_overrides.h"
-#include "confeature/hooks.h"
 
 namespace {
 
@@ -34,8 +35,7 @@ std::shared_ptr<confeature::ConfeatureClient> makeLocalOnlyClient() {
 
 }  // namespace
 
-TEST_CASE("Hooks: getHooks returns the same shared instance across calls",
-          "[hooks]") {
+TEST_CASE("Hooks: getHooks returns the same shared instance across calls", "[hooks]") {
   auto client = makeLocalOnlyClient();
   REQUIRE(client != nullptr);
   auto a = client->getHooks();
@@ -56,9 +56,7 @@ TEST_CASE("Hooks: invokeOnConfigChanged passes the settings map", "[hooks]") {
   confeature::Hooks hooks;
   std::unordered_map<std::string, nlohmann::json> captured;
   hooks.addOnConfigChanged(
-      [&captured](const std::unordered_map<std::string, nlohmann::json>& s) {
-        captured = s;
-      });
+      [&captured](const std::unordered_map<std::string, nlohmann::json>& s) { captured = s; });
   std::unordered_map<std::string, nlohmann::json> input;
   input["feature.x"] = nlohmann::json{{"v", true}};
   hooks.invokeOnConfigChanged(input);
@@ -69,10 +67,9 @@ TEST_CASE("Hooks: invokeOnConfigChanged passes the settings map", "[hooks]") {
 TEST_CASE("Hooks: invokeOnFlagEvaluated passes the payload", "[hooks]") {
   confeature::Hooks hooks;
   std::string captured_key;
-  hooks.addOnFlagEvaluated(
-      [&captured_key](const confeature::FlagEvaluatedPayload& payload) {
-        captured_key = payload.key;
-      });
+  hooks.addOnFlagEvaluated([&captured_key](const confeature::FlagEvaluatedPayload& payload) {
+    captured_key = payload.key;
+  });
   confeature::FlagEvaluatedPayload payload;
   payload.key = "feature.dark-mode";
   hooks.invokeOnFlagEvaluated(payload);

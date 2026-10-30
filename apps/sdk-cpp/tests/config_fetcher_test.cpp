@@ -10,8 +10,10 @@
 
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,6 +28,7 @@
 #include "confeature/config_cache.h"
 #include "confeature/polling_mode.h"
 #include "internal/sdk_key.h"
+#include "require_value.h"
 
 using confeature::LogLevel;
 using confeature::internal::buildConfigUrl;
@@ -95,7 +98,10 @@ class MockServer {
       addr.sin_family = AF_INET;
       addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
       addr.sin_port = htons(port_);
-      ::connect(wake, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+      if (::connect(wake, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        // Not fatal: a refused wake means the accept loop already exited.
+        std::cerr << "test server: wake connect failed: " << std::strerror(errno) << '\n';
+      }
       ::close(wake);
     }
     thread_.join();
@@ -315,7 +321,7 @@ TEST_CASE("ConfigFetcher resolves a 200 fetch + captures the ETag", "[config_fet
   REQUIRE(result.status == FetchStatus::Fetched);
   REQUIRE(result.body.has_value());
   REQUIRE(result.etag.has_value());
-  REQUIRE(result.etag.value() == "\"abc123\"");
+  REQUIRE(result.etag == "\"abc123\"");
 
   const auto request = server.lastRequest();
   REQUIRE(request.find("confeature-cpp-sdk/9.9.9") != std::string::npos);
@@ -335,7 +341,7 @@ TEST_CASE("ConfigFetcher routes through If-None-Match for 304", "[config_fetcher
   ConfigFetcher fetcher("confeature-sdk-1-test", "1.0.0", baseUrlFor(server), 5s, nullptr);
   auto result = fetcher.fetch(std::string("\"abc123\""));
   REQUIRE(result.status == FetchStatus::NotModified);
-  REQUIRE(result.etag.value() == "\"abc123\"");
+  REQUIRE(result.etag == "\"abc123\"");
 
   const auto request = server.lastRequest();
   REQUIRE(request.find("If-None-Match: \"abc123\"") != std::string::npos);
@@ -369,7 +375,7 @@ TEST_CASE("ConfigFetcher reports MALFORMED_JSON on garbled body", "[config_fetch
   ConfigFetcher fetcher("confeature-sdk-1-test", "1.0.0", baseUrlFor(server), 5s, nullptr);
   auto result = fetcher.fetch(std::nullopt);
   REQUIRE(result.status == FetchStatus::Failed);
-  REQUIRE(result.error.value() == "MALFORMED_JSON");
+  REQUIRE(result.error == "MALFORMED_JSON");
 }
 
 TEST_CASE("ConfigFetcher sends a legacy key raw, as ConfigCat does", "[config_fetcher]") {
@@ -420,7 +426,7 @@ TEST_CASE("ConfigFetcher never requests /v2/ nor a hash of the key", "[config_fe
   const auto url = buildConfigUrl("https://cdn.example", kConfigCatKey);
   REQUIRE(url == std::string("https://cdn.example/configuration-files/") + kConfigCatKey +
                      "/config_v6.json");
-  REQUIRE(url->find("/v2/") == std::string::npos);
+  REQUIRE(confeature::tests::requireValue(url, "url").find("/v2/") == std::string::npos);
 }
 
 TEST_CASE("ConfigFetcher refuses to fetch for an empty, '.' or '..' key", "[config_fetcher]") {
@@ -482,8 +488,9 @@ TEST_CASE("ConfigFetcher keeps the key out of logs and errors on transport failu
     auto logger = std::make_shared<CapturingLogger>();
     ConfigFetcher fetcher(key, "1.0.0", baseUrlFor(server), 5s, logger);
     // Every response redirects to the key-bearing URL itself.
-    server.setFallback("HTTP/1.1 302 Found\r\nLocation: " + fetcher.url().value() +
-                       "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    server.setFallback(
+        "HTTP/1.1 302 Found\r\nLocation: " + confeature::tests::requireValue(fetcher.url(), "url") +
+        "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     server.start();
     const auto result = fetcher.fetch(std::nullopt);
     server.stop();
@@ -687,7 +694,30 @@ TEST_CASE("a cache entry with an out-of-range number is ignored, never thrown (#
   constructsAndFetchesOver(std::make_shared<FixedCache>("1e400"));
 }
 
-TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)",
-          "[client][cache]") {
+TEST_CASE("a custom cache whose read() throws is a miss, never thrown (#838)", "[client][cache]") {
   constructsAndFetchesOver(std::make_shared<FixedCache>(std::nullopt, /*throws=*/true));
+}
+
+// #826 — ConfigCat reserves no setting key, so the api serves `__proto__` as an
+// ordinary key of config_v6 `f`. A JS SDK once dropped it by copying settings
+// into a plain object; the C++ SDK must keep it from the served bytes on.
+TEST_CASE("a served config_v6 flag keyed __proto__ returns its served value (#826)",
+          "[client][proto-key]") {
+  const std::string body =
+      R"({"p":{"u":"","r":0,"s":"salt"},)"
+      R"("f":{"__proto__":{"t":0,"v":{"b":true},"i":"v-proto","r":[]}},"s":[]})";
+  MockServer server;
+  server.enqueue("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                 std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+  server.start();
+  auto client = confeature::ConfeatureClient::builder(kConfigCatKey)
+                    .pollingMode(confeature::PollingMode::manualPoll())
+                    .baseUrl(baseUrlFor(server))
+                    .cacheDirectory(":memory:")
+                    .logger(std::make_shared<CapturingLogger>())
+                    .build();
+  REQUIRE(client->forceRefresh());
+  REQUIRE(client->getValue<bool>("__proto__", false) == true);
+  client->close();
+  server.stop();
 }

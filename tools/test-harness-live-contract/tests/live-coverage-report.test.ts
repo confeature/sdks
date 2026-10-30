@@ -6,6 +6,8 @@ import { resolve as pathResolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain .mjs report script, no type declarations
 import { buildReport } from "../scripts/live-coverage-report.mjs";
+// @ts-expect-error — plain .mjs repo-gates script, no type declarations
+import { hasLiveSuite } from "../../repo-gates/select-sdks.mjs";
 
 type Row = { sdk: string; live: string; result: string };
 
@@ -60,6 +62,22 @@ describe("buildReport (live-coverage-report)", () => {
     const r = buildReport({ sdks: [{ name: "x", liveSuite: { path: "y" } }] });
     expect(r.covered).toBe(0);
     expect(r.pending).toEqual(["x"]);
+  });
+
+  // MUTATION: give the report its own "is live" test again (a non-blank
+  // runner, say) and the blank runner's row disagrees with its leg: red.
+  // Whether a runner can run is manifestProblems', refused on every verify.
+  it("counts as live exactly the SDKs whose leg is live: select-sdks.mjs's hasLiveSuite", () => {
+    const sdks = [
+      { name: "a", liveSuite: { runner: "x" } },
+      { name: "b", liveSuite: { runner: "   " } },
+      { name: "c", liveSuite: { runner: 5 } },
+      { name: "d", liveSuite: {} },
+      { name: "e" },
+    ];
+    const r = buildReport({ sdks });
+    expect(r.rows.map((x: Row) => x.live === "yes")).toEqual(sdks.map((s) => hasLiveSuite(s)));
+    expect(r.covered).toBe(2);
   });
 
   it("the real manifest: every SDK is covered or exempt, none with no live suite yet (#924)", () => {

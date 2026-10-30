@@ -4,24 +4,28 @@
 // repository is clean, and every rule is seen to fire on a fixture that
 // breaks only that rule.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { rowSnapshots } from "./row-snapshots.mjs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   CREDENTIALED_COMMANDS,
   GATE_WORKFLOWS,
+  LIVE_SCRIPT,
   MANIFEST,
   SETTINGS,
-  WORKFLOWS,
   allFindings,
   findings,
   gateTriggerProblems,
   globMatches,
   publicGateFindings,
+  readLocalActions,
   readScriptOutputs,
+  readWorkflows,
   releaseGateFindings,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
@@ -1796,33 +1800,49 @@ describe("19 the SDK gates' own shape (#793)", () => {
   const REAL = {
     settings: JSON.parse(readFileSync(join(ROOT, SETTINGS), "utf8")),
     manifest: JSON.parse(readFileSync(join(ROOT, MANIFEST), "utf8")),
-    workflows: Object.fromEntries(
-      readdirSync(join(ROOT, WORKFLOWS))
-        .filter((n) => /\.ya?ml$/.test(n))
-        .map((n) => [n, parseYaml(readFileSync(join(ROOT, WORKFLOWS, n), "utf8"))]),
-    ),
+    ...readWorkflows(ROOT),
   };
   const SCRIPTS = readScriptOutputs(ROOT);
-  /** Every finding of the real tree after `mutate`, through the gate's one aggregate. */
+  const report = (t) =>
+    allFindings({ ...t, scriptOutputs: SCRIPTS, actions: readLocalActions(ROOT) }).map(
+      (f) => `${f.file}: ${f.job}: ${f.why}`,
+    );
+  /**
+   * Every finding of the real tree after `mutate`, through the gate's one
+   * aggregate. structuredClone keeps a shared array shared, so a step reached
+   * through `jobs.gate` is gate-known-red's too, as the parsed alias is.
+   */
   const after = (mutate) => {
     const t = structuredClone(REAL);
     mutate({ ...t, doc: t.workflows[G], jobs: t.workflows[G].jobs });
-    return allFindings({ ...t, scriptOutputs: SCRIPTS }).map(
-      (f) => `${f.file}: ${f.job}: ${f.why}`,
-    );
+    return report(t);
   };
+  /**
+   * The same after editing a workflow's TEXT, the one copy a maintainer
+   * edits: the edit must apply, and both the parsed tree and the source the
+   * anchor rule reads are the edited file.
+   */
+  const afterText = (edit, file = G) => {
+    const t = structuredClone(REAL);
+    const text = edit(t.sources[file]);
+    if (text === t.sources[file]) throw new Error(`the edit does not apply to ${file}`);
+    t.sources[file] = text;
+    t.workflows[file] = parseYaml(text);
+    return report(t);
+  };
+  /** Replace exactly one occurrence of `from`; a fixture that no longer applies throws. */
+  const once = (from, to) => (text) => {
+    if (text.split(from).length !== 2) throw new Error(`not exactly one ${JSON.stringify(from)}`);
+    return text.replace(from, () => to);
+  };
+  const ofJob = (got, job) => got.filter((g) => g.startsWith(`${G}: ${job}: `));
   const step = (job, name) => job.steps.find((x) => x.name === name);
   const conclude = (jobs) =>
     step(jobs["sdk-gates"], "Conclude (tools/repo-gates/conclude-sdk-gates.mjs)");
-  const suite = (job) =>
-    job.steps.find((x) => x.name === "Run ${{ matrix.sdk.daggerFn }} (Dagger)");
-  const live = (job) =>
-    job.steps.find((x) => x.name === "Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)");
 
   const precheck = (jobs) =>
     jobs.swift.steps.find((x) => x.run === "bash scripts/swift-precheck.sh");
-  const nativeLive = (jobs) =>
-    jobs.swift.steps.find((x) => x.run === "node tools/repo-gates/run-live-suite.mjs");
+  const nativeLive = (jobs) => jobs.swift.steps.find((x) => x.run === `node ${LIVE_SCRIPT}`);
 
   it("control: the real tree is clean", () => expect(after(() => {})).toEqual([]));
 
@@ -2032,6 +2052,34 @@ describe("19 the SDK gates' own shape (#793)", () => {
       ({ doc }) => void (doc.env._EXPERIMENTAL_DAGGER_CACHE_CONFIG = "type=gha"),
       /sets _EXPERIMENTAL_DAGGER_CACHE_CONFIG: no Dagger cloud or cache configuration/,
     ],
+    // M12: the Xcode pin is scripts/swift-precheck.sh's, and so is what counts
+    // as CI for it. No env: map of the workflow, a job or a step may select
+    // Xcode or change CI mode, and no value may name an Xcode path.
+    ...["DEVELOPER_DIR", "CI", "GITHUB_ACTIONS", "TOOLCHAINS"].flatMap((k) => {
+      const v = { DEVELOPER_DIR: "/Applications/Xcode.app/Contents/Developer", CI: "" }[k] ?? "x";
+      const env = (o) => void (o.env = { ...o.env, [k]: v });
+      const re = (where) => new RegExp(`sdk-gates\\.yml: ${where}: sets ${k} in an env:`);
+      return [
+        [`${k} in the workflow env:`, ({ doc }) => env(doc), re("-")],
+        [`${k} in a job env:`, ({ jobs }) => env(jobs.swift), re("swift")],
+        [`${k} in a step env:`, ({ jobs }) => env(precheck(jobs)), re("swift")],
+      ];
+    }),
+    [
+      "an Xcode path in a run: value",
+      ({ jobs }) =>
+        void jobs.swift.steps.splice(1, 0, {
+          name: "Select Xcode",
+          run: "sudo xcode-select -s /Applications/Xcode_0.app",
+        }),
+      /sdk-gates\.yml: swift: a value names \/Applications\/Xcode/,
+    ],
+    [
+      "an Xcode path in a with: value",
+      ({ jobs }) =>
+        void (step(jobs.gate, "Checkout").with.path = "/Applications/Xcode_0.app/Contents"),
+      /sdk-gates\.yml: gate: a value names \/Applications\/Xcode/,
+    ],
     // Listed, not restated: rule 3's caches and continueOnErrorFindings.
     [
       "a cache action",
@@ -2103,52 +2151,6 @@ describe("19 the SDK gates' own shape (#793)", () => {
         void (manifest.sdks.find((x) => x.name === "node").ci = { native: "macos" }),
       /dagger\/sdk-manifest\.json: node: has both daggerFn and ci\.native/,
     ],
-    // The Dagger legs' steps (#918): the suite, then the live suite.
-    ...["gate", "gate-known-red"].flatMap((job) => [
-      [
-        `${job}: no live-suite step`,
-        ({ jobs }) =>
-          void (jobs[job].steps = jobs[job].steps.filter((x) => !/live-suite/.test(x.name ?? ""))),
-        new RegExp(`${job}: has no step running live-suite --sdk`),
-      ],
-      [
-        `${job}: a live-suite step that runs whatever the leg says`,
-        ({ jobs }) => void (live(jobs[job]).if = "always()"),
-        new RegExp(`${job}: its live-suite step's if: is not exactly matrix\\.sdk\\.live`),
-      ],
-      [
-        `${job}: a live-suite step for another SDK`,
-        ({ jobs }) => void (live(jobs[job]).with.args = "live-suite --sdk node --source=."),
-        new RegExp(`${job}: has no step running live-suite --sdk`),
-      ],
-      [
-        `${job}: the live suite before the suite`,
-        ({ jobs }) => {
-          const st = jobs[job].steps;
-          const i = st.indexOf(live(jobs[job]));
-          const [l] = st.splice(i, 1);
-          st.splice(st.indexOf(suite(jobs[job])), 0, l);
-        },
-        new RegExp(`${job}: its live-suite step does not come after its suite`),
-      ],
-      [
-        `${job}: the suite step behind an if:`,
-        ({ jobs }) => void (suite(jobs[job]).if = "matrix.sdk.live"),
-        new RegExp(
-          `${job}: has no unconditional step running \\$\\{\\{ matrix\\.sdk\\.daggerFn \\}\\}`,
-        ),
-      ],
-      [
-        `${job}: a third Dagger step`,
-        ({ jobs }) => void jobs[job].steps.push(structuredClone(suite(jobs[job]))),
-        new RegExp(`${job}: runs 3 Dagger steps, not exactly its suite and its live suite`),
-      ],
-      [
-        `${job}: a live-suite step through another action`,
-        ({ jobs }) => void (live(jobs[job]).uses = "dagger/dagger-for-github@v8"),
-        new RegExp(`${job}: its live-suite step does not use the suite step's action`),
-      ],
-    ]),
     // The macOS job's steps (#924): the precheck, then the live suite natively.
     [
       "swift: no live step",
@@ -2229,6 +2231,283 @@ describe("19 the SDK gates' own shape (#793)", () => {
       got.some((g) => re.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+
+  // The Dagger legs' steps (#918): the suite, then the live suite. Each kind
+  // is held on its own steps: given its own copy (the alias broken, as an
+  // inline list would), a fault in one job is that job's finding alone.
+  const isLive = (x) => x.name === "Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)";
+  const isSuite = (x) => x.name === "Run ${{ matrix.sdk.daggerFn }} (Dagger)";
+  const LEG_FAULTS = [
+    [
+      "no live-suite step",
+      (st) => st.filter((x) => !isLive(x)),
+      /has no step running live-suite --sdk/,
+    ],
+    [
+      "a live-suite step that runs whatever the leg says",
+      (st) => void (st.find(isLive).if = "always()"),
+      /its live-suite step's if: is not exactly matrix\.sdk\.live/,
+    ],
+    [
+      "a live-suite step for another SDK",
+      (st) => void (st.find(isLive).with.args = "live-suite --sdk node --source=."),
+      /has no step running live-suite --sdk/,
+    ],
+    [
+      "the live suite before the suite",
+      (st) => {
+        const [l] = st.splice(st.findIndex(isLive), 1);
+        st.splice(st.findIndex(isSuite), 0, l);
+      },
+      /its live-suite step does not come after its suite/,
+    ],
+    [
+      "the suite step behind an if:",
+      (st) => void (st.find(isSuite).if = "matrix.sdk.live"),
+      /has no unconditional step running \$\{\{ matrix\.sdk\.daggerFn \}\}/,
+    ],
+    [
+      "a third Dagger step",
+      (st) => void st.push(structuredClone(st.find(isSuite))),
+      /runs 3 Dagger steps, not exactly its suite and its live suite/,
+    ],
+    [
+      "a live-suite step through another action",
+      (st) => void (st.find(isLive).uses = "dagger/dagger-for-github@v8"),
+      /its live-suite step does not use the suite step's action/,
+    ],
+  ];
+  const LEGS = ["gate", "gate-known-red"];
+  const otherLeg = (job) => LEGS.find((j) => j !== job);
+  it.each(LEGS.flatMap((job) => LEG_FAULTS.map(([name, fault, re]) => [job, name, fault, re])))(
+    "%s, given its own steps, refuses %s for that job alone",
+    (job, _name, fault, re) => {
+      const got = after(({ jobs }) => {
+        const own = structuredClone(jobs[job].steps);
+        jobs[job].steps = fault(own) ?? own;
+      });
+      expect(
+        ofJob(got, job).some((g) => re.test(g)),
+        got.join("\n") || "no finding",
+      ).toBe(true);
+      expect(ofJob(got, otherLeg(job))).toEqual([]);
+    },
+  );
+
+  // B1: the Dagger leg is written once, under gate (`steps: &dagger-leg`),
+  // and gate-known-red aliases it. An edit to the one copy reaches both.
+  const SUITE_LINE = "args: ${{ matrix.sdk.daggerFn }} --source=.";
+  it("the real file writes the leg once: one suite step, one live step, one summary step", () => {
+    for (const needle of [SUITE_LINE, "args: live-suite --sdk", "if: always()\n        env:"])
+      expect(REAL.sources[G].split(needle).length - 1, needle).toBe(1);
+    expect(REAL.workflows[G].jobs.gate.steps).toBe(REAL.workflows[G].jobs["gate-known-red"].steps);
+  });
+  it("M1: the suite's args changed in the one copy is refused for gate and gate-known-red", () => {
+    const got = afterText(once(SUITE_LINE, `${SUITE_LINE} --debug`));
+    for (const job of LEGS)
+      expect(ofJob(got, job), got.join("\n")).toContainEqual(
+        `${G}: ${job}: has no unconditional step running \${{ matrix.sdk.daggerFn }} --source=.`,
+      );
+  });
+  it("M2: gate-known-red with an inline list that has no live step is refused, for it alone", () => {
+    const inline = stringifyYaml(REAL.workflows[G].jobs.gate.steps.filter((x) => !isLive(x)))
+      .trimEnd()
+      .split("\n")
+      .map((l) => `      ${l}`)
+      .join("\n");
+    const got = afterText(once("    steps: *dagger-leg\n", `    steps:\n${inline}\n`));
+    expect(ofJob(got, "gate-known-red"), got.join("\n")).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/gate-known-red: has no step running live-suite --sdk/),
+        expect.stringMatching(
+          /gate-known-red: jobs\.gate-known-red\.steps is not the alias \*dagger-leg/,
+        ),
+      ]),
+    );
+    expect(ofJob(got, "gate")).toEqual([]);
+  });
+
+  // The one summary step (FR-002, M15): it says "known red, not counted"
+  // exactly when the leg has a ticket, which only a known-red leg may carry
+  // (select-sdks.mjs legProblem), and the ticket reaches it through env: only.
+  const SUMMARY_IF = "        if: always()\n        env:\n          SDK:";
+  it.each([
+    [
+      "its branch inverted",
+      once('if [ -n "${TICKET}" ]', 'if [ -z "${TICKET}" ]'),
+      [/its summary step's run: is not exactly/],
+    ],
+    [
+      "TICKET moved into run: as an expression",
+      (t) =>
+        once(
+          "known red ${TICKET}",
+          "known red ${{ matrix.sdk.ticket }}",
+        )(once("          TICKET: ${{ matrix.sdk.ticket }}\n", "")(t)),
+      [/its summary step's env: is not exactly/, /its summary step's run: is not exactly/],
+    ],
+    [
+      "its if: always() dropped",
+      once(SUMMARY_IF, "        env:\n          SDK:"),
+      [/its summary step's if: is not exactly always\(\)/],
+    ],
+    [
+      "its status read from elsewhere",
+      once("STATUS: ${{ job.status }}", "STATUS: success"),
+      [/its summary step's env: is not exactly/],
+    ],
+  ])("the summary step with %s is refused, for gate and gate-known-red", (_name, edit, res) => {
+    const got = afterText(edit);
+    for (const job of LEGS)
+      for (const re of res)
+        expect(
+          ofJob(got, job).some((g) => re.test(g)),
+          `${job} ${re}\n${got.join("\n")}`,
+        ).toBe(true);
+  });
+  it("a second summary step is refused", () => {
+    const got = after(
+      ({ jobs }) =>
+        void jobs.gate.steps.push({ run: 'echo "gate: green" >> "$GITHUB_STEP_SUMMARY"' }),
+    );
+    for (const job of LEGS)
+      expect(ofJob(got, job)).toContainEqual(
+        `${G}: ${job}: has 2 steps writing $GITHUB_STEP_SUMMARY, not exactly its one summary step`,
+      );
+  });
+  it("prints today's two summary lines, byte for byte, for each kind", () => {
+    const st = REAL.workflows[G].jobs.gate.steps.find((x) => /GITHUB_STEP_SUMMARY/.test(x.run));
+    const dir = mkdtempSync(join(tmpdir(), "leg-summary-"));
+    try {
+      const line = (ticket) => {
+        const out = join(dir, "summary");
+        writeFileSync(out, "");
+        const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", st.run], {
+          env: {
+            PATH: process.env.PATH,
+            SDK: "rust",
+            TICKET: ticket,
+            STATUS: "failure",
+            GITHUB_STEP_SUMMARY: out,
+          },
+        });
+        expect(r.status, String(r.stderr)).toBe(0);
+        return readFileSync(out, "utf8");
+      };
+      // GitHub gives a gate leg's missing matrix.sdk.ticket to env: as "".
+      expect(line("")).toBe("gate (rust): failure\n");
+      expect(line("#806")).toBe("gate (rust), known red #806, not counted: failure\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // FR-004, M16: one anchor/alias pair across every workflow, read from the
+  // YAML node tree. Anything else could be read one way by this rule's parser
+  // and another by GitHub's.
+  it.each([
+    [
+      "a second anchor and its alias",
+      G,
+      (t) =>
+        once(
+          "    timeout-minutes: 15\n",
+          "    timeout-minutes: *t\n",
+        )(
+          once(
+            "    runs-on: macos-15\n    timeout-minutes: 45\n",
+            "    runs-on: macos-15\n    timeout-minutes: &t 45\n",
+          )(t),
+        ),
+      [
+        /swift: defines the anchor &t at jobs\.swift\.timeout-minutes; the one anchor/,
+        /smoke: uses the alias \*t at jobs\.smoke\.timeout-minutes; the one alias/,
+      ],
+    ],
+    [
+      "the allowed anchor aliased a second time",
+      G,
+      (t) => `${t}x-leg: *dagger-leg\n`,
+      [/-: uses the alias \*dagger-leg at x-leg; the one alias/],
+    ],
+    [
+      "the pair under another name",
+      G,
+      (t) =>
+        once("steps: *dagger-leg", "steps: *leg")(once("steps: &dagger-leg", "steps: &leg")(t)),
+      [
+        /gate: defines the anchor &leg at jobs\.gate\.steps/,
+        /gate-known-red: uses the alias \*leg at jobs\.gate-known-red\.steps/,
+        /gate: jobs\.gate\.steps is not anchored &dagger-leg/,
+        /gate-known-red: jobs\.gate-known-red\.steps is not the alias \*dagger-leg/,
+      ],
+    ],
+    [
+      "an anchor and alias in another workflow",
+      "verify.yml",
+      (t) => `${t}x-a: &a 1\nx-b: *a\n`,
+      [
+        /^verify\.yml: -: defines the anchor &a at x-a/,
+        /^verify\.yml: -: uses the alias \*a at x-b/,
+      ],
+    ],
+    [
+      "a << merge key",
+      G,
+      once("    timeout-minutes: 15\n", "    <<: { timeout-minutes: 15 }\n"),
+      [/smoke: has a << merge key at jobs\.smoke/],
+    ],
+    [
+      "an anchor name defined twice",
+      G,
+      once("    runs-on: macos-15\n", "    runs-on: &dagger-leg macos-15\n"),
+      [/-: defines the anchor &dagger-leg 2 times/],
+    ],
+    [
+      "a << merge key that merges the leg's own anchor",
+      G,
+      once("    timeout-minutes: 15\n", "    <<: *dagger-leg\n    timeout-minutes: 15\n"),
+      [
+        /smoke: has a << merge key at jobs\.smoke/,
+        /smoke: uses the alias \*dagger-leg at jobs\.smoke\.<<; the one alias/,
+      ],
+    ],
+  ])("refuses %s", (_name, file, edit, res) => {
+    const got = afterText(edit, file);
+    for (const re of res)
+      expect(
+        got.some((g) => re.test(g)),
+        `${re}\n${got.join("\n")}`,
+      ).toBe(true);
+  });
+  // Text a parsed tree cannot be built from (parseYaml throws on both), so
+  // only the source is edited: rule 21 reads it through allFindings, and the
+  // other rules judge the real tree.
+  it.each([
+    [
+      "a workflow that does not parse as one YAML document",
+      (t) => `${t}x-broken: "never closed\n`,
+      `${G}: -: does not parse as one YAML document`,
+    ],
+    [
+      "a dangling alias, whose anchor is defined nowhere",
+      (t) => `${t}x-dangling: *nowhere\n`,
+      `${G}: -: uses the alias *nowhere at x-dangling; the one alias`,
+    ],
+  ])("refuses %s, read from its text", (_name, edit, want) => {
+    const t = structuredClone(REAL);
+    t.sources[G] = edit(t.sources[G]);
+    const got = report(t);
+    expect(
+      got.some((g) => g.startsWith(want)),
+      `${want}\n${got.join("\n")}`,
+    ).toBe(true);
+  });
+  it("is fed the workflows' text, and refuses to run blind without it", () => {
+    expect(
+      allFindings({ ...REAL, sources: undefined, scriptOutputs: SCRIPTS }).map((f) => f.why),
+    ).toContainEqual(expect.stringMatching(/no workflow source was given/));
   });
 
   it("the trigger check is one helper over GATE_WORKFLOWS, and refuses any other file", () => {

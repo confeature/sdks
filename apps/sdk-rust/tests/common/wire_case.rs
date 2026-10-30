@@ -166,10 +166,65 @@ pub fn load_corpus() -> WireCorpus {
     let path = fixtures_dir().join("wire-cases.json");
     let raw = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read wire-cases.json from {}: {e}", path.display()));
-    let corpus: WireCorpus =
+    // Leniently first, so a case this reader cannot read yet is told apart
+    // by its id (1.4, #994); then every other case strictly.
+    let lenient: Value =
         serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse wire-cases.json: {e}"));
-    assert!(!corpus.cases.is_empty(), "wire-cases.json carries no cases");
-    corpus
+    let mut pending = load_pending_cases();
+    let mut cases = Vec::new();
+    for raw_case in lenient["cases"]
+        .as_array()
+        .expect("wire-cases.json: cases[]")
+    {
+        let id = raw_case["id"]
+            .as_str()
+            .expect("a wire case has an id")
+            .to_owned();
+        let decoded = WireCase::deserialize(raw_case);
+        if let Some(ticket) = pending.remove(&id) {
+            // The proof that the entry is still true: this reader still
+            // cannot read the case. The day it can, the entry must go.
+            match decoded {
+                Ok(_) => panic!(
+                    "{id} is pending for sdk-rust ({ticket}) but this reader reads every field of it \
+                     — remove it from wire-cases-pending.json and run it"
+                ),
+                Err(e) => eprintln!("pending ({ticket}): {id} — this reader cannot read it yet: {e}"),
+            }
+            continue;
+        }
+        cases.push(decoded.unwrap_or_else(|e| panic!("parse wire case {id}: {e}")));
+    }
+    if let Some(id) = pending.keys().next() {
+        panic!("wire-cases-pending.json lists {id} for sdk-rust, but the corpus has no such case");
+    }
+    assert!(!cases.is_empty(), "wire-cases.json carries no cases");
+    WireCorpus { cases }
+}
+
+/// sdk-rust's entry of `wire-cases-pending.json` (1.4, #994): case id ->
+/// ticket. An absent entry is the empty set — the reader runs every case.
+pub fn load_pending_cases() -> std::collections::BTreeMap<String, String> {
+    let path = fixtures_dir().join("wire-cases-pending.json");
+    let raw = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read wire-cases-pending.json from {}: {e}", path.display()));
+    let manifest: Value =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse wire-cases-pending.json: {e}"));
+    let entry = &manifest["pending"]["sdk-rust"];
+    let ticket = entry["ticket"].as_str().unwrap_or_default().to_owned();
+    entry["cases"]
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .map(|id| {
+                    (
+                        id.as_str().expect("a pending case id").to_owned(),
+                        ticket.clone(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The fetcher's fixed, key-free transport reasons (#803 FR-002,

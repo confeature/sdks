@@ -28,11 +28,13 @@
 // exercises the comparator conversion path with the values the conversion
 // driver intends (NaN / +/-Infinity / exponential numbers, JSON arrays).
 
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -47,9 +49,9 @@
 #include "workspace_root.h"
 
 using confeature::User;
+using confeature::internal::EvalResult;
 using confeature::internal::evaluate;
 using confeature::internal::evaluateTraced;
-using confeature::internal::EvalResult;
 using confeature::tests::upstreamPath;
 using nlohmann::json;
 
@@ -142,7 +144,7 @@ std::string numberToCanonicalString(double value) {
     return "0";
   }
 
-  const long long k = static_cast<long long>(raw.size());
+  const auto k = static_cast<long long>(raw.size());
   const long long n = point;
 
   if (n >= k && n <= 21) {
@@ -205,7 +207,7 @@ std::unique_ptr<User> makeUser(const std::string& identifier, const json& custom
   auto user = std::make_unique<User>(identifier);
   if (custom.is_object()) {
     for (auto it = custom.begin(); it != custom.end(); ++it) {
-      const std::string key = it.key();
+      const std::string& key = it.key();
       const json& v = it.value();
       if (key == "Email") {
         user->withEmail(userAttributeValueToString(v));
@@ -297,12 +299,12 @@ json parseCell(const std::string& s) {
       }
     }
     if (allDigits) {
-      try {
-        const long long n = std::stoll(s);
-        if (std::llabs(n) <= 9007199254740991LL && std::to_string(n) == s) {
-          return json(n);
-        }
-      } catch (const std::exception&) {  // overflow → fall through to string
+      // strtoll, not stoll: an overflow (ERANGE) is an expected input that
+      // falls through to the string branch, not an exception to swallow.
+      errno = 0;
+      const long long n = std::strtoll(s.c_str(), nullptr, 10);
+      if (errno == 0 && std::llabs(n) <= 9007199254740991LL && std::to_string(n) == s) {
+        return json(n);
       }
     }
   }
@@ -327,9 +329,13 @@ json parseCell(const std::string& s) {
       }
     }
     if (looksFloat && sawDigit && (sawDot || sawExp)) {
-      try {
-        return json(std::stod(s));
-      } catch (const std::exception&) {
+      // strtod, not stod: no conversion or an out-of-range value falls
+      // through to the string branch exactly where stod would have thrown.
+      errno = 0;
+      char* end = nullptr;
+      const double d = std::strtod(s.c_str(), &end);
+      if (end != s.c_str() && errno != ERANGE) {
+        return json(d);
       }
     }
   }
@@ -364,13 +370,13 @@ bool matrixEntry(const std::string& matrix, MatrixEntry* out) {
       {"testmatrix_unicode.csv", {std::string(kJcp) + "Da6w8dBbmUeMUBhh0iEeQQ", false}},
       {"testmatrix_variationId.csv", {std::string(kPkd) + "spQnkRTIPEWVivZkWM84lQ", true}},
   };
-  for (const auto& kv : map) {
-    if (kv.first == matrix) {
-      *out = kv.second;
-      return true;
-    }
+  const auto it = std::find_if(map.begin(), map.end(),
+                               [&matrix](const auto& kv) { return kv.first == matrix; });
+  if (it == map.end()) {
+    return false;
   }
-  return false;
+  *out = it->second;
+  return true;
 }
 
 // ── config resolution ────────────────────────────────────────────────────────
@@ -486,9 +492,7 @@ std::unique_ptr<User> userFromRow(const std::vector<std::string>& cols,
   if (cols.empty() || cols[0] == kNullToken) {
     return nullptr;
   }
-  auto setOrNull = [](const std::string& v) -> bool {
-    return !(v.empty() || v == kNullToken);
-  };
+  auto setOrNull = [](const std::string& v) -> bool { return !(v.empty() || v == kNullToken); };
   const std::string identifier = !cols[0].empty() ? cols[0] : std::string();
   auto user = std::make_unique<User>(identifier);
   if (cols.size() > 1 && setOrNull(cols[1])) {
@@ -717,9 +721,15 @@ std::unique_ptr<User> traceUser(const json& raw) {
     return nullptr;
   }
   json reshaped = json::object();
-  if (raw.contains("identifier")) reshaped["Identifier"] = raw["identifier"];
-  if (raw.contains("email")) reshaped["Email"] = raw["email"];
-  if (raw.contains("country")) reshaped["Country"] = raw["country"];
+  if (raw.contains("identifier")) {
+    reshaped["Identifier"] = raw["identifier"];
+  }
+  if (raw.contains("email")) {
+    reshaped["Email"] = raw["email"];
+  }
+  if (raw.contains("country")) {
+    reshaped["Country"] = raw["country"];
+  }
   if (raw.contains("custom") && raw["custom"].is_object()) {
     for (auto it = raw["custom"].begin(); it != raw["custom"].end(); ++it) {
       reshaped[it.key()] = it.value();
@@ -834,8 +844,8 @@ TEST_CASE("upstream corpus — matched targeting rule + no-user fallback", "[ups
   REQUIRE(matching != nullptr);
   REQUIRE(noUser != nullptr);
 
-  const EvalResult m = evaluate(matching->config.get(), matching->key, json("default"),
-                                matching->user.get());
+  const EvalResult m =
+      evaluate(matching->config.get(), matching->key, json("default"), matching->user.get());
   REQUIRE(m.value == json("Dog"));
   REQUIRE(m.hasMatchedRule);
   REQUIRE_FALSE(m.hasMatchedOption);
@@ -885,7 +895,7 @@ TEST_CASE("upstream corpus — percentage bucketing is repeat-invariant", "[upst
   REQUIRE(withUser != nullptr);
   const int type = settingType(*withUser->config, withUser->key);
   const json def = withUser->defaultValue.is_null() ? defaultFor(withUser->expected, type)
-                                                     : coerceDefault(withUser->defaultValue, type);
+                                                    : coerceDefault(withUser->defaultValue, type);
   const EvalResult first =
       evaluate(withUser->config.get(), withUser->key, def, withUser->user.get());
   for (int i = 0; i < 20; ++i) {
@@ -1132,10 +1142,10 @@ TEST_CASE("upstream corpus — attribute conversion (NaN/Inf/exp/array)", "[upst
       {"dateToStringConversionNegativeInf", json(-inf), "5"},
       {"stringArrayToStringConversion", json::array({"read", "Write", " eXecute "}), "4"},
       {"stringArrayToStringConversionEmpty", json::array(), "5"},
-      {"stringArrayToStringConversionSpecialChars",
-       json::array({std::string("+<>%\"'\\/\t\r\n")}), "3"},
-      {"stringArrayToStringConversionUnicode",
-       json::array({std::string("äöüÄÖÜçéèñışğâ¢™✓😀")}), "2"},
+      {"stringArrayToStringConversionSpecialChars", json::array({std::string("+<>%\"'\\/\t\r\n")}),
+       "3"},
+      {"stringArrayToStringConversionUnicode", json::array({std::string("äöüÄÖÜçéèñışğâ¢™✓😀")}),
+       "2"},
   };
 
   std::vector<std::string> failures;
@@ -1163,12 +1173,26 @@ struct TrimCase {
 
 std::vector<TrimCase> attributeTrimmingDriver() {
   std::vector<TrimCase> out;
-  for (const char* k :
-       {"isoneof", "isnotoneof", "isoneofhashed", "isnotoneofhashed", "equalshashed",
-        "notequalshashed", "arraycontainsanyofhashed", "arraynotcontainsanyofhashed", "equals",
-        "notequals", "startwithanyof", "notstartwithanyof", "endswithanyof", "notendswithanyof",
-        "arraycontainsanyof", "arraynotcontainsanyof", "startwithanyofhashed",
-        "notstartwithanyofhashed", "endswithanyofhashed", "notendswithanyofhashed"}) {
+  for (const char* k : {"isoneof",
+                        "isnotoneof",
+                        "isoneofhashed",
+                        "isnotoneofhashed",
+                        "equalshashed",
+                        "notequalshashed",
+                        "arraycontainsanyofhashed",
+                        "arraynotcontainsanyofhashed",
+                        "equals",
+                        "notequals",
+                        "startwithanyof",
+                        "notstartwithanyof",
+                        "endswithanyof",
+                        "notendswithanyof",
+                        "arraycontainsanyof",
+                        "arraynotcontainsanyof",
+                        "startwithanyofhashed",
+                        "notstartwithanyofhashed",
+                        "endswithanyofhashed",
+                        "notendswithanyofhashed"}) {
     out.push_back({k, "no trim"});
   }
   out.push_back({"semverisoneof", "4 trim"});
@@ -1192,13 +1216,28 @@ std::vector<TrimCase> attributeTrimmingDriver() {
 
 std::vector<TrimCase> valueTrimmingDriver() {
   std::vector<TrimCase> out;
-  for (const char* k :
-       {"isoneof", "isnotoneof", "containsanyof", "notcontainsanyof", "isoneofhashed",
-        "isnotoneofhashed", "equalshashed", "notequalshashed", "arraycontainsanyofhashed",
-        "arraynotcontainsanyofhashed", "equals", "notequals", "startwithanyof", "notstartwithanyof",
-        "endswithanyof", "notendswithanyof", "arraycontainsanyof", "arraynotcontainsanyof",
-        "startwithanyofhashed", "notstartwithanyofhashed", "endswithanyofhashed",
-        "notendswithanyofhashed"}) {
+  for (const char* k : {"isoneof",
+                        "isnotoneof",
+                        "containsanyof",
+                        "notcontainsanyof",
+                        "isoneofhashed",
+                        "isnotoneofhashed",
+                        "equalshashed",
+                        "notequalshashed",
+                        "arraycontainsanyofhashed",
+                        "arraynotcontainsanyofhashed",
+                        "equals",
+                        "notequals",
+                        "startwithanyof",
+                        "notstartwithanyof",
+                        "endswithanyof",
+                        "notendswithanyof",
+                        "arraycontainsanyof",
+                        "arraynotcontainsanyof",
+                        "startwithanyofhashed",
+                        "notstartwithanyofhashed",
+                        "endswithanyofhashed",
+                        "notendswithanyofhashed"}) {
     out.push_back({k, "no trim"});
   }
   out.push_back({"semverisoneof", "4 trim"});
@@ -1277,9 +1316,9 @@ TEST_CASE("upstream corpus — native numeric attr matches string form", "[upstr
     std::string expected;
   };
   std::vector<NCase> cases = {
-      {"native-int-pass", json(21), "match"},     {"native-float-pass", json(18.0), "match"},
-      {"native-int-fail", json(17), "no-match"},  {"native-float-fail", json(17.999), "no-match"},
-      {"string-int-pass", json("21"), "match"},   {"string-float-pass", json("18.0"), "match"},
+      {"native-int-pass", json(21), "match"},      {"native-float-pass", json(18.0), "match"},
+      {"native-int-fail", json(17), "no-match"},   {"native-float-fail", json(17.999), "no-match"},
+      {"string-int-pass", json("21"), "match"},    {"string-float-pass", json("18.0"), "match"},
       {"string-int-fail", json("17"), "no-match"},
   };
 
@@ -1321,7 +1360,7 @@ TEST_CASE("evaluationlog — byte-identical trace fidelity (#501)", "[upstream_c
     }
 
     const std::string key = t.value("key", std::string());
-    const json config = t["config"];
+    const json& config = t["config"];
     const int type = settingType(config, key);
     const json def =
         coerceDefault(t.contains("defaultValue") ? t["defaultValue"] : json(nullptr), type);
@@ -1341,8 +1380,11 @@ TEST_CASE("evaluationlog — byte-identical trace fidelity (#501)", "[upstream_c
     seen[scenario]++;
     const std::string expected = t["expectedTrace"].get<std::string>();
     if (actual != expected) {
-      failures.push_back("trace mismatch for " + scenario + "/" + key + "\n--- want ---\n" +
-                         expected + "\n--- got ---\n" + actual);
+      std::ostringstream failure;
+      failure << "trace mismatch for " << scenario << "/" << key << "\n--- want ---\n"
+              << expected << "\n--- got ---\n"
+              << actual;
+      failures.push_back(failure.str());
     }
   }
 

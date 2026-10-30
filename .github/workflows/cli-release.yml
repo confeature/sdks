@@ -18,9 +18,17 @@
 #                      checks the artifact against that digest and runs
 #                      release-github.sh, the GitHub release (a mirror, never
 #                      the documented path).
+#   1c. attest         keyless build provenance (#903): `id-token: write` and
+#                      `attestations: write` only, no environment, no secret, no
+#                      checkout and no run step. It receives the artifact and
+#                      attests every file R2 will serve under v<ver>/ (the
+#                      binaries and SHA256SUMS), so `gh attestation verify
+#                      <file> --repo confeature/sdks` checks a download against
+#                      an anchor outside R2.
 #   2. upload          a `contents: read` job, separate from the write token and
-#                      the build's toolchain. It re-checks the artifact against
-#                      that digest, then `publish-r2.sh upload` puts the immutable
+#                      the build's toolchain. It waits on attest (nothing reaches
+#                      R2 unattested), re-checks the artifact against that
+#                      digest, then `publish-r2.sh upload` puts the immutable
 #                      v<ver>/ files.
 #   3. verify-pinned   Windows installs `-Version <ver>` from the real host, and
 #                      exercises the checkout's latest path against the current
@@ -44,6 +52,11 @@
 #     `contents: read` jobs that install nothing: publish-r2.sh puts through
 #     R2's S3 API with the runner's AWS CLI. Cloudflare honours a bucket-scoped
 #     token on the S3 API only, not on the REST API wrangler and `cf` call.
+#   - The attest job's OIDC token (`id-token: write`), exchanged by
+#     attest-build-provenance for a short-lived Sigstore signing certificate,
+#     and its `attestations: write` token, which stores the attestation. It is
+#     the one job outside an environment allowed `id-token: write`
+#     (verify-workflows.mjs ID_TOKEN_EXCEPTIONS).
 #   - No `secrets: inherit`.
 #
 # Spec 183 (CLI distribution docs) and #801's plan.
@@ -220,9 +233,42 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: bash apps/cli/scripts/release-github.sh "$TAG" dist
 
+  # Keyless build provenance (#903): a signed statement, outside R2, that each
+  # file this release puts under v<ver>/ was built by this workflow run in
+  # confeature/sdks. The artifact is the bytes upload checks against the build
+  # job's SHA256SUMS digest and puts on R2, so the attested digests are the
+  # served ones. The job holds `id-token: write` and `attestations: write` and
+  # nothing else: no `contents: read` (it checks nothing out; download-artifact
+  # reads this run's artifact with the runner's own token), no environment, no
+  # secret, and it runs no project code, only the two actions below
+  # (verify-workflows.mjs ID_TOKEN_EXCEPTIONS freezes that shape).
+  attest:
+    name: attest ${{ github.ref_name }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Receive the build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-dist
+          path: dist
+
+      # One attestation whose subjects are every binary and SHA256SUMS:
+      # `gh attestation verify <file> --repo confeature/sdks` checks any one.
+      - name: Attest every released file (GitHub artifact attestation)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/confeature-*
+            dist/SHA256SUMS
+
   upload:
     name: upload ${{ github.ref_name }} to R2
-    needs: [build, release]
+    needs: [build, release, attest]
     runs-on: ubuntu-latest
     # The R2 token is an ENVIRONMENT secret of `cli-release` (#794): this job
     # accepts `cli-v*` tags only (no approval click: operator ruling 2026-10-16;

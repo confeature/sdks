@@ -43,13 +43,21 @@
 // (the completion claims between the wait expiring and the give-up's
 // claim) and `Confeature.Wire.ProcessRequestRefused` (ProcessRequest
 // returns false after firing the completion, or without firing it).
+// `Confeature.Wire.GameThreadPump` (#832) calls FetchSync ON the game
+// thread: it pumps the HTTP manager itself, fetches without deadlocking,
+// and keeps the body cap.
+// `Confeature.Wire.BodyCap` (#837) serves bodies past and at the 16 MiB
+// cap: a declared over-cap length, an endless chunked body, and a valid
+// config of exactly the cap.
 //
-// Threading: `FConfigFetcher::FetchSync` blocks on an FEvent until the
-// HTTP-completion delegate fires. UE's HTTP manager is pumped from the
-// game thread (where Automation tests also run) so calling FetchSync
-// directly from the test deadlocks. We push the fetch onto a worker
-// thread via `Async(EAsyncExecution::Thread, ...)` and pump the HTTP
-// manager from the test thread until the worker's future resolves.
+// Threading: `FConfigFetcher::FetchSync` blocks until the HTTP-completion
+// delegate fires, which UE's HTTP manager delivers on game-thread ticks
+// (where Automation tests also run). On the game thread FetchSync pumps
+// the manager itself (#832, `Confeature.Wire.GameThreadPump`); the other
+// tests push the fetch onto a worker thread via
+// `Async(EAsyncExecution::Thread, ...)` and pump the HTTP manager from the
+// test thread until the worker's future resolves — the shape a worker
+// caller sees, and the one the claim-race seams need.
 
 #include "CoreMinimal.h"
 #include "Async/Async.h"
@@ -133,6 +141,27 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FConfeatureWireProcessRequestRefusedTest,
 	"Confeature.Wire.ProcessRequestRefused",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConfeatureWireGameThreadPumpTest,
+	"Confeature.Wire.GameThreadPump",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConfeatureWireCancelInFlightTest,
+	"Confeature.Wire.CancelInFlight",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
+		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
+		| EAutomationTestFlags::EngineFilter)
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FConfeatureWireBodyCapTest,
+	"Confeature.Wire.BodyCap",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext
 		| EAutomationTestFlags::ServerContext | EAutomationTestFlags::CommandletContext
 		| EAutomationTestFlags::EngineFilter)
@@ -361,13 +390,27 @@ namespace
 		//                         very URL requested (which holds the SDK key),
 		//                         so a library error quoting the redirect
 		//                         target would leak the key (#803 FR-004).
+		//   - DeclaredOverCap  — a 200 announcing `MaxBodyBytes + 1` bytes,
+		//                         then 1 KiB of them, then hold the connection
+		//                         (recording the client's close) — only a
+		//                         refusal at the header can end it before the
+		//                         request timeout (#837).
+		//   - EndlessChunked   — a chunked 200 that never ends: 64 KiB chunks
+		//                         until a send fails (the client hung up) or
+		//                         `EndlessBodyBoundBytes`, recorded (#837).
 		enum class EMockBehavior : uint8
 		{
 			Respond,
 			Timeout,
 			CloseMidResponse,
 			RedirectLoop,
+			DeclaredOverCap,
+			EndlessChunked,
 		};
+
+		// Where EndlessChunked stops on its own: far past the cap, so
+		// reaching it means the client never cut the transfer off.
+		static constexpr int64 EndlessBodyBoundBytes = int64{256} * 1024 * 1024;
 
 		void SetBehavior(EMockBehavior InBehavior) { Behavior = InBehavior; }
 
@@ -429,6 +472,13 @@ namespace
 		// meaningful once `SawClientClose()` is true.
 		double ClientCloseSeconds() const { return ClientClosedAt.load(); }
 
+		// Body bytes the EndlessChunked behaviour wrote before it stopped,
+		// and why it stopped: a failed send (the client hung up) or its
+		// own bound.
+		int64 BodyBytesSent() const { return BodySent.load(); }
+		bool SendFailed() const { return bSendFailed; }
+		bool HitBodyBound() const { return bHitBodyBound; }
+
 		uint16 GetPort() const { return Port; }
 
 	private:
@@ -439,6 +489,53 @@ namespace
 #else
 			::close(S);
 #endif
+		}
+
+		// Writes all of `Data`, looping over short sends (a 16 MiB body
+		// does not go out in one). False once the peer is gone. A send to
+		// a closed peer must fail, never raise SIGPIPE and end the run:
+		// MSG_NOSIGNAL where it exists, SO_NOSIGPIPE (set on accept)
+		// on Apple.
+		static bool SendAll(SocketType S, const char* Data, int64 Len)
+		{
+#if defined(MSG_NOSIGNAL)
+			constexpr int Flags = MSG_NOSIGNAL;
+#else
+			constexpr int Flags = 0;
+#endif
+			int64 Offset = 0;
+			while (Offset < Len)
+			{
+				const int Chunk = static_cast<int>(FMath::Min<int64>(Len - Offset, 1 << 16));
+				const int N = static_cast<int>(::send(S, Data + Offset, Chunk, Flags));
+				if (N <= 0)
+				{
+					return false;
+				}
+				Offset += N;
+			}
+			return true;
+		}
+
+		static bool SendAll(SocketType S, const FString& Text)
+		{
+			const FTCHARToUTF8 Utf8(*Text);
+			return SendAll(S, Utf8.Get(), Utf8.Length());
+		}
+
+		// Holds `Client` open until it closes it (recorded) or Stop().
+		void HoldUntilClientCloses(SocketType Client)
+		{
+			while (!Stopping)
+			{
+				if (PeerClosedWithin(Client, 20))
+				{
+					// The time first, so a reader seeing the flag sees it.
+					ClientClosedAt.store(FPlatformTime::Seconds());
+					ClientClosed.AtomicSet(true);
+					return;
+				}
+			}
 		}
 
 		// Waits up to `TimeoutMs` for the peer to close `S`: true on an
@@ -498,6 +595,10 @@ namespace
 					CloseSock(Client);
 					return;
 				}
+#if defined(SO_NOSIGPIPE)
+				int NoSigPipe = 1;
+				::setsockopt(Client, SOL_SOCKET, SO_NOSIGPIPE, &NoSigPipe, sizeof(NoSigPipe));
+#endif
 				HandleOne(Client);
 				CloseSock(Client);
 			}
@@ -538,15 +639,62 @@ namespace
 			// unless the CLIENT closes it first, which is recorded.
 			if (Behavior == EMockBehavior::Timeout)
 			{
+				HoldUntilClientCloses(Client);
+				return;
+			}
+
+			// Declared-over-cap behaviour (#837): the header announces one
+			// byte past the cap, a sliver of the body follows, and the rest
+			// never comes. A client that waits for the body runs into its
+			// request timeout; one that refuses the header hangs up now.
+			if (Behavior == EMockBehavior::DeclaredOverCap)
+			{
+				const FString Head = FString::Printf(
+					TEXT("HTTP/1.1 200 OK\r\nContent-Length: %lld\r\n")
+					TEXT("Connection: close\r\n\r\n"),
+					static_cast<long long>(Confeature::Internal::MaxBodyBytes + 1));
+				TArray<char> Sliver;
+				Sliver.Init(' ', 1024);
+				if (SendAll(Client, Head) && SendAll(Client, Sliver.GetData(), Sliver.Num()))
+				{
+					HoldUntilClientCloses(Client);
+				}
+				return;
+			}
+
+			// Endless-chunked behaviour (#837): no Content-Length to refuse
+			// up front, so only a client counting received bytes stops it.
+			if (Behavior == EMockBehavior::EndlessChunked)
+			{
+				if (!SendAll(Client,
+						FString(TEXT("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n")
+								TEXT("Connection: close\r\n\r\n"))))
+				{
+					bSendFailed.AtomicSet(true);
+					return;
+				}
+				constexpr int32 ChunkBytes = 64 * 1024;
+				TArray<char> Chunk;
+				const FTCHARToUTF8 Size(*FString::Printf(TEXT("%x\r\n"), ChunkBytes));
+				Chunk.Append(Size.Get(), Size.Length());
+				const int32 PayloadAt = Chunk.Num();
+				Chunk.AddUninitialized(ChunkBytes);
+				FMemory::Memset(Chunk.GetData() + PayloadAt, ' ', ChunkBytes);
+				Chunk.Add('\r');
+				Chunk.Add('\n');
 				while (!Stopping)
 				{
-					if (PeerClosedWithin(Client, 20))
+					if (BodySent.load() >= EndlessBodyBoundBytes)
 					{
-						// The time first, so a reader seeing the flag sees it.
-						ClientClosedAt.store(FPlatformTime::Seconds());
-						ClientClosed.AtomicSet(true);
+						bHitBodyBound.AtomicSet(true);
 						return;
 					}
+					if (!SendAll(Client, Chunk.GetData(), Chunk.Num()))
+					{
+						bSendFailed.AtomicSet(true);
+						return;
+					}
+					BodySent.fetch_add(ChunkBytes);
 				}
 				return;
 			}
@@ -562,8 +710,7 @@ namespace
 					TEXT("Content-Length: 0\r\nConnection: close\r\n\r\n"),
 					Port,
 					*RequestTarget(Raw));
-				const FTCHARToUTF8 Utf8Loop(*Loop);
-				::send(Client, Utf8Loop.Get(), Utf8Loop.Length(), 0);
+				SendAll(Client, Loop);
 				return;
 			}
 
@@ -576,8 +723,7 @@ namespace
 				const FString Truncated
 					= TEXT("HTTP/1.1 200 OK\r\nContent-Length: 4096\r\n")
 					  TEXT("Connection: close\r\n\r\n{\"p\":{\"s\":\"partial");
-				const FTCHARToUTF8 Utf8Trunc(*Truncated);
-				::send(Client, Utf8Trunc.Get(), Utf8Trunc.Length(), 0);
+				SendAll(Client, Truncated);
 				return;
 			}
 
@@ -595,8 +741,7 @@ namespace
 				Response = TEXT("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n")
 						   TEXT("Connection: close\r\n\r\n");
 			}
-			const FTCHARToUTF8 Utf8(*Response);
-			::send(Client, Utf8.Get(), Utf8.Length(), 0);
+			SendAll(Client, Response);
 		}
 
 		SocketType Sock = InvalidSocketValue;
@@ -606,6 +751,9 @@ namespace
 		FThreadSafeBool Stopping;
 		FThreadSafeBool ClientClosed;
 		std::atomic<double> ClientClosedAt{0.0};
+		std::atomic<int64> BodySent{0};
+		FThreadSafeBool bSendFailed;
+		FThreadSafeBool bHitBodyBound;
 		TFuture<void> Future;
 
 		mutable FCriticalSection ResponsesMutex;
@@ -791,10 +939,43 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 		AddError(TEXT("wire-cases.json missing 'cases' array"));
 		return false;
 	}
-	// FROZEN at 17 — #491 grew 7→12, #590 grew 12→14 (timeout +
+	// FROZEN at 19 — #491 grew 7→12, #590 grew 12→14 (timeout +
 	// network-reset behaviour cases), #803 grew 14→17 (request-path
-	// cases: legacy, ConfigCat-shaped, malformed). Any drift = spec change.
-	TestEqual(TEXT("wire-cases corpus size"), Cases->Num(), 17);
+	// cases: legacy, ConfigCat-shaped, malformed), #994 grew 17→19
+	// (redirect cases). Any drift = spec change.
+	TestEqual(TEXT("wire-cases corpus size"), Cases->Num(), 19);
+
+	// Cases pending for sdk-unreal (wire-cases-pending.json, 1.4, #994) are
+	// left out BY NAME, under a proof that the entry is still true: this
+	// reader still cannot read them. The day it can, the entry must go.
+	TMap<FString, FString> Pending;
+	{
+		const FString PendingPath = FPaths::Combine(FixturesDir, TEXT("wire-cases-pending.json"));
+		FString PendingRaw;
+		TSharedPtr<FJsonObject> Manifest;
+		const TSharedPtr<FJsonObject>* PendingObj = nullptr;
+		if (!FFileHelper::LoadFileToString(PendingRaw, *PendingPath)
+			|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(PendingRaw), Manifest)
+			|| !Manifest.IsValid()
+			|| !Manifest->TryGetObjectField(TEXT("pending"), PendingObj))
+		{
+			AddError(FString::Printf(TEXT("Failed to read %s"), *PendingPath));
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* Entry = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Ids = nullptr;
+		FString Ticket;
+		if ((*PendingObj)->TryGetObjectField(TEXT("sdk-unreal"), Entry)
+			&& (*Entry)->TryGetStringField(TEXT("ticket"), Ticket)
+			&& (*Entry)->TryGetArrayField(TEXT("cases"), Ids))
+		{
+			for (const TSharedPtr<FJsonValue>& IdVal : *Ids)
+			{
+				Pending.Add(IdVal->AsString(), Ticket);
+			}
+		}
+	}
+	const int32 PendingCount = Pending.Num();
 
 	int32 Passed = 0;
 	for (const TSharedPtr<FJsonValue>& CaseVal : *Cases)
@@ -820,6 +1001,32 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 			continue;
 		}
 		const FString TestId = FString::Printf(TEXT("wire-case '%s'"), *Id);
+
+		if (const FString* Ticket = Pending.Find(Id))
+		{
+			int32 Unread = 0;
+			for (const auto& Pair : (*GivenObj)->Values)
+			{
+				Unread += KnownGivenFields().Contains(Pair.Key) ? 0 : 1;
+			}
+			for (const auto& Pair : (*ExpectedObj)->Values)
+			{
+				Unread += KnownExpectedFields().Contains(Pair.Key) ? 0 : 1;
+			}
+			if (Unread == 0)
+			{
+				AddError(FString::Printf(
+					TEXT("%s is pending for sdk-unreal (%s) but this reader reads every field of it — "
+						 "remove it from wire-cases-pending.json and run it"),
+					*TestId, **Ticket));
+			}
+			else
+			{
+				AddInfo(FString::Printf(TEXT("%s pending (%s): this reader cannot read it yet"), *TestId, **Ticket));
+			}
+			Pending.Remove(Id);
+			continue;
+		}
 
 		// FR-003: a field nobody reads fails the case, never passes it.
 		bool bUnknownField = false;
@@ -1026,8 +1233,14 @@ bool FConfeatureWireCasesTest::RunTest(const FString& /*Parameters*/)
 		++Passed;
 	}
 
-	TestEqual(TEXT("wire-cases passed"), Passed, Cases->Num());
-	return Passed == Cases->Num();
+	for (const TPair<FString, FString>& Stale : Pending)
+	{
+		AddError(FString::Printf(
+			TEXT("wire-cases-pending.json lists %s for sdk-unreal, not in the corpus"), *Stale.Key));
+	}
+	const int32 Runnable = Cases->Num() - PendingCount;
+	TestEqual(TEXT("wire-cases passed"), Passed, Runnable);
+	return Pending.Num() == 0 && Passed == Runnable;
 }
 
 // #803 FR-004 — the URL now holds the SDK key, so every transport failure
@@ -1506,5 +1719,303 @@ bool FConfeatureWireProcessRequestRefusedTest::RunTest(const FString& /*Paramete
 	const int32 RequestCount = Mock.RequestCount();
 	Mock.Stop();
 	TestEqual(TEXT("no request reached the network"), RequestCount, 0);
+	return true;
+}
+
+// #837 — the config body is capped at `MaxBodyBytes` (16 MiB, sdk-cpp's
+// cap) WHILE it arrives, never only after it was buffered whole:
+//   - a declared `Content-Length` one byte over the cap is refused at the
+//     header: the fetch ends long before the request timeout although the
+//     body never comes, and the client hangs up;
+//   - an endless chunked body (no length to refuse) is cut off once the
+//     received count passes the cap: the client hangs up mid-stream, far
+//     short of the mock's own bound;
+//   - a valid config of exactly the cap is fetched (the cap refuses only
+//     what passes it).
+// Each refusal is `body_too_large` (the fetchFailed class), logged once,
+// key-free.
+bool FConfeatureWireBodyCapTest::RunTest(const FString& /*Parameters*/)
+{
+	using namespace Confeature::Internal;
+
+	const FString Key = TEXT("configcat-sdk-1/FAKEfixtureKeyNotRea01/FAKEfixtureKeyNotRea02");
+	const TArray<FString> Secrets{
+		Key, TEXT("FAKEfixtureKeyNotRea01"), TEXT("FAKEfixtureKeyNotRea02")};
+
+	// The refusal's shared assertions: the fixed reason, its class, one
+	// log line naming it, and no secret anywhere.
+	const auto ExpectRefused = [this, &Secrets](
+								   const TCHAR* Name,
+								   const FFetchResult& Result,
+								   const FCapturingLogger& Logger)
+	{
+		TestTrue(
+			FString::Printf(TEXT("%s: the fetch failed"), Name),
+			Result.Status == EFetchStatus::Failed);
+		TestEqual(
+			FString::Printf(TEXT("%s: the reason is body_too_large"), Name),
+			Result.Error,
+			FString(FetchError::BodyTooLarge));
+		TestEqual(
+			FString::Printf(TEXT("%s: the error class"), Name),
+			UnrealErrorToClass(Result.Error),
+			FString(TEXT("fetchFailed")));
+		TestFalse(FString::Printf(TEXT("%s: no config"), Name), Result.Body.IsValid());
+		const TArray<FString> Lines = Logger.Snapshot();
+		int32 CapLines = 0;
+		for (const FString& Line : Lines)
+		{
+			CapLines += Line.Contains(FetchError::BodyTooLarge, ESearchCase::CaseSensitive) ? 1 : 0;
+		}
+		TestEqual(FString::Printf(TEXT("%s: one body_too_large log line"), Name), CapLines, 1);
+		TestEqual(FString::Printf(TEXT("%s: nothing else logged"), Name), Lines.Num(), 1);
+		for (int32 S = 0; S < Secrets.Num(); ++S)
+		{
+			TestFalse(
+				FString::Printf(TEXT("%s: secret #%d absent from FFetchResult.Error"), Name, S),
+				Result.Error.Contains(Secrets[S], ESearchCase::CaseSensitive));
+			for (int32 L = 0; L < Lines.Num(); ++L)
+			{
+				TestFalse(
+					FString::Printf(TEXT("%s: secret #%d absent from log line #%d"), Name, S, L),
+					Lines[L].Contains(Secrets[S], ESearchCase::CaseSensitive));
+			}
+		}
+	};
+
+	// 0. The progress check's bounds, wrap included (#837 review): 5.3's
+	// int32 count goes negative past 2 GiB and must read as over the cap.
+	TestFalse(TEXT("counts: 0 is under"), IsReceivedCountOverCap(int64{0}));
+	TestFalse(TEXT("counts: the cap itself is under"), IsReceivedCountOverCap(MaxBodyBytes));
+	TestTrue(TEXT("counts: cap + 1 is over"), IsReceivedCountOverCap(MaxBodyBytes + 1));
+	TestTrue(TEXT("counts: a wrapped int32 is over"),
+		IsReceivedCountOverCap(static_cast<int64>(static_cast<int32>(0x80000000u))));
+	TestTrue(TEXT("counts: -1 is over"), IsReceivedCountOverCap(int64{-1}));
+	TestFalse(TEXT("counts: unsigned cap is under"),
+		IsReceivedCountOverCap(static_cast<uint64>(MaxBodyBytes)));
+	TestTrue(TEXT("counts: unsigned max is over"), IsReceivedCountOverCap(TNumericLimits<uint64>::Max()));
+
+	// 0b. The declared-length parse (#837 review): leading zeros carry no
+	// magnitude, and only a plain decimal is read.
+	TestFalse(TEXT("length: the cap is under"),
+		IsDeclaredLengthOverCap(FString::Printf(TEXT("%lld"), static_cast<long long>(MaxBodyBytes))));
+	TestTrue(TEXT("length: cap + 1 is over"),
+		IsDeclaredLengthOverCap(FString::Printf(TEXT("%lld"), static_cast<long long>(MaxBodyBytes + 1))));
+	TestFalse(TEXT("length: zero-padded small is under"),
+		IsDeclaredLengthOverCap(TEXT("0000000000000000000000000016")));
+	TestTrue(TEXT("length: zero-padded cap + 1 is over"),
+		IsDeclaredLengthOverCap(TEXT("0000000000000000000000016777217")));
+	TestTrue(TEXT("length: 30 digits is over"), IsDeclaredLengthOverCap(TEXT("123456789012345678901234567890")));
+	TestFalse(TEXT("length: all zeros is under"), IsDeclaredLengthOverCap(TEXT("0000")));
+	TestFalse(TEXT("length: not a decimal is ignored"), IsDeclaredLengthOverCap(TEXT("-1")));
+	TestFalse(TEXT("length: empty is ignored"), IsDeclaredLengthOverCap(TEXT(" ")));
+
+	// 1. Declared over the cap — refused at the header.
+	{
+		FMockServer Mock;
+		if (!Mock.IsValid())
+		{
+			AddError(TEXT("declared: failed to bind loopback socket"));
+			return false;
+		}
+		Mock.SetBehavior(FMockServer::EMockBehavior::DeclaredOverCap);
+		Mock.Start();
+		const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+		constexpr int32 TimeoutSeconds = 10;
+		FConfigFetcher Fetcher(Key, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), TimeoutSeconds, Logger);
+		const double Start = FPlatformTime::Seconds();
+		const FFetchResult Result = RunFetchPumpedFromGameThread(Fetcher, FString(), 30.0f);
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+		// Give the mock a moment to see the hang-up the cancel caused.
+		const double CloseDeadline = FPlatformTime::Seconds() + 5.0;
+		while (!Mock.SawClientClose() && FPlatformTime::Seconds() < CloseDeadline)
+		{
+			FPlatformProcess::Sleep(0.01f);
+		}
+		Mock.Stop();
+
+		ExpectRefused(TEXT("declared"), Result, *Logger);
+		// The body never arrives: only a refusal at the header ends the
+		// fetch before the request timeout.
+		TestTrue(
+			FString::Printf(TEXT("declared: refused before the request timeout (%.1f s)"), Elapsed),
+			Elapsed < static_cast<double>(TimeoutSeconds) * 0.5);
+		TestTrue(TEXT("declared: the client hung up"), Mock.SawClientClose());
+	}
+
+	// 2. Endless chunked — cut off mid-stream.
+	{
+		FMockServer Mock;
+		if (!Mock.IsValid())
+		{
+			AddError(TEXT("chunked: failed to bind loopback socket"));
+			return false;
+		}
+		Mock.SetBehavior(FMockServer::EMockBehavior::EndlessChunked);
+		Mock.Start();
+		const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+		FConfigFetcher Fetcher(Key, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), /*TimeoutSeconds=*/30, Logger);
+		const FFetchResult Result = RunFetchPumpedFromGameThread(Fetcher, FString(), 60.0f);
+		Mock.Stop();
+
+		ExpectRefused(TEXT("chunked"), Result, *Logger);
+		// Not vacuous: the body really passed the cap, and the client — not
+		// the mock's bound — ended the transfer.
+		TestTrue(
+			FString::Printf(TEXT("chunked: the body passed the cap (%lld bytes sent)"),
+				static_cast<long long>(Mock.BodyBytesSent())),
+			Mock.BodyBytesSent() > MaxBodyBytes);
+		TestTrue(TEXT("chunked: the client hung up mid-stream"), Mock.SendFailed());
+		TestFalse(TEXT("chunked: the mock never reached its own bound"), Mock.HitBodyBound());
+	}
+
+	// 3. Exactly the cap — fetched. A valid config_v6 padded with an
+	// unread field to MaxBodyBytes bytes on the wire (all ASCII).
+	{
+		FMockServer Mock;
+		if (!Mock.IsValid())
+		{
+			AddError(TEXT("at-cap: failed to bind loopback socket"));
+			return false;
+		}
+		const FString Prefix = TEXT("{\"p\":{\"s\":\"\"},\"f\":{},\"s\":[],\"pad\":\"");
+		const FString Suffix = TEXT("\"}");
+		const int32 PadLen = static_cast<int32>(MaxBodyBytes) - Prefix.Len() - Suffix.Len();
+		const FString Body = Prefix + FString::ChrN(PadLen, TEXT('a')) + Suffix;
+		TestEqual(TEXT("at-cap: the body is exactly the cap"), static_cast<int64>(Body.Len()), MaxBodyBytes);
+		Mock.Enqueue(FString::Printf(
+						 TEXT("HTTP/1.1 200 OK\r\nETag: \"cap\"\r\nContent-Length: %d\r\n")
+						 TEXT("Connection: close\r\n\r\n"),
+						 Body.Len())
+			+ Body);
+		Mock.Start();
+		const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+		FConfigFetcher Fetcher(Key, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), /*TimeoutSeconds=*/30, Logger);
+		const FFetchResult Result = RunFetchPumpedFromGameThread(Fetcher, FString(), 60.0f);
+		Mock.Stop();
+
+		TestTrue(TEXT("at-cap: fetched"), Result.Status == EFetchStatus::Fetched);
+		TestTrue(TEXT("at-cap: the config parsed"), Result.Body.IsValid());
+		TestEqual(TEXT("at-cap: the ETag"), Result.ETag, FString(TEXT("\"cap\"")));
+		TestEqual(TEXT("at-cap: nothing logged"), Logger->Snapshot().Num(), 0);
+	}
+	return true;
+}
+
+// #832 — FetchSync on the game thread pumps the HTTP manager (upstream's
+// Tick 0.05 s + Sleep 0.05 s) instead of waiting on a completion only that
+// thread can deliver. Before #832 the plain wait deadlocked: every
+// game-thread call froze for the give-up bound (35 s by default), then
+// failed. Called here on the test (game) thread with NO external pumping:
+//   - a server that answers: the config is fetched, well inside the
+//     request timeout;
+//   - an endless chunked body: the body cap's progress delegate fires from
+//     the pump's own ticks and cuts it off (`body_too_large`, client hangs
+//     up), so the cap holds under the pump too.
+bool FConfeatureWireGameThreadPumpTest::RunTest(const FString& /*Parameters*/)
+{
+	using namespace Confeature::Internal;
+
+	// Not vacuous: automation tests run on the game thread.
+	if (!TestTrue(TEXT("the test runs on the game thread"), IsInGameThread()))
+	{
+		return false;
+	}
+	constexpr int32 TimeoutSeconds = 30;
+	{
+		FMockServer Mock;
+		if (!Mock.IsValid())
+		{
+			AddError(TEXT("fetch: failed to bind loopback socket"));
+			return false;
+		}
+		const FString Body = TEXT("{\"p\":{\"s\":\"\"},\"f\":{},\"s\":[]}");
+		Mock.Enqueue(FString::Printf(
+			TEXT("HTTP/1.1 200 OK\r\nETag: \"gt\"\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"),
+			Body.Len(), *Body));
+		Mock.Start();
+		const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+		FConfigFetcher Fetcher(WireTestSdkKey, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), TimeoutSeconds, Logger);
+
+		const double Start = FPlatformTime::Seconds();
+		const FFetchResult Result = Fetcher.FetchSync(FString());
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+		Mock.Stop();
+
+		TestTrue(FString::Printf(TEXT("fetch: no deadlock (%.2f s)"), Elapsed), Elapsed < 5.0);
+		TestTrue(TEXT("fetch: fetched"), Result.Status == EFetchStatus::Fetched);
+		TestTrue(TEXT("fetch: the config parsed"), Result.Body.IsValid());
+		TestEqual(TEXT("fetch: the ETag"), Result.ETag, FString(TEXT("\"gt\"")));
+		TestEqual(TEXT("fetch: one request"), Mock.RequestCount(), 1);
+		TestEqual(TEXT("fetch: nothing logged"), Logger->Snapshot().Num(), 0);
+	}
+	{
+		FMockServer Mock;
+		if (!Mock.IsValid())
+		{
+			AddError(TEXT("cap: failed to bind loopback socket"));
+			return false;
+		}
+		Mock.SetBehavior(FMockServer::EMockBehavior::EndlessChunked);
+		Mock.Start();
+		const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+		FConfigFetcher Fetcher(WireTestSdkKey, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), TimeoutSeconds, Logger);
+		const FFetchResult Result = Fetcher.FetchSync(FString());
+		Mock.Stop();
+
+		TestEqual(TEXT("cap: body_too_large under the pump"), Result.Error, FString(FetchError::BodyTooLarge));
+		TestTrue(TEXT("cap: the client hung up mid-stream"), Mock.SendFailed());
+		TestFalse(TEXT("cap: the mock never reached its own bound"), Mock.HitBodyBound());
+	}
+	return true;
+}
+
+// #832 review — `FConfigFetcher::Cancel` (the client's Close) stops the
+// fetch in flight: against a server that never answers, the blocked
+// FetchSync returns `fetch cancelled` long before the request timeout, the
+// connection is closed, and nothing is logged (the completion discards
+// itself).
+bool FConfeatureWireCancelInFlightTest::RunTest(const FString& /*Parameters*/)
+{
+	using namespace Confeature::Internal;
+
+	FMockServer Mock;
+	if (!Mock.IsValid())
+	{
+		AddError(TEXT("failed to bind loopback socket"));
+		return false;
+	}
+	Mock.SetBehavior(FMockServer::EMockBehavior::Timeout);
+	Mock.Start();
+	const TSharedRef<FCapturingLogger> Logger = MakeShared<FCapturingLogger>();
+	constexpr int32 TimeoutSeconds = 20;
+	FConfigFetcher Fetcher(WireTestSdkKey, TEXT("0.0.0-wire-test"), BaseUrlFor(Mock), TimeoutSeconds, Logger);
+
+	TFuture<FFetchResult> Future
+		= Async(EAsyncExecution::Thread, [&Fetcher]() { return Fetcher.FetchSync(FString()); });
+	FHttpManager& Manager = FHttpModule::Get().GetHttpManager();
+	const double SeenDeadline = FPlatformTime::Seconds() + 10.0;
+	while (Mock.RequestCount() == 0 && FPlatformTime::Seconds() < SeenDeadline)
+	{
+		Manager.Tick(0.01f);
+		FPlatformProcess::Sleep(0.01f);
+	}
+	const double CancelledAt = FPlatformTime::Seconds();
+	Fetcher.Cancel();
+	while (!Future.IsReady() && FPlatformTime::Seconds() - CancelledAt < TimeoutSeconds + 10.0)
+	{
+		Manager.Tick(0.01f);
+		FPlatformProcess::Sleep(0.01f);
+	}
+	const FFetchResult Result = Future.Get();
+	const double Ended = FPlatformTime::Seconds() - CancelledAt;
+	Mock.Stop();
+
+	TestEqual(TEXT("the request reached the server"), Mock.RequestCount(), 1);
+	TestTrue(FString::Printf(TEXT("ended soon after the cancel (%.2f s)"), Ended), Ended < 5.0);
+	TestTrue(TEXT("the fetch failed"), Result.Status == EFetchStatus::Failed);
+	TestEqual(TEXT("the fixed reason"), Result.Error, FString(FetchError::Cancelled));
+	TestEqual(TEXT("nothing logged"), Logger->Snapshot().Num(), 0);
+	TestTrue(TEXT("the cancel closed the connection"), Mock.SawClientClose());
 	return true;
 }

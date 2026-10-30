@@ -36,15 +36,7 @@
 import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
-import {
-  DAGGER_FN,
-  KINDS,
-  NAME,
-  OUTPUT_KEYS,
-  PLAIN_PATH,
-  SELECT_JOB,
-  TICKET,
-} from "./select-sdks.mjs";
+import { KINDS, legProblem, OUTPUT_KEYS, PLAIN_PATH, SELECT_JOB } from "./select-sdks.mjs";
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const quoted = (names) => names.map((n) => `\`${n}\``).join(", ");
@@ -83,18 +75,7 @@ function readSelection(outputs) {
       continue;
     }
     const kind = KINDS.find((x) => x.output === k);
-    const leg = (x) =>
-      isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
-    const bad = v.filter((x) =>
-      !kind.live
-        ? typeof x !== "string" || !NAME.test(x)
-        : kind.native !== undefined
-          ? !leg(x)
-          : !leg(x) ||
-            typeof x.daggerFn !== "string" ||
-            !DAGGER_FN.test(x.daggerFn) ||
-            (k === "known_red" && (typeof x.ticket !== "string" || !TICKET.test(x.ticket))),
-    );
+    const bad = v.filter((x) => legProblem(kind, x));
     if (bad.length > 0) {
       problems.push(
         `select's output ${k} holds ${bad.length} entr${bad.length === 1 ? "y" : "ies"} that are not manifest SDKs`,

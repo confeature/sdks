@@ -16,7 +16,9 @@ Options:
   --help                  Print this message and exit 0
   --version               Print version and exit 0
   --exec -- <cmd…>        Boot, run <cmd> with CONFEATURE_LIVE=1 and
-                          LIVE_HARNESS_URL set, exit with its code, stop
+                          LIVE_HARNESS_URL set, exit with its code, stop;
+                          a <cmd> that exits 0 leaving any seeded key
+                          unrequested exits 1, naming the keys
 `;
 
 export type ParsedArgs = {

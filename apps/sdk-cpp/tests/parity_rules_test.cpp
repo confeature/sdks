@@ -44,6 +44,7 @@
 #include "confeature/flag_overrides.h"
 #include "confeature/snapshot.h"
 #include "confeature/user.h"
+#include "require_value.h"
 #include "workspace_root.h"
 
 using confeature::ConfigOverrideDataSource;
@@ -92,9 +93,8 @@ std::unique_ptr<User> buildUser(const json& userJson) {
         user->withCustom(it.key(), v.get<std::string>());
       } else if (v.is_object() && v.contains("$date")) {
         const double seconds = v.at("$date").get<double>();
-        const auto sinceEpoch =
-            std::chrono::duration_cast<User::date_time_t::duration>(
-                std::chrono::duration<double>(seconds));
+        const auto sinceEpoch = std::chrono::duration_cast<User::date_time_t::duration>(
+            std::chrono::duration<double>(seconds));
         user->withCustom(it.key(), User::date_time_t(sinceEpoch));
       } else if (v.is_object() && v.contains("$num")) {
         const auto tag = v.at("$num").get<std::string>();
@@ -218,8 +218,8 @@ TEST_CASE("parity rules corpus is non-empty via full-config override", "[parity_
       std::optional<std::string> actualVid;
       switch (settingType) {
         case 0:  // Bool
-          actualVid = snapshot.getValueDetails<bool>(key, defaultJson.get<bool>(), user.get())
-                          .variationId;
+          actualVid =
+              snapshot.getValueDetails<bool>(key, defaultJson.get<bool>(), user.get()).variationId;
           break;
         case 1:  // String
           actualVid =
@@ -238,7 +238,7 @@ TEST_CASE("parity rules corpus is non-empty via full-config override", "[parity_
       INFO("variationId mismatch: expected=" << expectedVid
                                              << " actual=" << actualVid.value_or("<nullopt>"));
       REQUIRE(actualVid.has_value());
-      REQUIRE(*actualVid == expectedVid);
+      REQUIRE(actualVid == expectedVid);
     }
     ++passed;
   }
@@ -264,9 +264,9 @@ TEST_CASE("ConfigOverrideDataSource retains the full config", "[parity_rules]") 
 
   // getOverridesSync exposes the rule-bearing settings map (`f`) so
   // getAllKeys / getAllValues can enumerate the override's flag keys.
-  const auto maybeMap = source.getOverridesSync();
-  REQUIRE(maybeMap.has_value());
+  const auto overrides =
+      confeature::tests::requireValue(source.getOverridesSync(), "the override map");
   for (auto it = cfgJson.at("f").begin(); it != cfgJson.at("f").end(); ++it) {
-    REQUIRE(maybeMap->count(it.key()) == 1);
+    REQUIRE(overrides.count(it.key()) == 1);
   }
 }

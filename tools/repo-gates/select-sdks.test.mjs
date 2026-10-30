@@ -22,12 +22,15 @@ import {
   MANIFEST,
   NAME,
   OUTPUT_KEYS,
+  legProblem,
   SelectError,
   classifyPath,
   gateFiles,
+  hasLiveSuite,
   manifestProblems,
   routeSelection,
   selectNames,
+  shellOperatorsOutsideQuotes,
   workspaceDependents,
 } from "./select-sdks.mjs";
 
@@ -167,7 +170,11 @@ const fixture = () => ({
   sdks: [
     { name: "a", daggerFn: "a-test" },
     { name: "b", daggerFn: "b-test" },
-    { name: "live", daggerFn: "live-test", liveSuite: { runner: `${LIVE_WRAPPER}node run` } },
+    {
+      name: "live",
+      daggerFn: "live-test",
+      liveSuite: { runner: `${LIVE_WRAPPER}node run`, toolchain: "js" },
+    },
     { name: "mac", daggerFn: null, ci: { native: "macos" } },
     { name: "ue", daggerFn: null, ci: { native: "smoke" } },
     {
@@ -354,6 +361,44 @@ describe("the manifest's CI shape", () => {
       { name: "x", daggerFn: "x-test", liveExempt: "" },
       /liveExempt/,
     ],
+    // M8: a Dagger live suite names the live toolchain recipe that builds its
+    // container (liveSuite.toolchain), never defaulted; a native SDK runs on
+    // its own job's toolchain, so it never names one.
+    [
+      "a Dagger live suite with no toolchain",
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}r` } },
+      /has a liveSuite and a daggerFn but no liveSuite\.toolchain/,
+    ],
+    [
+      "a toolchain on a macOS SDK",
+      {
+        name: "x",
+        daggerFn: null,
+        ci: { native: "macos" },
+        liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: "swift" },
+      },
+      /liveSuite\.toolchain on an SDK with no Dagger leg/,
+    ],
+    ...[
+      ["a toolchain id with a space", "a b"],
+      ["a toolchain id that is not a string", 42],
+      ["an empty toolchain id", ""],
+    ].map(([name, id]) => [
+      name,
+      { name: "x", daggerFn: "x-test", liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: id } },
+      /liveSuite\.toolchain .* is not a toolchain id/,
+    ]),
+    [
+      // NAME-shaped, so only the Object.prototype check refuses it: a lookup
+      // of it in a plain object would find Object itself, not a recipe.
+      "the toolchain id constructor, an Object.prototype key",
+      {
+        name: "x",
+        daggerFn: "x-test",
+        liveSuite: { runner: `${LIVE_WRAPPER}r`, toolchain: "constructor" },
+      },
+      /liveSuite\.toolchain "constructor" is a key every object has/,
+    ],
     ["a name with a capital", { name: "X", daggerFn: "x-test" }, /name/],
     ["a name with a space", { name: "a b", daggerFn: "x-test" }, /name/],
     ["a duplicate name", { name: "a", daggerFn: "a-test" }, /twice/],
@@ -362,10 +407,110 @@ describe("the manifest's CI shape", () => {
       expect.stringMatching(re),
     );
   });
+  it("M8: refuses every Object.prototype key as a toolchain id", () => {
+    for (const id of Object.getOwnPropertyNames(Object.prototype)) {
+      const live = { runner: `${LIVE_WRAPPER}r`, toolchain: id };
+      expect(
+        manifestProblems(withEntry({ name: "x", daggerFn: "x-test", liveSuite: live })).map(
+          (p) => p.why,
+        ),
+        id,
+      ).toContainEqual(expect.stringMatching(/liveSuite\.toolchain/));
+    }
+  });
+  // M8 on the real manifest: every Linux live SDK names its toolchain, and
+  // deleting any one of them is refused for that SDK. An empty set would run
+  // no row at all, so it is asserted first.
+  const LINUX_LIVE = REAL.sdks.filter((s) => s.daggerFn && hasLiveSuite(s));
+  it("the real manifest has Linux live SDKs for the next rows to judge", () =>
+    expect(LINUX_LIVE.length).toBeGreaterThan(0));
+  it.each(LINUX_LIVE.map((s) => s.name))(
+    "refuses the real manifest with %s's liveSuite.toolchain deleted",
+    (name) => {
+      const m = structuredClone(REAL);
+      delete m.sdks.find((s) => s.name === name).liveSuite.toolchain;
+      expect(manifestProblems(m)).toContainEqual({
+        sdk: name,
+        why: expect.stringMatching(/no liveSuite\.toolchain/),
+      });
+    },
+  );
   it("refuses a manifest with no sdks[]", () =>
     expect(manifestProblems({}).map((p) => p.why)).toContainEqual(
       expect.stringMatching(/no sdks/),
     ));
+});
+
+// #926 A4: a runner is run as one `bash -c "<runner>"` (run-live-suite.mjs's
+// runnerArgv, on both paths), so a shell operator after the wrapped
+// command runs OUTSIDE the wrapper: `<wrapper> -- cmd || true` is green
+// whatever the wrapper says. Only the runner's own unquoted text is refused;
+// a `bash -c '… && …'` argument is the wrapped command, and stays legal.
+describe("a liveSuite.runner carries no shell operator outside the wrapped command (#926 A4)", () => {
+  const runner = (tail) => ({
+    sdks: [
+      {
+        name: "x",
+        daggerFn: "x-test",
+        liveSuite: { runner: `${LIVE_WRAPPER}${tail}`, toolchain: "x" },
+      },
+    ],
+  });
+  const whys = (tail) => manifestProblems(runner(tail)).map((p) => p.why);
+
+  // MUTATION: drop the operator check from manifestProblems and every one of
+  // these is accepted again, `|| true` first.
+  it.each([
+    ["|| true", "cmd || true"],
+    ["; true", "cmd; true"],
+    ["& (background)", "cmd & true"],
+    ["| (pipe)", "cmd | tee log"],
+    ["&& true", "cmd && true"],
+    ["> (redirect)", "cmd > /dev/null"],
+    ["< (redirect)", "cmd < /dev/null"],
+    ["( (subshell)", "(cmd)"],
+    ["a newline", "cmd\ntrue"],
+    ["$( substitution", "cmd $(true)"],
+    ["a backtick substitution", "cmd `true`"],
+    ["$( inside double quotes", 'cmd "$(true)"'],
+    ["|| true after a quoted argument", "bash -c 'a && b' || true"],
+  ])("refuses %s", (_label, tail) => {
+    expect(whys(tail)).toContainEqual(expect.stringMatching(/shell (operator|substitution)/));
+  });
+
+  it("refuses an unterminated quote: what bash would read cannot be judged", () => {
+    expect(whys("bash -c 'cmd")).toContainEqual(expect.stringMatching(/unterminated/));
+    expect(whys('bash -c "cmd')).toContainEqual(expect.stringMatching(/unterminated/));
+  });
+
+  it.each([
+    [
+      "a bash -c argument with && and || inside its single quotes",
+      "bash -c 'cd a && t || exit 1; done'",
+    ],
+    ["operators inside double quotes", 'node -e "a|b;c&d>e"'],
+    ["escaped operators", "echo \\|\\;\\&"],
+    ["a plain command", "pnpm --filter @confeature/sdk-node exec vp test run t.live.test.ts"],
+    ["a variable", "cmd $HOME"],
+  ])("accepts %s", (_label, tail) => {
+    expect(whys(tail)).toEqual([]);
+  });
+
+  it("names the operators it found, outside quotes only", () => {
+    expect(shellOperatorsOutsideQuotes("bash -c 'a || b' || true; x")).toEqual({
+      operators: ["||", ";"],
+      unterminated: false,
+    });
+    expect(shellOperatorsOutsideQuotes("a 'b")).toEqual({ operators: [], unterminated: true });
+  });
+
+  it("every real runner passes", () => {
+    for (const s of REAL.sdks.filter((x) => hasLiveSuite(x)))
+      expect(
+        shellOperatorsOutsideQuotes(s.liveSuite.runner.slice(LIVE_WRAPPER.length)),
+        s.name,
+      ).toEqual({ operators: [], unterminated: false });
+  });
 });
 
 describe("the gate files a pull request changes", () => {
@@ -689,4 +834,69 @@ describe("the CLI", SPAWNS, () => {
     for (const k of ["gate", "known_red", "swift", "smoke"])
       for (const n of names(got.outputs, k)) expect(n).toMatch(NAME);
   });
+});
+
+describe("legProblem — the one statement of a leg's shape (#927 B4)", () => {
+  const kind = (output) => KINDS.find((k) => k.output === output);
+  it("accepts exactly the shape routeSelection writes for each kind", () => {
+    expect(legProblem(kind("smoke"), "node")).toBe(false);
+    expect(legProblem(kind("swift"), { name: "swift", live: true })).toBe(false);
+    expect(legProblem(kind("gate"), { name: "go", daggerFn: "go-test", live: false })).toBe(false);
+    expect(
+      legProblem(kind("known_red"), { name: "go", daggerFn: "go-test", live: false, ticket: "#1" }),
+    ).toBe(false);
+  });
+  it("refuses another kind's shape, a bad name, a missing live flag or a missing waiver", () => {
+    expect(legProblem(kind("smoke"), { name: "node", live: false })).toBe(true);
+    expect(legProblem(kind("swift"), "swift")).toBe(true);
+    expect(legProblem(kind("gate"), { name: "Go", daggerFn: "go-test", live: false })).toBe(true);
+    expect(legProblem(kind("gate"), { name: "go", daggerFn: "go-test" })).toBe(true);
+    expect(legProblem(kind("gate"), { name: "go", live: false })).toBe(true);
+    expect(legProblem(kind("known_red"), { name: "go", daggerFn: "go-test", live: false })).toBe(
+      true,
+    );
+  });
+  // M14: the Dagger leg's one summary step says "known red, not counted"
+  // exactly when the leg carries a ticket, so only a known-red leg may.
+  const GO = { name: "go", daggerFn: "go-test", live: false };
+  it.each([
+    ["a gate leg", "gate", { ...GO, ticket: "#1" }],
+    ["a gate leg, even an empty one", "gate", { ...GO, ticket: "" }],
+    ["a gate leg, even a null one", "gate", { ...GO, ticket: null }],
+    ["a macOS leg", "swift", { name: "swift", live: true, ticket: "#1" }],
+  ])("refuses a ticket on %s", (_, output, leg) =>
+    expect(legProblem(kind(output), leg)).toBe(true),
+  );
+  it("every kind but known_red is refused a ticket, and known_red alone is refused none", () => {
+    const shape = {
+      gate: GO,
+      known_red: { ...GO, ticket: "#1" },
+      swift: { name: "swift", live: true },
+    };
+    const liveKinds = KINDS.filter((x) => x.live);
+    // A loop over no kind asserts nothing: the live kinds are exactly the fixtures.
+    expect(liveKinds.map((k) => k.output).sort()).toEqual(Object.keys(shape).sort());
+    for (const k of liveKinds) {
+      const leg = shape[k.output];
+      expect(leg, `a fixture leg for ${k.output}`).toBeDefined();
+      expect(legProblem(k, leg), k.output).toBe(false);
+      const { ticket: _, ...bare } = leg;
+      expect(legProblem(k, { ...bare, ticket: "#1" }), k.output).toBe(k.output !== "known_red");
+    }
+  });
+});
+
+describe("hasLiveSuite: an SDK has a live suite exactly when liveSuite.runner is a string", () => {
+  it.each([
+    ["a runner", { liveSuite: { runner: "x" } }, true],
+    [
+      "a blank runner (manifestProblems refuses it, but it is a live suite)",
+      { liveSuite: { runner: " " } },
+      true,
+    ],
+    ["no liveSuite", {}, false],
+    ["a liveSuite without a runner", { liveSuite: {} }, false],
+    ["a runner that is not a string", { liveSuite: { runner: 1 } }, false],
+    ["no entry at all", undefined, false],
+  ])("%s", (_why, sdk, expected) => expect(hasLiveSuite(sdk)).toBe(expected));
 });

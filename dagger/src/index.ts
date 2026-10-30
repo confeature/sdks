@@ -128,7 +128,8 @@ function jsWorkspace(source: Directory, platform?: Platform): Container {
 
 /**
  * Build the shared Android-SDK container (JDK 17 + cmdline-tools + platform-34 +
- * build-tools), used by `androidTest` and `kotlinMpTest`. Both apply the Android
+ * build-tools), used by `androidTest`, and by `kotlinMpTest` through
+ * `kotlinMpToolchain`. Both apply the Android
  * Gradle Plugin (kotlin-mp's `androidTarget` needs ANDROID_HOME even to
  * *configure* its `jvmTest` task), so neither can run on a bare JDK image.
  *
@@ -138,6 +139,11 @@ function jsWorkspace(source: Directory, platform?: Platform): Container {
  * target. License acceptance is non-interactive (`yes | sdkmanager --licenses`).
  */
 function androidSdkContainer(source: Directory): Container {
+  return androidSdkToolchain().withMountedDirectory("/work", source);
+}
+
+/** {@link androidSdkContainer} before the source is mounted, so a layer added on top stays cached. */
+function androidSdkToolchain(): Container {
   const cmdlineTools =
     "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip";
   // Pin to linux/amd64: AGP fetches `com.android.tools.build:aapt2:*:linux`, an
@@ -176,22 +182,43 @@ function androidSdkContainer(source: Directory): Container {
         `  "$TOOLS/sdkmanager" 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' >/dev/null`,
         "fi",
       ].join("\n"),
-    ])
-    .withMountedDirectory("/work", source);
+    ]);
 }
 
 /**
- * An SDK's `liveSuite.runner` from `dagger/sdk-manifest.json` — the one command
- * that runs its live wire-cases (#783, #918). Throws when the SDK has none: a
- * Dagger live gate with nothing to run must fail, not pass.
+ * Chrome for Testing's headless shell, pinned by version and SHA-256: the browser
+ * kotlin-mp's `jsBrowserTest` runs in (#928). Without it the gate skipped the
+ * browser target. The zip carries `deb.deps`, Chrome's own list of the Debian
+ * packages it needs; `apt-get satisfy` installs them under whatever names the
+ * base image's release gives them (the t64 renames included), so the list is
+ * never restated here. Karma finds the binary through `CHROME_BIN`.
  */
-async function liveSuiteRunner(source: Directory, sdk: string): Promise<string> {
-  const manifest = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
-    sdks: Array<{ name: string; liveSuite?: { runner: string } }>;
-  };
-  const runner = manifest.sdks.find((s) => s.name === sdk)?.liveSuite?.runner;
-  if (!runner) throw new Error(`dagger/sdk-manifest.json has no ${sdk} liveSuite.runner`);
-  return runner;
+const CHROME_FOR_TESTING = {
+  version: "156.0.8078.47",
+  sha256: "0d5acc62c3e213f8c87d3c298d66ffcf9a236d12ea4b9f85318bf85dbc279daa",
+};
+
+/** kotlin-mp's toolchain: the Android SDK image plus the pinned headless Chrome. */
+function kotlinMpToolchain(source: Directory): Container {
+  const { version, sha256 } = CHROME_FOR_TESTING;
+  const zip = `https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-headless-shell-linux64.zip`;
+  return androidSdkToolchain()
+    .withExec([
+      "bash",
+      "-eu",
+      "-c",
+      [
+        `curl -sSfLo /tmp/chrome.zip ${zip}`,
+        `echo "${sha256}  /tmp/chrome.zip" | sha256sum -c -`,
+        "unzip -q /tmp/chrome.zip -d /opt",
+        "rm /tmp/chrome.zip",
+        "apt-get update >/dev/null",
+        'apt-get satisfy -y --no-install-recommends "$(paste -sd, /opt/chrome-headless-shell-linux64/deb.deps)" >/dev/null',
+        "rm -rf /var/lib/apt/lists/*",
+      ].join("\n"),
+    ])
+    .withEnvVariable("CHROME_BIN", "/opt/chrome-headless-shell-linux64/chrome-headless-shell")
+    .withMountedDirectory("/work", source);
 }
 
 /**
@@ -380,7 +407,10 @@ function cppToolchain(source: Directory): Container {
         "bash",
         "-eu",
         "-c",
-        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev >/dev/null && rm -rf /var/lib/apt/lists/*",
+        // clang-tidy-19 / clang-format-19 (bookworm main, 19.1.7): one LLVM
+        // major for both, the SDK's declared lint bar run by `cppTest` (#839).
+        // python3 runs run-clang-tidy-19.
+        "apt-get update >/dev/null && apt-get install -y --no-install-recommends g++ cmake make git ca-certificates libcurl4-openssl-dev libssl-dev clang-tidy-19 clang-format-19 python3 >/dev/null && rm -rf /var/lib/apt/lists/*",
       ])
       .withMountedDirectory("/work", source)
       .withWorkdir("/work/apps/sdk-cpp")
@@ -416,19 +446,25 @@ function deployedHarness(source: Directory, platform?: Platform): Directory {
     .directory("/harness-deploy");
 }
 
+/** How a live container is built: the builder, and whether it already carries Node and the harness. */
+type LiveToolchain = { build: (source: Directory) => Container; node?: true };
+
 /**
- * Which toolchain container runs each SDK's live suite (#918, FR-015): the
- * SDK's own builder, the one its `*Test` function uses, so the live suite runs
- * on exactly the toolchain the suite does. The single home of the map; an SDK
- * with a `liveSuite.runner` and no entry here is refused, never defaulted.
- * `node: true` marks a builder that already has the pinned Node runtime and a
- * built harness (the JS family's `jsWorkspace`).
+ * The recipes a Dagger live suite's container is built from, keyed by
+ * toolchain id. Each recipe is an SDK builder, the one its `*Test` function
+ * uses, so a live suite runs on exactly the toolchain its suite does.
+ *
+ * This is a recipe table, not an SDK list. An SDK reaches a recipe only
+ * through its `liveSuite.toolchain` in dagger/sdk-manifest.json, the one SDK
+ * list, never by its own name, and nothing enumerates these keys to find
+ * SDKs. That 12 of the ids are spelled like the one SDK they serve is
+ * naming, not a second list; `js` serves the whole JS family. An id with no
+ * recipe is refused by liveContainer, never defaulted. `node: true` marks a
+ * builder that already has the pinned Node runtime and a built harness
+ * (`jsWorkspace`), and is set here only.
  */
-const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container; node?: true }> = {
-  node: { build: jsWorkspace, node: true },
-  "browser-js": { build: jsWorkspace, node: true },
-  bun: { build: jsWorkspace, node: true },
-  deno: { build: jsWorkspace, node: true },
+const LIVE_TOOLCHAINS: Record<string, LiveToolchain> = {
+  js: { build: jsWorkspace, node: true },
   python: { build: pythonToolchain },
   ruby: { build: rubyToolchain },
   php: { build: phpToolchain },
@@ -436,7 +472,7 @@ const LIVE_TOOLCHAINS: Record<string, { build: (source: Directory) => Container;
   rust: { build: rustToolchain },
   java: { build: javaToolchain },
   android: { build: androidSdkContainer },
-  "kotlin-mp": { build: androidSdkContainer },
+  "kotlin-mp": { build: kotlinMpToolchain },
   dotnet: { build: dotnetToolchain },
   dart: { build: dartToolchain },
   elixir: { build: elixirToolchain },
@@ -463,8 +499,10 @@ function nativeHarnessCheck(platform: Platform): string {
 }
 
 /**
- * The container an SDK's live suite runs in, at the repository root: its
- * toolchain, plus (outside the JS family) the pinned Node runtime copied from
+ * The container an SDK's live suite runs in, at the repository root: the
+ * LIVE_TOOLCHAINS recipe its manifest `liveSuite.toolchain` names, read from
+ * `source` (an SDK with no id, or an id with no recipe, is refused naming
+ * both; `Object.hasOwn`, so no Object.prototype key passes), plus (outside the JS family) the pinned Node runtime copied from
  * `NODE_IMAGE`'s `/usr/local` — every toolchain image is glibc Debian or
  * Ubuntu — and the deployed harness mounted where the runner names it.
  *
@@ -477,11 +515,15 @@ function nativeHarnessCheck(platform: Platform): string {
  * platform mismatch fails as one, not as a suite that cannot boot its harness.
  */
 async function liveContainer(source: Directory, sdk: string): Promise<Container> {
-  const toolchain = LIVE_TOOLCHAINS[sdk];
-  if (toolchain === undefined)
+  const { sdks } = JSON.parse(await source.file("dagger/sdk-manifest.json").contents()) as {
+    sdks: Array<{ name: string; liveSuite?: { toolchain?: unknown } }>;
+  };
+  const id = sdks.find((s) => s.name === sdk)?.liveSuite?.toolchain;
+  if (typeof id !== "string" || !Object.hasOwn(LIVE_TOOLCHAINS, id))
     throw new Error(
-      `dagger/src/index.ts LIVE_TOOLCHAINS has no toolchain for ${sdk}: add its builder there`,
+      `dagger/sdk-manifest.json: ${sdk}'s liveSuite.toolchain ${JSON.stringify(id ?? null)} is not a LIVE_TOOLCHAINS recipe of dagger/src/index.ts`,
     );
+  const toolchain = LIVE_TOOLCHAINS[id];
   const base = toolchain.build(source);
   if (toolchain.node) return base.withWorkdir("/work");
   const platform = await base.platform();
@@ -694,8 +736,8 @@ export class Confeature {
   /** Run apps/sdk-php's composer `test` (phpunit) on PHP 8.3 + composer. */
   @func()
   async phpTest(source: Directory): Promise<string> {
-    // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar
-    // (.claude/agents/sdk-php.md rule 9): zero offenses (#793 FR-007).
+    // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar:
+    // zero offenses (#793 FR-007).
     const result = await phpToolchain(source)
       .withExec([
         "bash",
@@ -736,8 +778,8 @@ export class Confeature {
   @func()
   async rustTest(source: Directory): Promise<string> {
     // MSRV guard (cargo +1.86 build --lib, no dev-deps), then fmt, clippy
-    // with -D warnings (the SDK's declared merge bar, .claude/agents/sdk-rust.md
-    // rule 9; #793 FR-007) and the tests on the image's 1.88 default.
+    // with -D warnings (the SDK's declared merge bar, #793 FR-007) and the
+    // tests on the image's 1.88 default.
     // rustfmt and clippy adds are idempotent.
     const result = await rustToolchain(source)
       .withExec([
@@ -754,8 +796,8 @@ export class Confeature {
   /** Run apps/sdk-dart's `dart analyze && dart test` on the stable Dart SDK. */
   @func()
   async dartTest(source: Directory): Promise<string> {
-    // `dart analyze --fatal-infos` is the SDK's declared bar
-    // (.claude/agents/sdk-dart.md rule 8); `dart format` holds the formatting.
+    // `dart analyze --fatal-infos` is the SDK's declared bar; `dart format`
+    // holds the formatting.
     const result = await dartToolchain(source)
       .withExec([
         "bash",
@@ -789,9 +831,8 @@ export class Confeature {
         "bash",
         "-eu",
         "-c",
-        // `mix credo --strict` is the SDK's declared bar
-        // (.claude/agents/sdk-elixir.md rule 9); `mix format` holds the
-        // formatting. The prod compile is what a customer's `mix deps.compile`
+        // `mix credo --strict` is the SDK's declared bar; `mix format` holds
+        // the formatting. The prod compile is what a customer's `mix deps.compile`
         // does: the suite alone ran under MIX_ENV=test, where a test-only
         // transitive dependency (TypedStruct) hid a missing one (#805).
         "mix local.hex --force && mix local.rebar --force && mix deps.get && mix format --check-formatted && mix credo --strict && mix test && MIX_ENV=prod mix compile --warnings-as-errors",
@@ -801,16 +842,36 @@ export class Confeature {
     return `${lastLine} (Tier 3 elixirTest)`;
   }
 
-  /** Build + run apps/sdk-cpp's Catch2 suite (C++17, libcurl + OpenSSL 3, FetchContent). */
+  /**
+   * Build apps/sdk-cpp (C++17, libcurl + OpenSSL 3, FetchContent), lint it,
+   * then run its Catch2 suite.
+   *
+   * The lint is the SDK's declared bar, its own `.clang-tidy` and
+   * `.clang-format` (#839): clang-tidy over every src/ and tests/ translation unit in the
+   * exported compile_commands.json (headers through `.clang-tidy`'s
+   * HeaderFilterRegex), with `--warnings-as-errors='*'` because the config's
+   * `WarningsAsErrors` is empty and a warning alone exits 0; then
+   * `clang-format --dry-run --Werror` over every .h/.cpp under include/, src/
+   * and tests/ (the source view holds tracked files only). The file list is
+   * refused when empty: clang-format given no file reads stdin and passes.
+   */
   @func()
   async cppTest(source: Directory): Promise<string> {
-    // clang-tidy and clang-format, the SDK's declared bar, are #839.
     const result = await cppToolchain(source)
       .withExec([
         "bash",
-        "-eu",
+        "-euo",
+        "pipefail",
         "-c",
-        "cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON && cmake --build /cache/cpp-build && ctest --test-dir /cache/cpp-build --output-on-failure",
+        [
+          "cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON",
+          "cmake --build /cache/cpp-build",
+          "run-clang-tidy-19 -clang-tidy-binary clang-tidy-19 -p /cache/cpp-build -quiet -warnings-as-errors='*' '/sdk-cpp/(src|tests)/'",
+          "files=$(find include src tests -name '*.h' -o -name '*.cpp')",
+          'test -n "$files"',
+          "clang-format-19 --dry-run --Werror $files",
+          "ctest --test-dir /cache/cpp-build --output-on-failure",
+        ].join(" && "),
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
@@ -822,20 +883,20 @@ export class Confeature {
   async androidTest(source: Directory): Promise<string> {
     const result = await androidSdkContainer(source)
       .withWorkdir("/work/apps/sdk-android")
-      // The SDK's declared bar (.claude/agents/sdk-android.md rule 8, #793
-      // FR-007): Android Lint, the unit tests, the release AAR build.
+      // The SDK's declared bar (#793 FR-007): Android Lint, the unit tests,
+      // the release AAR build.
       .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon lint test assembleRelease"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 androidTest)`;
   }
 
-  /** Run apps/sdk-kotlin-mp's `check`, minus jsBrowserTest: the image has no browser. */
+  /** Run apps/sdk-kotlin-mp's `check`, its browser target included (#928). */
   @func()
   async kotlinMpTest(source: Directory): Promise<string> {
-    const result = await androidSdkContainer(source)
+    const result = await kotlinMpToolchain(source)
       .withWorkdir("/work/apps/sdk-kotlin-mp")
-      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check -x jsBrowserTest"])
+      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 kotlinMpTest)`;
@@ -950,25 +1011,34 @@ export class Confeature {
    * Run one SDK's live wire-cases against the harness (#918, FR-015): the CLI's
    * `live-suite --sdk <name>`, a step of that SDK's leg in sdk-gates.yml.
    *
-   * The command is the SDK's `liveSuite.runner` from the manifest, its one
-   * home: the harness wrapper (`--corpus-seed --exec`) boots the reference
-   * origin through wrangler `unstable_dev` (in-process workerd, loopback only,
-   * so the loopback-guarded admin routes stay unreachable from the network),
-   * hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`, and passes its
-   * exit code through. One container, not a service binding: the harness
-   * binds 127.0.0.1 by design. The runner runs from the repository root under
-   * `bash -euo pipefail`.
+   * The container is liveContainer's, at the repository root; what runs in it
+   * is tools/repo-gates/run-live-suite.mjs, the one implementation that finds
+   * an SDK's `liveSuite.runner` and runs it, the same script the macOS job
+   * runs natively. So the SDK name, the runner and how bash is handed it are
+   * judged there, by manifestProblems, never here: `sdk` reaches no path,
+   * cache-volume name or argv in this module, only liveContainer's manifest
+   * lookup, the script's `SDK` and the messages.
+   * The runner's harness wrapper (`--corpus-seed --exec`) boots the reference
+   * origin through wrangler `unstable_dev` (in-process workerd, loopback
+   * only, so the loopback-guarded admin routes stay unreachable from the
+   * network) and hands the suite `CONFEATURE_LIVE=1` + `LIVE_HARNESS_URL`.
+   * One container, not a service binding: the harness binds 127.0.0.1 by
+   * design.
+   *
+   * The exec is the default `withExec`, so the script's exit code is the
+   * call's: its exit 2 on a refused runner, or the suite's own failure, fails
+   * the call and reddens the leg. Nothing here may soften that.
    *
    * @param source The workspace root.
    * @param sdk A manifest SDK name with a `liveSuite.runner`.
    */
   @func()
   async liveSuite(source: Directory, sdk: string): Promise<string> {
-    if (!/^[a-z][a-z0-9-]*$/.test(sdk))
-      throw new Error(`${JSON.stringify(sdk)} is not an SDK name`);
-    const runner = await liveSuiteRunner(source, sdk);
     const container = await liveContainer(source, sdk);
-    const result = await container.withExec(["bash", "-euo", "pipefail", "-c", runner]).stdout();
+    const result = await container
+      .withEnvVariable("SDK", sdk)
+      .withExec(["node", "tools/repo-gates/run-live-suite.mjs"])
+      .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (liveSuite ${sdk} #918)`;
   }

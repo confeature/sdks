@@ -86,6 +86,11 @@ export type HarnessHandle = {
   stop(): Promise<void>;
   /** Config requests served for a seeded key since boot (AdminState.served). */
   served(): number;
+  /**
+   * The keys the boot seed declared that no config request has asked for
+   * since boot (#926 A1). Under `--corpus-seed`, every seeded corpus case.
+   */
+  unserved(): string[];
 };
 
 // ---------------------------------------------------------------------------

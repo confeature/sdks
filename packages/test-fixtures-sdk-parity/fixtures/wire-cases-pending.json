@@ -1,0 +1,61 @@
+{
+  "description": "Wire cases a consumer cannot run YET, by name (1.4, #994, epic #834). A consumer listed here skips exactly these case ids and, for each, PROVES it still cannot read the case: its own unknown-field check rejects it (native readers), or the case runs as a strict expected failure (the TS reader, wireTestFor). The moment the consumer can read or pass the case, its proof fails and the entry must go. An unlisted consumer runs every case. scripts/validate-wire-cases.ts checks every entry names a real corpus case, a real consumer (a directory under apps/ whose files read wire-cases.json), a ticket, and that the consumer reads this file. Empty this file's entries, not the cases, as each family child lands.",
+  "pending": {
+    "sdk-android": {
+      "ticket": "#996",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-cpp": {
+      "ticket": "#999",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-dart": {
+      "ticket": "#1000",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-dotnet": {
+      "ticket": "#1001",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-elixir": {
+      "ticket": "#1001",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-go": {
+      "ticket": "#997",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-java": {
+      "ticket": "#996",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-kotlin-mp": {
+      "ticket": "#996",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-php": {
+      "ticket": "#1001",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-python": {
+      "ticket": "#1001",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-ruby": {
+      "ticket": "#1001",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-rust": {
+      "ticket": "#998",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-swift": {
+      "ticket": "#1000",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    },
+    "sdk-unreal": {
+      "ticket": "#999",
+      "cases": ["redirect-https-to-http-refused", "redirect-https-to-https-followed"]
+    }
+  }
+}

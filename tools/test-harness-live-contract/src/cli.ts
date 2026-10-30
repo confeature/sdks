@@ -18,8 +18,10 @@
  *
  * Exit codes:
  *   0   — clean shutdown via signal (serve mode) / <cmd> exited 0 (exec mode)
- *   1   — boot failure (printed on stderr), <cmd> died on a signal, or a
- *         teardown error after <cmd> exited 0
+ *   1   — boot failure (printed on stderr), <cmd> died on a signal, a
+ *         teardown error after <cmd> exited 0, or <cmd> exited 0 having
+ *         sent no request for some key the seed declares (#926, named on
+ *         stderr)
  *   2   — bad CLI arguments
  *   137 — graceful teardown exceeded --shutdown-grace
  *   128+n — (exec mode) interrupted by signal n while <cmd> exited 0 anyway

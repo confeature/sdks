@@ -9,18 +9,25 @@ catalogMode: prefer
 # resolved fresh: a catalog value that disagrees with it is refused at
 # export, rather than shipped in a lockfile pnpm would reject.
 catalog:
-  "@types/node": ^24
+  # One @types/node for the whole workspace (#867): two resolved versions put
+  # two global AbortSignal declarations in a program, and which one pnpm
+  # hoists depends on install order. The override below forces transitive
+  # dependants onto it too; tools/repo-gates fails if a second one resolves.
+  "@types/node": ^25.6.2
   # tsgo, which `vp pack` runs for the .d.ts of every package that sets
   # `dts.tsgo`: one pin for all of them, declared by each (never hoisted in).
   "@typescript/native-preview": 7.0.0-dev.20260509.2
   typescript: ^5
-  vite: npm:@voidzero-dev/vite-plus-core@latest
+  # Pinned with vite-plus too: `@latest` re-resolves on any non-frozen
+  # install and drags the whole peer graph with it.
+  vite: npm:@voidzero-dev/vite-plus-core@0.1.21
   # Pinned with vite-plus: the `vp` CLI bundles its own test runner, so the
   # two must move together, never by float.
   vitest: npm:@voidzero-dev/vite-plus-test@0.1.21
   vite-plus: 0.1.21
 
 overrides:
+  "@types/node": "catalog:"
   vite: "catalog:"
   vitest: "catalog:"
   vite-plus: "catalog:"

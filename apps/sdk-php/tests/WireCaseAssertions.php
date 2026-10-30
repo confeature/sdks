@@ -60,15 +60,78 @@ trait WireCaseAssertions
             throw new \RuntimeException('wire-cases.json must be { cases: [...] }');
         }
 
+        $pending = self::pendingWireCases();
         $cases = [];
         foreach ($data['cases'] as $case) {
             if (!\is_array($case) || !\is_string($case['id'] ?? null)) {
                 throw new \RuntimeException('wire-cases.json carries a malformed case');
             }
+            if (isset($pending[$case['id']])) {
+                // Left out BY NAME (wire-cases-pending.json, 1.4, #994), under
+                // a proof that the entry is still true: this reader still
+                // cannot read the case. The day it can, the entry must go.
+                if (self::unreadFields($case) === []) {
+                    throw new \RuntimeException(\sprintf(
+                        '%s is pending for sdk-php (%s) but this reader reads every field of it — '
+                        . 'remove it from wire-cases-pending.json and run it',
+                        $case['id'],
+                        $pending[$case['id']],
+                    ));
+                }
+                unset($pending[$case['id']]);
+                continue;
+            }
             $cases[$case['id']] = $case;
+        }
+        if ($pending !== []) {
+            throw new \RuntimeException(
+                'wire-cases-pending.json lists ' . implode(', ', array_keys($pending)) . ' for sdk-php, not in the corpus',
+            );
         }
 
         return $cases;
+    }
+
+    /**
+     * sdk-php's entry of `wire-cases-pending.json`: case id => ticket.
+     *
+     * @return array<string, string>
+     */
+    private static function pendingWireCases(): array
+    {
+        $raw = file_get_contents(WorkspaceRoot::fixturePath('wire-cases-pending.json'));
+        if ($raw === false) {
+            throw new \RuntimeException('Cannot read wire-cases-pending.json');
+        }
+        $data = json_decode($raw, true);
+        if (!\is_array($data) || !\is_array($data['pending'] ?? null)) {
+            throw new \RuntimeException('wire-cases-pending.json must be { pending: {...} }');
+        }
+        $entry = $data['pending']['sdk-php'] ?? null;
+        if (!\is_array($entry)) {
+            return [];
+        }
+        $ticket = (string) $entry['ticket'];
+        $out = [];
+        foreach ((array) $entry['cases'] as $id) {
+            $out[(string) $id] = $ticket;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The `given` / `expected` fields of a case this reader does not read.
+     *
+     * @param array<string, mixed> $case
+     * @return list<string>
+     */
+    private static function unreadFields(array $case): array
+    {
+        return array_values(array_merge(
+            array_diff(array_keys((array) $case['given']), self::$knownGivenFields),
+            array_diff(array_keys((array) $case['expected']), self::$knownExpectedFields),
+        ));
     }
 
     /**

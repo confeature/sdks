@@ -15,9 +15,13 @@
 #                   Dagger function, the one definition of its suite, shared
 #                   with the publish gate, release-gate.yml and the pre-push,
 #                   then, when the manifest gives it a liveSuite.runner, its
-#                   live wire-cases (`live-suite --sdk <name>`, #918).
-#   gate-known-red  the same legs for an SDK whose ticketed defect is waived in
-#                   the BASE manifest (ci.knownRed): shown red, never counted.
+#                   live wire-cases (`live-suite --sdk <name>`, #918), then
+#                   one summary line naming the leg. Its steps are written
+#                   once, here (`&dagger-leg`).
+#   gate-known-red  the same steps, by alias (`*dagger-leg`), for an SDK whose
+#                   ticketed defect is waived in the BASE manifest
+#                   (ci.knownRed): shown red, never counted. Its leg carries
+#                   the ticket, so its summary line says so.
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
 #                   whose toolchain is Apple's, on a macos-15 runner; then its
 #                   live wire-cases natively (run-live-suite.mjs, #924).
@@ -37,6 +41,8 @@
 # three unfiltered triggers, the runner labels, a timeout on every job, the
 # concurrency key, fail-fast: false, the empty-matrix guards, and an
 # aggregate that needs every job, runs always() and runs the conclude script.
+# Rule 21 allows one YAML anchor and one alias, the Dagger leg's, and no
+# other anchor, alias or merge key, in this file or any other.
 
 name: sdk-gates
 
@@ -108,7 +114,10 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.gate) }}
-    steps:
+    # The Dagger leg, written once: gate-known-red runs this same list by
+    # alias. verify-workflows.mjs rule 21 allows this one anchor/alias pair
+    # and no other, and rule 19 holds the steps in both jobs.
+    steps: &dagger-leg
       # The leg runs the pull request's code inside Dagger and never pushes, so
       # the checkout keeps no GITHUB_TOKEN in .git/config.
       - name: Checkout
@@ -117,46 +126,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      # The pin, the verified CLI and the action exactly as release-gate.yml's
-      # test job runs them: tools/dagger-call/engine-pin.test.mjs decides how
-      # Dagger is installed, and every workflow asks it.
-      - name: Read the Dagger engine version (dagger/dagger.json)
+      # Dagger as every job sets it up (.github/actions/dagger-setup, #868):
+      # the engine version from dagger/dagger.json, the CLI verified against
+      # dagger/cli-checksums.txt, and the engine image by the digest in
+      # dagger/engine-digest.txt. tools/dagger-call/engine-pin.test.mjs
+      # follows the action into its action.yml and fails on any drift.
+      - name: Set up the pinned Dagger (.github/actions/dagger-setup)
         id: pin
-        run: |
-          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
-          if [ -z "${version}" ]; then
-            echo "::error::dagger/dagger.json has no engineVersion"
-            exit 1
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
-      # this repository, never from a checksum served by the download host. With
-      # this CLI first on PATH at the pinned version, the action below finds it
-      # and skips its own install.sh.
-      - name: Install the checksum-verified Dagger CLI
-        env:
-          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
-        run: |
-          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
-          dir="${RUNNER_TEMP}/dagger-cli"
-          mkdir -p "${dir}/bin"
-          cd "${dir}"
-          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
-            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
-          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
-          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
-            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
-            exit 1
-          fi
-          sha256sum -c --strict expected.sha256
-          tar -xzf "${tarball}" -C bin dagger
-          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
-          if [ "${got}" != "${DAGGER_VERSION}" ]; then
-            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
-            exit 1
-          fi
-          echo "${dir}/bin" >> "$GITHUB_PATH"
+        uses: ./.github/actions/dagger-setup
 
       # The action is pinned by commit SHA (v8.4.1, the contract that supports
       # verb/module/args/enable-github-summary) and the engine by `version:`,
@@ -186,14 +163,22 @@ jobs:
           args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
           enable-github-summary: true
 
-      # A matrix job reports one combined result, so each leg names itself.
+      # A matrix job reports one combined result, so each leg names itself. The
+      # known-red line is printed when the leg has a ticket, which only a
+      # known-red leg carries (select-sdks.mjs legProblem); the ticket reaches
+      # the step through env: only.
       - name: Name the leg in its summary
         if: always()
         env:
           SDK: ${{ matrix.sdk.name }}
+          TICKET: ${{ matrix.sdk.ticket }}
           STATUS: ${{ job.status }}
         run: |
-          echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${TICKET}" ]; then
+            echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   gate-known-red:
     name: gate (${{ matrix.sdk.name }}, known red ${{ matrix.sdk.ticket }})
@@ -205,91 +190,13 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.known_red) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Read the Dagger engine version (dagger/dagger.json)
-        id: pin
-        run: |
-          version="$(jq -r '.engineVersion // empty' dagger/dagger.json)"
-          if [ -z "${version}" ]; then
-            echo "::error::dagger/dagger.json has no engineVersion"
-            exit 1
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      # The CLI's bytes are trusted from dagger/cli-checksums.txt, committed in
-      # this repository, never from a checksum served by the download host. With
-      # this CLI first on PATH at the pinned version, the action below finds it
-      # and skips its own install.sh.
-      - name: Install the checksum-verified Dagger CLI
-        env:
-          DAGGER_VERSION: ${{ steps.pin.outputs.version }}
-        run: |
-          tarball="dagger_${DAGGER_VERSION}_linux_amd64.tar.gz"
-          dir="${RUNNER_TEMP}/dagger-cli"
-          mkdir -p "${dir}/bin"
-          cd "${dir}"
-          curl -fsSL --proto '=https' --tlsv1.2 -o "${tarball}" \
-            "https://dl.dagger.io/dagger/releases/${DAGGER_VERSION#v}/${tarball}"
-          awk -v f="${tarball}" '$2 == f' "${GITHUB_WORKSPACE}/dagger/cli-checksums.txt" > expected.sha256
-          if [ "$(wc -l < expected.sha256)" -ne 1 ]; then
-            echo "::error::dagger/cli-checksums.txt has no single entry for ${tarball}"
-            exit 1
-          fi
-          sha256sum -c --strict expected.sha256
-          tar -xzf "${tarball}" -C bin dagger
-          got="$(bin/dagger --silent version | cut -s -d ' ' -f 2)"
-          if [ "${got}" != "${DAGGER_VERSION}" ]; then
-            echo "::error::the verified CLI reports '${got}', not ${DAGGER_VERSION}; the action would reinstall it unverified"
-            exit 1
-          fi
-          echo "${dir}/bin" >> "$GITHUB_PATH"
-
-      # The action is pinned by commit SHA (v8.4.1, the contract that supports
-      # verb/module/args/enable-github-summary) and the engine by `version:`,
-      # taken from the pin step. The action tag and the engine version are
-      # decoupled by design: never @v8 / @latest, never the action's `latest`
-      # engine default. tools/dagger-call/engine-pin.test.mjs fails on either.
-      - name: Run ${{ matrix.sdk.daggerFn }} (Dagger)
-        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
-        with:
-          version: ${{ steps.pin.outputs.version }}
-          verb: call
-          module: ./dagger
-          args: ${{ matrix.sdk.daggerFn }} --source=.
-          enable-github-summary: true
-
-      # The SDK's live wire-cases against the reference origin (#918): its
-      # manifest liveSuite.runner, on its own toolchain, through the same
-      # verified CLI and pinned engine. After the suite, and only on a leg that
-      # has one (select-sdks.mjs sets live); a red live suite reddens the leg.
-      - name: Run live-suite --sdk ${{ matrix.sdk.name }} (Dagger)
-        if: matrix.sdk.live
-        uses: dagger/dagger-for-github@27b130bf0f79a7f6fbbbe0fbca6760dc9bb40a77 # v8.4.1
-        with:
-          version: ${{ steps.pin.outputs.version }}
-          verb: call
-          module: ./dagger
-          args: live-suite --sdk ${{ matrix.sdk.name }} --source=.
-          enable-github-summary: true
-
-      - name: Name the leg in its summary
-        if: always()
-        env:
-          SDK: ${{ matrix.sdk.name }}
-          TICKET: ${{ matrix.sdk.ticket }}
-          STATUS: ${{ job.status }}
-        run: |
-          echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"
+    steps: *dagger-leg
 
   # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
   # the same script the local pre-push runs, which fails closed under CI when
-  # swift or swift-format is missing. Xcode is selected by exact path. Then,
+  # swift or swift-format is missing. The script holds the Xcode pin: it
+  # selects the pinned Xcode, fails the job when that Xcode is not the one
+  # installed, and exports it through GITHUB_ENV to the steps after it. Then,
   # when the manifest gives the SDK a liveSuite.runner (select-sdks.mjs sets
   # live, #924), its live wire-cases natively: no Dagger container has
   # Apple's toolchain, so the harness runs here, on loopback, on the runner.
@@ -303,8 +210,6 @@ jobs:
       fail-fast: false
       matrix:
         sdk: ${{ fromJSON(needs.select.outputs.swift) }}
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -336,10 +241,10 @@ jobs:
         if: matrix.sdk.live
         run: pnpm --filter @confeature/test-harness-live-contract build
 
-      # The SDK's manifest liveSuite.runner, run as Dagger's live-suite runs
-      # it (repository root, bash -euo pipefail); a red live suite reddens
-      # the leg.
-      - name: Run the live suite (tools/repo-gates/run-live-suite.mjs)
+      # The SDK's manifest liveSuite.runner, run by the script Dagger's
+      # live-suite runs (repository root, under its runnerArgv); a red live
+      # suite reddens the leg.
+      - name: Run the live suite
         if: matrix.sdk.live
         env:
           SDK: ${{ matrix.sdk.name }}

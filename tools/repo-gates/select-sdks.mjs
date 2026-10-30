@@ -92,8 +92,8 @@ export const KINDS = [
 /** The select job's own id, whose outputs every other job reads. */
 export const SELECT_JOB = "select";
 
-/** Every output, in the order it is written. */
-export const OUTPUT_KEYS = ["gate", "known_red", "swift", "smoke", "gate_files", "summary"];
+/** Every output, in the order it is written: one per KINDS entry, then the two others (#927 B5). */
+export const OUTPUT_KEYS = [...KINDS.map((k) => k.output), "gate_files", "summary"];
 
 /** The events the workflow runs on: pushes and the schedule judge every SDK. */
 const ALL_EVENTS = ["push", "schedule"];
@@ -128,6 +128,72 @@ export const GATE_PREFIXES = [
  */
 export const LIVE_WRAPPER =
   "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- ";
+/**
+ * Whether an SDK has a live suite to run: its `liveSuite.runner` is a string
+ * (#918). The one test of it: a leg's `live`, and the live-coverage report's
+ * "live" row, both ask this. Whether that runner CAN run (not blank, through
+ * LIVE_WRAPPER, no operator outside it) is manifestProblems', never this.
+ */
+export function hasLiveSuite(sdk) {
+  return typeof sdk?.liveSuite?.runner === "string";
+}
+/**
+ * The shell operators and substitutions in `text` that bash would act on, in
+ * the order they appear, read with bash's quoting: nothing inside single
+ * quotes, only `$(` and backticks inside double quotes, nothing a backslash
+ * escapes. `unterminated` is true when a quote never closes.
+ *
+ * Why (#926 A4): every liveSuite.runner is run as one `bash -c "<runner>"`
+ * (run-live-suite.mjs's runnerArgv), so an operator after the wrapped command
+ * runs OUTSIDE the harness wrapper, and its exit code, not the wrapper's, is
+ * the leg's:
+ * `<wrapper> -- cmd || true` is green whatever the suite did. A `bash -c
+ * '… && …'` argument is the wrapped command itself, quoted, so it is never
+ * read here. A substitution is refused too: it runs a command bash starts
+ * before the wrapper, which no check sees. This reads the text, it runs
+ * nothing; anything it cannot judge (an open quote) is reported, never passed.
+ */
+export function shellOperatorsOutsideQuotes(text) {
+  const operators = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") i += 2;
+    else if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      if (end === -1) return { operators, unterminated: true };
+      i = end + 1;
+    } else if (c === '"') {
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\") i += 2;
+        else {
+          if (text[i] === "`") operators.push("`");
+          else if (text.startsWith("$(", i)) operators.push("$(");
+          i++;
+        }
+      }
+      if (i >= text.length) return { operators, unterminated: true };
+      i++;
+    } else if (text.startsWith("$'", i)) {
+      // ANSI-C quoting: a backslash escapes any character, `'` closes.
+      i += 2;
+      while (i < text.length && text[i] !== "'") i += text[i] === "\\" ? 2 : 1;
+      if (i >= text.length) return { operators, unterminated: true };
+      i++;
+    } else if (text.startsWith("$(", i) || c === "`") {
+      operators.push(c === "`" ? "`" : "$(");
+      i += c === "`" ? 1 : 2;
+    } else if ("|&;<>()\n".includes(c)) {
+      const two = text.slice(i, i + 2);
+      const op = ["||", "&&", ";;", ">>", "<<", "&>", ">&", "<&", "|&"].includes(two) ? two : c;
+      operators.push(op === "\n" ? "newline" : op);
+      i += op.length;
+    } else i++;
+  }
+  return { operators, unterminated: false };
+}
+
 /** A path printed as it is: no newline, no `$`, no backtick, no `:`, no segment led by a dash. */
 export const PLAIN_PATH = /^[A-Za-z0-9._][A-Za-z0-9._-]*(?:\/[A-Za-z0-9._][A-Za-z0-9._-]*)*$/;
 /** At most this many gate files are named; the rest are counted. */
@@ -145,8 +211,17 @@ const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
  * (`ci.native`); a known-red waiver needs a Dagger leg to run red in; every
  * ticket is `#<issue>`. A `liveSuite` has a runner and needs a job that runs
  * it: a Dagger leg (#918) or a native kind whose KINDS entry is `live`, the
- * macOS job (#924), and runs through LIVE_WRAPPER; an SDK has a liveSuite or a
+ * macOS job (#924), and runs through LIVE_WRAPPER with no shell operator after
+ * it (shellOperatorsOutsideQuotes, #926 A4); an SDK has a liveSuite or a
  * `liveExempt` reason, never both.
+ * A Dagger SDK's liveSuite names its container's recipe in
+ * `liveSuite.toolchain`: a NAME-shaped id of a live toolchain recipe in
+ * dagger/src/index.ts, required and never defaulted, so a new live SDK is
+ * refused here, before CI, until the manifest says what runs it. The id is
+ * never a key every object has (`constructor`), which a lookup would find in
+ * Object.prototype. A native SDK's suite runs on its own job's toolchain, so
+ * it names none. Whether the id is a recipe is the Dagger module's to refuse,
+ * the one place the recipes are known.
  * The daggerFn's own shape is DAGGER_FN, checked where it is used. verify-workflows.mjs rule 19 reports these on every verify.
  */
 export function manifestProblems(manifest) {
@@ -188,6 +263,37 @@ export function manifestProblems(manifest) {
       )
         add(
           `liveSuite.runner does not run a command through the harness wrapper (${LIVE_WRAPPER.trim()}): without it the suite skips every case and passes`,
+        );
+      else {
+        const { operators, unterminated } = shellOperatorsOutsideQuotes(
+          live.runner.slice(LIVE_WRAPPER.length),
+        );
+        if (unterminated)
+          add(
+            "liveSuite.runner has an unterminated quote: what bash runs after the wrapper cannot be judged",
+          );
+        if (operators.length > 0)
+          add(
+            `liveSuite.runner has a shell operator or substitution outside the wrapped command (${[...new Set(operators)].join(" ")}): bash runs it outside the harness wrapper, so its exit code, not the wrapper's, would be the leg's (quote it inside the command, e.g. bash -c '…')`,
+          );
+      }
+      const toolchain = live?.toolchain;
+      if (dagger) {
+        if (toolchain === undefined)
+          add(
+            "has a liveSuite and a daggerFn but no liveSuite.toolchain: name the live toolchain recipe (dagger/src/index.ts) that builds its live container; it is never defaulted",
+          );
+        else if (typeof toolchain !== "string" || !NAME.test(toolchain))
+          add(
+            `liveSuite.toolchain ${JSON.stringify(toolchain)} is not a toolchain id (${NAME.source})`,
+          );
+        else if (toolchain in Object.prototype)
+          add(
+            `liveSuite.toolchain ${JSON.stringify(toolchain)} is a key every object has (Object.prototype), not a toolchain id`,
+          );
+      } else if (toolchain !== undefined)
+        add(
+          "liveSuite.toolchain on an SDK with no Dagger leg: only a Dagger live suite runs in a live toolchain recipe's container, a native one on its job's own toolchain",
         );
       const runsLive = dagger || KINDS.some((k) => k.native === ci?.native && k.live);
       if (!runsLive)
@@ -299,6 +405,35 @@ export function workspaceDependents(root, names) {
   return out;
 }
 
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Whether `x` is NOT a leg `routeSelection` could have written for `kind`
+ * (#927 B4): a bare name for a kind with no live suite, `{ name, live }` for a
+ * native live kind, and `{ name, daggerFn, live }` for a Dagger leg, which
+ * carries its waiver's `ticket` on the known-red output. The one statement of
+ * the leg shape, read back by conclude-sdk-gates.mjs.
+ *
+ * Only a known-red leg may carry a `ticket` key, whatever its value: the
+ * Dagger leg's one summary step (sdk-gates.yml `&dagger-leg`) prints "known
+ * red, not counted" whenever the leg's ticket is non-empty, and decides
+ * nothing else, so a ticket on a counted leg would read as not counted.
+ */
+export function legProblem(kind, x) {
+  const leg =
+    isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
+  if (!kind.live) return typeof x !== "string" || !NAME.test(x);
+  const knownRed = kind.output === "known_red";
+  if (leg && !knownRed && Object.hasOwn(x, "ticket")) return true;
+  if (kind.native !== undefined) return !leg;
+  return (
+    !leg ||
+    typeof x.daggerFn !== "string" ||
+    !DAGGER_FN.test(x.daggerFn) ||
+    (knownRed && (typeof x.ticket !== "string" || !TICKET.test(x.ticket)))
+  );
+}
+
 /**
  * Route selected names into the job kinds. `baseManifest` is where the
  * known-red waiver is read on a pull request (the base commit's), and the
@@ -312,14 +447,12 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
     const w = (waivers?.sdks ?? []).find((s) => s?.name === name)?.ci?.knownRed;
     return typeof w === "string" && TICKET.test(w) ? w : null;
   };
-  const out = { gate: [], known_red: [], swift: [], smoke: [] };
+  const out = Object.fromEntries(KINDS.map((k) => [k.output, []]));
   for (const name of names) {
     const s = byName.get(name);
     if (s?.ci?.native !== undefined) {
       const kind = KINDS.find((k) => k.native === s.ci.native);
-      out[kind.output].push(
-        kind.live ? { name, live: typeof s.liveSuite?.runner === "string" } : name,
-      );
+      out[kind.output].push(kind.live ? { name, live: hasLiveSuite(s) } : name);
       continue;
     }
     if (typeof s?.daggerFn !== "string" || !DAGGER_FN.test(s.daggerFn))
@@ -327,7 +460,7 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
         `${name}: daggerFn ${JSON.stringify(s?.daggerFn)} is not one Dagger function name (${DAGGER_FN.source})`,
       );
     const ticket = waiver(name);
-    const leg = { name, daggerFn: s.daggerFn, live: typeof s.liveSuite?.runner === "string" };
+    const leg = { name, daggerFn: s.daggerFn, live: hasLiveSuite(s) };
     if (ticket === null) out.gate.push(leg);
     else out.known_red.push({ ...leg, ticket });
   }

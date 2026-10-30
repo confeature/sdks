@@ -62,10 +62,15 @@ export function runWithHarness(
  * documented teardown code; any other stop error turns 0 into 1), and that a
  * <cmd> which exits 0 without one request for a seeded key is 1: a suite that
  * skipped every case, or never reached the harness, checked nothing (#793
- * review). Every live runner goes through here, whatever its test runner.
+ * review). Nor is one that left any key its seed declares without a request
+ * (#926 A1): a suite that asked for one case and skipped the rest checked
+ * one case. The declaration is the runner's seed flag — `--corpus-seed`, in
+ * every liveSuite.runner, declares every seeded corpus case — so the floor
+ * has one home, the corpus seed, and no list to keep in step with it. Every
+ * live runner goes through here, whatever its test runner.
  */
 export async function execAgainstHarness(
-  handle: Pick<HarnessHandle, "url" | "stop" | "served">,
+  handle: Pick<HarnessHandle, "url" | "stop" | "served" | "unserved">,
   cmd: readonly string[],
   signals: EventEmitter = process,
 ): Promise<number> {
@@ -75,6 +80,16 @@ export async function execAgainstHarness(
   if (code === 0 && served === 0) {
     process.stderr.write("--exec: <cmd> exited 0 but asked the harness nothing: not a pass\n");
     code = 1;
+  }
+  const unserved = handle.unserved();
+  if (unserved.length > 0) {
+    process.stderr.write(
+      `--exec: no seeded request for ${String(unserved.length)} declared key(s): ${unserved.join(", ")}\n`,
+    );
+    if (code === 0) {
+      process.stderr.write("--exec: <cmd> exited 0 but skipped those cases: not a pass\n");
+      code = 1;
+    }
   }
   try {
     await handle.stop();

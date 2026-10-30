@@ -1,12 +1,13 @@
 {
-  "$comment": "publish[] (#794) is the publish table: one unit per releasable package (the 21 SDKs of .sdks[] plus sdk-shared), each naming its gate, registry (or none, with a reason), coordinates, versionSource and the units it must follow (after). tagFormat is the one release-tag shape; tools/sdk-pack/resolve-publish.mjs is the only reader that decides whether a tag may publish. liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. Its one runner is the Dagger function `live-suite --sdk <name>` (#918), which runs it on that SDK's own toolchain as the second step of the SDK's sdk-gates.yml leg, after its suite, so a red live suite reddens the leg; a ci.native `macos` SDK (swift, #924) runs the same runner natively, in that job after its suite, through tools/repo-gates/run-live-suite.mjs; a `smoke` SDK cannot carry one (tools/repo-gates/select-sdks.mjs). Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate. ci (#793) is how .github/workflows/sdk-gates.yml runs an SDK on every push and pull request: an SDK with a daggerFn runs it as a Dagger leg (`gate (<name>)`); an SDK whose daggerFn is null carries ci.native instead, `macos` (built and tested natively on a macos-15 runner) or `smoke` (a labelled source-quality smoke, not a build). Every SDK has exactly one of the two (tools/repo-gates/verify-workflows.mjs rule 19). ci.knownRed: `#<issue>` marks an SDK whose first run is red with a defect too large for its child: its leg runs in gate-known-red, shown red with the ticket and not counted, and a pull request honours the waiver only as the BASE commit carries it (tools/repo-gates/select-sdks.mjs), so a pull request cannot waive its own red. liveExempt: `<reason>` (#918) is why an SDK has no liveSuite, carried instead of a liveSuite with no runner, never beside one. Every SDK has one of the two since #924 (tools/test-harness-live-contract/tests/live-suite-runners.test.ts fails on an SDK with neither); live-coverage-report.mjs would list one as no live suite yet, never as covered.",
+  "$comment": "publish[] (#794) is the publish table: one unit per releasable package (the 21 SDKs of .sdks[] plus sdk-shared), each naming its gate, registry (or none, with a reason), coordinates, versionSource and the units it must follow (after). tagFormat is the one release-tag shape; tools/sdk-pack/resolve-publish.mjs is the only reader that decides whether a tag may publish. liveSuite.runner (#783) is the ONE command that runs an SDK's live wire-cases: it always goes through the harness wrapper (`--corpus-seed --exec -- <cmd>`), which boots the harness, exports CONFEATURE_LIVE=1 + LIVE_HARNESS_URL and passes the exit code through — so no caller can run a live suite that silently skips. Nothing outside the wrapped command is a shell operator or substitution (`<wrapper> -- cmd || true` would make bash, not the wrapper, decide the leg; #926): an operator belongs inside a quoted `bash -c '…'`. The wrapper's `--corpus-seed` is each suite's declaration of the cases it must exercise: every seeded corpus case, and the wrapper fails a suite that sent no request for any of them, naming them (#926). Its one runner is the Dagger function `live-suite --sdk <name>` (#918), which runs it on that SDK's own toolchain as the second step of the SDK's sdk-gates.yml leg, after its suite, so a red live suite reddens the leg; a ci.native `macos` SDK (swift, #924) runs the same runner natively, in that job after its suite, through tools/repo-gates/run-live-suite.mjs; a `smoke` SDK cannot carry one (tools/repo-gates/select-sdks.mjs). liveSuite.toolchain names the LIVE_TOOLCHAINS recipe in dagger/src/index.ts that builds a Dagger SDK's live container (`js` for the JS family, which share one workspace; the other ids are spelled like the SDK they serve): required on every daggerFn SDK with a liveSuite, and never defaulted, so a new live SDK is refused by verify until it names one; absent on a ci.native SDK, whose live suite runs on its own job's toolchain (tools/repo-gates/select-sdks.mjs manifestProblems). An id with no recipe is refused by the Dagger module, naming the SDK and the id. Single source of truth for per-SDK containerized test coverage (spec 053 Phase 5, #204). Consumed by .github/workflows/release-gate.yml and .github/workflows/sdk-publish.yml. status=covered SDKs run their daggerFn as a publish/release gate; status=pending SDKs BLOCK publish (no false-green); status=exempt SDKs publish without a gate (documented reason). Flip a pending entry to covered (with its daggerFn) when epic #354 containerizes it — both gates auto-enroll it with zero workflow edits. localGate (default true when absent): whether the SDK also runs in the LOCAL prepushAll suite. Tier-2 SDKs (java/dotnet/php/ruby/rust/dart) are covered but localGate=false — release-gate-only — because 6 heavyweight heterogeneous toolchain containers in parallel exceed the NFR-004 8GB local budget (they OOM the Dagger engine); this is the constitution v1.3.0 'demote the slowest tier to release-gate-only' clause. The release-gate runs each on its own CI runner, so no shared-memory OOM. android + kotlin-mp (#364) are also localGate=false: their shared androidSdkContainer is pinned to linux/amd64 because AGP ships only an x86-64 aapt2 (no linux-aarch64 build), so on an arm64 host it runs under emulation — too slow for prepushAll, fine for the release gate. ci (#793) is how .github/workflows/sdk-gates.yml runs an SDK on every push and pull request: an SDK with a daggerFn runs it as a Dagger leg (`gate (<name>)`); an SDK whose daggerFn is null carries ci.native instead, `macos` (built and tested natively on a macos-15 runner) or `smoke` (a labelled source-quality smoke, not a build). Every SDK has exactly one of the two (tools/repo-gates/verify-workflows.mjs rule 19). ci.knownRed: `#<issue>` marks an SDK whose first run is red with a defect too large for its child: its leg runs in gate-known-red, shown red with the ticket and not counted, and a pull request honours the waiver only as the BASE commit carries it (tools/repo-gates/select-sdks.mjs), so a pull request cannot waive its own red. liveExempt: `<reason>` (#918) is why an SDK has no liveSuite, carried instead of a liveSuite with no runner, never beside one. Every SDK has one of the two since #924 (tools/test-harness-live-contract/tests/live-suite-runners.test.ts fails on an SDK with neither); live-coverage-report.mjs would list one as no live suite yet, never as covered.",
   "sdks": [
     {
       "name": "node",
       "daggerFn": "js-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-node exec vp test run tests/wire/wire-cases.live.test.ts tests/wire/configcat-stock.live.test.ts",
+        "toolchain": "js",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'r=/tmp/confeature-live-node.json && rm -f \"$r\" && pnpm --filter @confeature/sdk-node exec vp test run tests/wire/wire-cases.live.test.ts tests/wire/configcat-stock.live.test.ts --reporter=default --reporter=json --outputFile.json=\"$r\" && grep -Eq \"\\\"numTotalTests\\\":([1-9][0-9]*),\\\"numPassedTests\\\":\\1,\\\"numFailedTests\\\":0,\\\"numPendingTests\\\":0,\\\"numTodoTests\\\":0\" \"$r\"'",
         "path": "apps/sdk-node/tests/wire/wire-cases.live.test.ts"
       }
     },
@@ -15,6 +16,7 @@
       "daggerFn": "browser-test",
       "status": "covered",
       "liveSuite": {
+        "toolchain": "js",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-browser-js exec vp test run tests/wire/wire-cases.live.test.ts",
         "path": "apps/sdk-browser-js/tests/wire/wire-cases.live.test.ts"
       }
@@ -24,7 +26,8 @@
       "daggerFn": "python-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && uv run --frozen --extra dev pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q'",
+        "toolchain": "python",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-python && r=/tmp/confeature-live-python.xml && rm -f \"$r\" && uv run --frozen --extra dev pytest tests/wire/test_wire_cases_live.py tests/wire/test_configcat_stock_live.py -q --junitxml=\"$r\" && grep -Eq \"<testsuite name=\\\"pytest\\\" errors=\\\"0\\\" failures=\\\"0\\\" skipped=\\\"0\\\" tests=\\\"[1-9][0-9]*\\\"\" \"$r\"'",
         "path": "apps/sdk-python/tests/wire/test_wire_cases_live.py"
       }
     },
@@ -33,7 +36,8 @@
       "daggerFn": "go-test",
       "status": "covered",
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-go && go test -count=1 -v wire_cases_live_test.go wire_case_assertions_test.go'",
+        "toolchain": "go",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'set -o pipefail && cd apps/sdk-go && r=/tmp/confeature-live-go.txt && rm -f \"$r\" && go test -count=1 -v wire_cases_live_test.go wire_case_assertions_test.go 2>&1 | tee \"$r\" && ! grep -q -- \"--- SKIP:\" \"$r\" && grep -Eq -- \"^--- PASS: TestWireCasesLive \" \"$r\" && grep -Eq -- \"^ +--- PASS: TestWireCasesLive/\" \"$r\"'",
         "path": "apps/sdk-go/wire_cases_live_test.go"
       }
     },
@@ -43,6 +47,7 @@
       "daggerFn": "deno-test",
       "status": "covered",
       "liveSuite": {
+        "toolchain": "js",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-deno exec vp test run tests/wire/wire-cases.live.test.ts",
         "path": "apps/sdk-deno/tests/wire/wire-cases.live.test.ts"
       }
@@ -52,6 +57,7 @@
       "daggerFn": "bun-test",
       "status": "covered",
       "liveSuite": {
+        "toolchain": "js",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- pnpm --filter @confeature/sdk-bun exec vp test run tests/wire/wire-cases.live.test.ts",
         "path": "apps/sdk-bun/tests/wire/wire-cases.live.test.ts"
       }
@@ -81,6 +87,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "java",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-java && c=\"io.confeature.client.$(basename src/test/java/io/confeature/client/WireCasesLiveTest.java .java)\" && sh ./gradlew --no-daemon test --rerun --tests \"$c\" && r=\"build/test-results/test/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
         "path": "apps/sdk-java/src/test/java/io/confeature/client/WireCasesLiveTest.java"
       }
@@ -91,6 +98,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "dotnet",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-dotnet && c=\"Confeature.Client.Tests.Wire.$(basename tests/Confeature.Client.Tests/Wire/WireCasesLiveTests.cs .cs)\" && r=/tmp/confeature-live-dotnet && rm -rf \"$r\" && for f in net8.0 net10.0; do dotnet test tests/Confeature.Client.Tests --configuration Release --framework \"$f\" --filter \"FullyQualifiedName~$c.\" --logger \"trx;LogFileName=$f.trx\" --results-directory \"$r\" && grep -Eo \"total=\\\"([1-9][0-9]*)\\\" executed=\\\"\\1\\\" passed=\\\"\\1\\\" failed=\\\"0\\\" error=\\\"0\\\"\" \"$r/$f.trx\" || exit 1; done'",
         "path": "apps/sdk-dotnet/tests/Confeature.Client.Tests/Wire/WireCasesLiveTests.cs"
       }
@@ -101,7 +109,8 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-php && composer install --no-interaction --no-progress && vendor/bin/phpunit --no-coverage tests/WireCasesLiveTest.php'",
+        "toolchain": "php",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-php && r=/tmp/confeature-live-php.xml && rm -f \"$r\" && composer install --no-interaction --no-progress && vendor/bin/phpunit --no-coverage --log-junit \"$r\" tests/WireCasesLiveTest.php && grep -m1 \"<testsuite \" \"$r\" | grep -Eq \"tests=\\\"[1-9][0-9]*\\\" assertions=\\\"[0-9]+\\\" errors=\\\"0\\\" failures=\\\"0\\\" skipped=\\\"0\\\"\"'",
         "path": "apps/sdk-php/tests/WireCasesLiveTest.php"
       }
     },
@@ -111,7 +120,8 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-ruby && bundle install && bundle exec rspec spec/wire/wire_cases_live_spec.rb'",
+        "toolchain": "ruby",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-ruby && r=/tmp/confeature-live-ruby.json && rm -f \"$r\" && bundle install && bundle exec rspec spec/wire/wire_cases_live_spec.rb --format documentation --format json --out \"$r\" && grep -Eq \"\\\"example_count\\\":[1-9][0-9]*,\\\"failure_count\\\":0,\\\"pending_count\\\":0,\\\"errors_outside_of_examples_count\\\":0\" \"$r\"'",
         "path": "apps/sdk-ruby/spec/wire/wire_cases_live_spec.rb"
       }
     },
@@ -121,7 +131,8 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
-        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-rust && cargo test --test \"$(basename tests/wire_cases_live.rs .rs)\" -- --nocapture'",
+        "toolchain": "rust",
+        "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'set -o pipefail && cd apps/sdk-rust && r=/tmp/confeature-live-rust.txt && rm -f \"$r\" && cargo test --test \"$(basename tests/wire_cases_live.rs .rs)\" -- --nocapture 2>&1 | tee \"$r\" && grep -Eq \"^test result: ok\\. [1-9][0-9]* passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\" \"$r\" && ! grep -q \"^wire_cases_live: skipped\" \"$r\" && grep -Eq \"^wire_cases_live: .+ ok$\" \"$r\"'",
         "path": "apps/sdk-rust/tests/wire_cases_live.rs"
       }
     },
@@ -131,6 +142,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "dart",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-dart && r=/tmp/confeature-live-dart.json && rm -f \"$r\" && dart pub get && dart test test/wire/wire_cases_live_test.dart --file-reporter \"json:$r\" && grep -q \"\\\"skipped\\\":false,\\\"hidden\\\":false\" \"$r\" && ! grep -q \"\\\"skipped\\\":true\" \"$r\" && grep -q \"{\\\"success\\\":true,\\\"type\\\":\\\"done\\\"\" \"$r\"'",
         "path": "apps/sdk-dart/test/wire/wire_cases_live_test.dart"
       }
@@ -142,6 +154,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "kotlin-mp",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-kotlin-mp && c=\"io.confeature.kmp.$(basename src/jvmTest/kotlin/io/confeature/kmp/WireCasesLiveTest.kt .kt)\" && sh ./gradlew --no-daemon jvmTest --rerun --tests \"$c\" && r=\"build/test-results/jvmTest/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
         "path": "apps/sdk-kotlin-mp/src/jvmTest/kotlin/io/confeature/kmp/WireCasesLiveTest.kt"
       }
@@ -152,6 +165,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "android",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-android && c=\"io.confeature.android.$(basename src/test/java/io/confeature/android/WireCasesLiveTest.kt .kt)\" && sh ./gradlew --no-daemon testDebugUnitTest --rerun --tests \"$c\" && r=\"build/test-results/testDebugUnitTest/TEST-$c.xml\" && grep -o \"tests=\\\"[1-9][0-9]*\\\" skipped=\\\"0\\\" failures=\\\"0\\\" errors=\\\"0\\\"\" \"$r\"'",
         "path": "apps/sdk-android/src/test/java/io/confeature/android/WireCasesLiveTest.kt"
       }
@@ -162,6 +176,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "elixir",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'cd apps/sdk-elixir && r=/tmp/confeature-live-elixir.log && mix local.hex --force && mix local.rebar --force && mix deps.get && { mix test test/wire/wire_cases_live_test.exs > \"$r\" 2>&1; s=$?; cat \"$r\"; [ \"$s\" -eq 0 ] && grep -Eq \"^[1-9][0-9]* tests, 0 failures$\" \"$r\"; }'",
         "path": "apps/sdk-elixir/test/wire/wire_cases_live_test.exs"
       }
@@ -172,6 +187,7 @@
       "status": "covered",
       "localGate": false,
       "liveSuite": {
+        "toolchain": "cpp",
         "runner": "node tools/test-harness-live-contract/dist/cli.js --corpus-seed --exec -- bash -c 'set -o pipefail && cd apps/sdk-cpp && test -f tests/wire_cases_live_test.cpp && cmake -S . -B /cache/cpp-build -DCONFEATURE_ENABLE_TESTS=ON >/dev/null && cmake --build /cache/cpp-build --target confeature_tests && r=/tmp/confeature-live-cpp.txt && rm -f \"$r\" && /cache/cpp-build/confeature_tests \"[live]\" 2>&1 | tee \"$r\" && grep -q \"^All tests passed (\" \"$r\"'",
         "path": "apps/sdk-cpp/tests/wire_cases_live_test.cpp"
       }
@@ -258,6 +274,16 @@
         "pattern": "^  \"version\": \"([^\"]+)\",$"
       },
       "after": ["shared"]
+    },
+    {
+      "name": "deno",
+      "registry": "jsr",
+      "coordinates": "@confeature/sdk-deno",
+      "path": "apps/sdk-deno",
+      "versionSource": {
+        "file": "apps/sdk-deno/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      }
     },
     {
       "name": "react",
@@ -365,8 +391,7 @@
         "file": "apps/sdk-elixir/mix.exs",
         "pattern": "^  @version \"([^\"]+)\"$"
       },
-      "after": [],
-      "blockedBy": "#805 — mix compile fails outside MIX_ENV=test"
+      "after": []
     },
     {
       "name": "go",

@@ -55,6 +55,13 @@ String? _resolveBody(Map<String, dynamic> server) {
 void main() {
   final cases = loadWireCases();
 
+  // A pending case is reported by name, never dropped (1.4, #994); its
+  // proof (this reader still cannot read it) runs in loadWireCases.
+  pendingWireCases().forEach((id, ticket) {
+    test('case $id is pending ($ticket)', () {},
+        skip: 'pending ($ticket): this reader cannot read it yet');
+  });
+
   // The error-class mapping fails closed: a missing or unknown reason maps
   // to no corpus class, so it can never pass a fetchFailed case (the old
   // fold to fetchFailed did).

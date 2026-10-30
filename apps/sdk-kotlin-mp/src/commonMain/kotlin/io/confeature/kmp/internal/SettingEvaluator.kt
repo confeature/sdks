@@ -257,5 +257,5 @@ internal object SettingEvaluator {
 
     /** The setting type of the current eval context (drives the value-slot selection for the trace). */
     private fun settingTypeOf(ctx: EvalContext): Int =
-        readInt(ctx.setting["t"]) ?: Evaluator.SETTING_TYPE_BOOL
+        readInt(ctx.setting["t"]) ?: SettingType.BOOL
 }

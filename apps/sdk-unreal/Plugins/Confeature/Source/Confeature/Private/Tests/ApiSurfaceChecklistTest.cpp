@@ -3,11 +3,20 @@
 // API-surface conformance — documented checklist.
 //
 // ──────────────────────────────────────────────────────────────────────
-// No official ConfigCat Unreal SDK exists. This test asserts the
-// SDK's UFUNCTION surface against a documented checklist derived from
-// the cross-SDK ConfigCat surface (boolean + string + int + double +
-// control plane). This IS the conformance reference for Unreal — there
-// is no upstream package to compare to.
+// This test asserts the SDK's UFUNCTION surface against a documented
+// checklist derived from the cross-SDK ConfigCat surface (boolean +
+// string + int + double + control plane). ConfigCat's official Unreal
+// SDK (configcat/unreal-engine-sdk) exposes that surface on a
+// `UGameInstanceSubsystem` rather than a client UObject, so its
+// reflected names are compared entry by entry where they apply, not as a
+// whole package — pinned to configcat/unreal-engine-sdk @
+// 923800268dba36ad25963dcace191179de4ba936 (`ConfigCatSubsystem.h`), read
+// 2026-10-27. The members that carry a `UConfigCatSubsystem` member's
+// name — ForceRefresh, SetOnline, SetOffline, IsOffline and the hook
+// delegates below — keep its name, arity and semantics (ForceRefresh is
+// synchronous, as upstream's, #832). The rest of the checklist (GetValue*,
+// Close, IsClosed) follows the cross-SDK surface, and Confeature additions
+// (ForceRefreshWithCallback, ForceRefreshAsync) carry their own names.
 // ──────────────────────────────────────────────────────────────────────
 //
 // Background — every Confeature SDK in the federation exposes the
@@ -139,7 +148,11 @@ bool FConfeatureApiSurfaceChecklistTest::RunTest(const FString& /*Parameters*/)
 				FStructProperty::StaticClass() },
 			true },
 		// --- Control plane -------------------------------------------
-		{ FName(TEXT("ForceRefresh")), FBoolProperty::StaticClass(), {}, false },
+		// Upstream's shape: configcat/unreal-engine-sdk @
+		// 923800268dba36ad25963dcace191179de4ba936, read 2026-10-27,
+		// `ConfigCatSubsystem.h:125` `UFUNCTION(BlueprintCallable) void
+		// ForceRefresh();` — no parameters, no return, synchronous (#832).
+		{ FName(TEXT("ForceRefresh")), nullptr, {}, false },
 		// Close returns void → ExpectedReturnClass is nullptr.
 		{ FName(TEXT("Close")), nullptr, {}, false },
 		{ FName(TEXT("IsClosed")), FBoolProperty::StaticClass(), {}, false },
@@ -261,6 +274,29 @@ bool FConfeatureApiSurfaceChecklistTest::RunTest(const FString& /*Parameters*/)
 		// canonical bitflag on UFunction::FunctionFlags.
 		if (!TestTrue(*FString::Printf(TEXT("%s is BlueprintCallable"), *EntryLabel),
 				(Fn->FunctionFlags & FUNC_BlueprintCallable) != 0))
+		{
+			bAllPassed = false;
+		}
+	}
+
+	// Confeature addition, outside the upstream checklist (#832): the
+	// completion-pin variant carries one FConfeatureRefreshResult.
+	UFunction* Refresh = Cls->FindFunctionByName(FName(TEXT("ForceRefreshWithCallback")));
+	if (!TestNotNull(TEXT("ForceRefreshWithCallback present"), Refresh))
+	{
+		bAllPassed = false;
+	}
+	else
+	{
+		FDelegateProperty* Pin = CastField<FDelegateProperty>(NthNonReturnParam(Refresh, 0));
+		UFunction* Signature = Pin ? Pin->SignatureFunction : nullptr;
+		FStructProperty* ResultParam
+			= Signature ? CastField<FStructProperty>(NthNonReturnParam(Signature, 0)) : nullptr;
+		if (!TestTrue(TEXT("ForceRefreshWithCallback completion carries one FConfeatureRefreshResult"),
+				Refresh->GetReturnProperty() == nullptr && CountNonReturnParams(Refresh) == 1
+					&& (Refresh->FunctionFlags & FUNC_BlueprintCallable) != 0 && Signature != nullptr
+					&& CountNonReturnParams(Signature) == 1 && ResultParam != nullptr
+					&& ResultParam->Struct == FConfeatureRefreshResult::StaticStruct()))
 		{
 			bAllPassed = false;
 		}

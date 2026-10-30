@@ -47,7 +47,9 @@ inline std::filesystem::path fixturesPath() {
 }
 
 // Vendored upstream ConfigCat corpus root (spec 130 / SC-001).
-inline std::filesystem::path upstreamPath() { return fixturesPath() / "upstream"; }
+inline std::filesystem::path upstreamPath() {
+  return fixturesPath() / "upstream";
+}
 
 }  // namespace confeature::tests
 

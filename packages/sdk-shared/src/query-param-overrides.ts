@@ -7,6 +7,7 @@ import {
   type OverrideBehaviour,
   settingFromValue,
 } from "./flag-overrides.ts";
+import { keyedRecord } from "./own-key.ts";
 
 /**
  * URL query-string flag-override source. Port of `configcat-react@4.9.0`'s
@@ -70,7 +71,7 @@ class QueryParamsOverrideDataSource implements IOverrideDataSource {
     // Wrap each value envelope as a trivial value-only `ISetting` so the
     // source satisfies the widened, rule-capable `IOverrideDataSource`
     // (spec 135 §R2). Resolution stays value-only — no rules are introduced.
-    const wrapped: Record<string, ISetting> = {};
+    const wrapped = keyedRecord<ISetting>();
     for (const [key, value] of Object.entries(this.settings)) {
       wrapped[key] = settingFromValue(value);
     }
@@ -82,7 +83,7 @@ function extractSettings(
   queryString: string | undefined,
   paramPrefix: string,
 ): Record<string, ISettingValue> {
-  const settings: Record<string, ISettingValue> = {};
+  const settings = keyedRecord<ISettingValue>();
   if (!queryString || queryString.lastIndexOf("?", 0) < 0) {
     return settings;
   }

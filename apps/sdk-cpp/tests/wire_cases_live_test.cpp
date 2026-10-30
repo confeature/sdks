@@ -190,7 +190,7 @@ TEST_CASE("wire-cases live — an unseeded key is the CDN's own 403 (sdk-cpp)", 
                         nullptr);
   const FetchResult result = fetcher.fetch(std::nullopt);
   REQUIRE(result.status == FetchStatus::Failed);
-  REQUIRE(result.error.has_value());
-  INFO("raw error=" << *result.error);
-  CHECK(wire::cppErrorToClass(*result.error) == "invalidSdkKey");
+  const auto error = confeature::tests::requireValue(result.error, "the fetch error");
+  INFO("raw error=" << error);
+  CHECK(wire::cppErrorToClass(error) == "invalidSdkKey");
 }

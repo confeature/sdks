@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp
 
-import io.confeature.kmp.internal.Evaluator
+import io.confeature.kmp.internal.SettingType
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -164,8 +164,8 @@ class ParityRulesTest {
     private fun typedDefault(raw: JsonElement?, settingType: Int?): Any? {
         val decoded = decodeJsonElement(raw)
         return when (settingType) {
-            Evaluator.SETTING_TYPE_DOUBLE -> (decoded as? Number)?.toDouble() ?: decoded
-            Evaluator.SETTING_TYPE_INT -> (decoded as? Number)?.toInt() ?: decoded
+            SettingType.DOUBLE -> (decoded as? Number)?.toDouble() ?: decoded
+            SettingType.INT -> (decoded as? Number)?.toInt() ?: decoded
             else -> decoded
         }
     }

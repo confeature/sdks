@@ -142,7 +142,7 @@ FConfeaturePollingModeConfig AutoPoll =
 FConfeaturePollingModeConfig LazyLoad =
     FConfeaturePollingModeConfig::LazyLoadMode(/*CacheTtl=*/60);
 
-// ManualPoll — only when you call Client->ForceRefresh().
+// ManualPoll — only when you force a refresh (below).
 FConfeaturePollingModeConfig Manual =
     FConfeaturePollingModeConfig::ManualPollMode();
 
@@ -151,6 +151,36 @@ UConfeatureClient* Client =
         .PollingMode(Manual)
         .HttpTimeoutSeconds(5)
         .Build();
+```
+
+### Force refresh
+
+**Force Refresh** is ConfigCat's node, with its semantics: no
+arguments, synchronous, results through `OnConfigChanged` / `OnError`.
+It returns once the new config is applied (on the game thread, its hooks
+have fired by then). On the game thread it ticks the HTTP manager while
+it waits, as ConfigCat's SDK does, so the frame stalls for the request
+(at most the HTTP timeout + 5 s) but never deadlocks.
+
+To refresh without stalling the frame — the route to use from
+Blueprint — call **Force Refresh With Callback** (a Confeature addition):
+it returns at once and hands an `FConfeatureRefreshResult` (`bSuccess`,
+`ErrorMessage`) to its pin on the game thread. From C++:
+
+```cpp
+// Game thread: non-blocking, the callback runs on a later game-thread tick.
+// It may run after the client (or your object) is gone: capture weakly.
+TWeakObjectPtr<UMyComponent> WeakThis(this);
+Client->ForceRefreshAsync([WeakThis](const FConfeatureRefreshResult& Result)
+{
+    if (UMyComponent* Self = WeakThis.Get())
+    {
+        Self->OnFlagsRefreshed(Result.bSuccess);
+    }
+});
+
+// Synchronous, ConfigCat's semantics: returns with the new config applied.
+Client->ForceRefresh();
 ```
 
 ## Flag overrides
@@ -201,13 +231,18 @@ UConfeatureClient* Client =
 
 - HTTP: `FHttpModule` (UE stdlib). User-Agent
   `confeature-unreal-sdk/{version}`. `If-None-Match` for 304 reuse.
+  A config response over 16 MiB (sdk-cpp's cap) fails the fetch with
+  `body_too_large` and keeps the config already held.
 - JSON: `FJsonSerializer` / `FJsonObject` (UE stdlib).
 - Crypto: `FSHA256` from `Misc/SecureHash.h` (UE 5.3+).
 - Cache: `FPaths::ProjectSavedDir() / "Confeature" / "confeature-{cacheKey}.json"`.
   Atomic write via `FFileHelper::SaveStringToFile` + `IFileManager::Move`.
-- Polling: v0.1 fetches on builder construction + `ForceRefresh`;
-  AutoPoll's `FTSTicker` cadence is wired but not yet enabled by
-  default (see plan 051 R4).
+- Polling: v0.1 fetches only when a refresh is forced — there is no
+  fetch at construction (the client restores its cache), and AutoPoll /
+  LazyLoad are accepted but not wired yet (see plan 051 R4). When
+  AutoPoll lands it must take the async path (`ForceRefreshAsync`): an
+  `FTSTicker` tick runs on the game thread, where a synchronous fetch
+  would stall the frame for the whole request.
 
 ## Platform support
 

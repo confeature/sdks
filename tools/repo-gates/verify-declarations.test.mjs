@@ -923,7 +923,12 @@ describe("the sweep finds a gate in a directory nobody listed", () => {
         .map((v) => v.what)
         .join(),
     ).toMatch(/vendor\/scripts\/cascade-check\.sh can fail but has no declared home/);
-    for (const t of EXCLUDED_TREES) {
+    // Every exclusion carries a reason: this repository's (none today) and the
+    // fixture's, so the loop always asserts something (#870 item 4 — over the
+    // empty EXCLUDED_TREES alone it asserted nothing).
+    const exclusions = [...EXCLUDED_TREES, ...vendor];
+    expect(exclusions.length).toBeGreaterThan(0);
+    for (const t of exclusions) {
       expect(typeof t.reason).toBe("string");
       expect(t.reason.trim().length).toBeGreaterThan(40);
     }
@@ -1445,6 +1450,29 @@ describe("a direct workflow home runs the script itself, in every job (round 10)
     expect(what(job("a", "bash tools/guard-x.sh || true"))).toMatch(/job "a" reaches/));
   it("rejects a run that only names it", () =>
     expect(what(job("a", "echo bash tools/guard-x.sh"))).toMatch(/job "a" reaches/));
+  // exceptJobs (#903): a named job, with its reason, and nothing wider.
+  const except = (exceptJobs) => {
+    const home = DIRECT["guard-x"].homes[0];
+    home.exceptJobs = exceptJobs;
+    try {
+      return what(job("a", "bash tools/guard-x.sh"), job("b", null));
+    } finally {
+      delete home.exceptJobs;
+    }
+  };
+  it("accepts a job exceptJobs names, with its reason", () =>
+    expect(except({ b: "runs no project code" })).not.toMatch(/guard-x/));
+  it("still rejects a job exceptJobs does not name", () =>
+    expect(except({ a: "runs no project code" })).toMatch(/job "b" reaches/));
+  it("rejects an exception without a reason, and does not apply it", () => {
+    const got = except({ b: " " });
+    expect(got).toMatch(/exceptJobs names job "b" with no reason/);
+    expect(got).toMatch(/job "b" reaches/);
+  });
+  it("rejects a stale exception naming no job that reaches the step", () =>
+    expect(except({ b: "why", gone: "why" })).toMatch(
+      /exceptJobs names job "gone", which reaches no "Pack the release artifact"/,
+    ));
 });
 
 describe("perJob: every job that reaches the guarded step runs the gate first, in that job (#794)", () => {

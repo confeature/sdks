@@ -142,8 +142,12 @@ pnpm dagger:go        # sdk-go gofmt + vet + staticcheck + test + build
 pnpm dagger:wire      # wire-cases corpus subset across sdk-node + sdk-browser-js
 pnpm dagger:harness-live   # the live-contract harness's own test:live (harness-live-test)
 
-# One SDK's live wire-cases against the harness (#918): its manifest
-# liveSuite.runner, on its own toolchain, the step its sdk-gates.yml leg runs
+# One SDK's live wire-cases against the harness (#918), the step its
+# sdk-gates.yml leg runs: in the container its liveSuite.toolchain names (a
+# LIVE_TOOLCHAINS recipe of src/index.ts, never defaulted), Dagger runs
+# tools/repo-gates/run-live-suite.mjs, which runs its manifest
+# liveSuite.runner. The macOS job runs the same script natively, so a runner
+# is found, judged and run one way on both paths; Dagger's exit is the script's
 bash tools/dagger-call/dagger-call.sh live-suite --sdk node
 bash tools/dagger-call/dagger-call.sh live-suite --sdk python
 

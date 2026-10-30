@@ -124,5 +124,15 @@ export {
   type IConfigFetcher,
 } from "./config-fetcher.ts";
 
+// ---- Redirect policy of the config fetch (#834) ---------------------
+export {
+  fetchGuardingRedirects,
+  type GuardedFetchResult,
+  MAX_REDIRECTS,
+  type RedirectRefusal,
+  type RedirectRuntime,
+  redirectRuntime,
+} from "./redirect.ts";
+
 // ---- Version constant ----------------------------------------------
 export { CONFEATURE_SDK_VERSION } from "./version.ts";

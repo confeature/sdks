@@ -28,14 +28,16 @@ const MAIN = { mainRef: "origin/main", isOnMain: () => true };
 const unpublished = async () => false;
 
 describe("the real publish table", () => {
+  // A jsr entry rides along its unit's primary entry (#935, jsr-unit.test.mjs).
+  const PRIMARIES = REAL.publish.filter((u) => u.registry !== "jsr");
   it("has exactly one unit per roster entry, plus shared", () => {
     const byName = (a, b) => a.localeCompare(b);
-    const units = REAL.publish.map((u) => u.name).sort(byName);
+    const units = PRIMARIES.map((u) => u.name).sort(byName);
     const expected = [...REAL.sdks.map((s) => s.name), "shared"].sort(byName);
     expect(units).toEqual(expected);
   });
 
-  it.each(REAL.publish.map((u) => [u.name, u]))(
+  it.each(PRIMARIES.map((u) => [u.name, u]))(
     "unit %s resolves, or is refused for its declared reason",
     async (name, unit) => {
       const version = unit.versionSource === "tag" ? "0.1.0" : undefined;
@@ -49,6 +51,19 @@ describe("the real publish table", () => {
       expect(out.version).toMatch(/^\d+\.\d+\.\d+/);
     },
   );
+
+  // #805 closed (mix compile works outside MIX_ENV=test): Hex ships (#909).
+  it("the Hex unit resolves: nothing is blocked any more", async () => {
+    expect(REAL.publish.filter((u) => u.blockedBy !== undefined)).toEqual([]);
+    const out = await resolvePublish({ root: ROOT, unit: "elixir" });
+    expect(out).toMatchObject({
+      registry: "hex",
+      coordinates: "confeature_client",
+      path: "apps/sdk-elixir",
+      gate: "test",
+      daggerFn: "elixir-test",
+    });
+  });
 
   it("a release tag carries the declared version, never a substring of the tag", async () => {
     const out = await resolvePublish({

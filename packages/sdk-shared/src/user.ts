@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+import { ownValue } from "./own-key.ts";
+
 /**
  * Targeting context for a flag evaluation.
  *
@@ -43,6 +45,6 @@ export function getUserAttribute(
     case User.countryAttribute:
       return user.country;
     default:
-      return user.custom?.[name];
+      return ownValue(user.custom, name);
   }
 }

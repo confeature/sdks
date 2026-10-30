@@ -2,6 +2,8 @@
 
 import {
   buildConfigUrl,
+  fetchGuardingRedirects,
+  type GuardedFetchResult,
   isConfigShape,
   type IConfig,
   type LoggerWrapper,
@@ -41,7 +43,8 @@ export interface IConfigFetcher {
  * one builder (#803, FR-001): ConfigCat's CDN path, a well-shaped key raw,
  * any other key Go-`url.PathEscape`d into one segment, and `null` (never a
  * throw) for a key no segment can hold. The URL holds the key, so it MUST
- * NEVER reach a log line or a fetch result (FR-002).
+ * NEVER reach a log line or a fetch result (FR-002). Redirects follow the
+ * shared policy (#834): an `https` request is never redirected to `http`.
  *
  * Caller owns the `AbortSignal` lifetime — the fetcher honours it for
  * timeout + dispose semantics but does not create its own controller.
@@ -71,9 +74,11 @@ export class HttpConfigFetcher implements IConfigFetcher {
     const headers: Record<string, string> = {};
     if (eTag) headers["If-None-Match"] = eTag;
 
-    let response: Response;
+    let guarded: GuardedFetchResult;
     try {
-      response = await fetch(url, { method: "GET", headers, signal });
+      // Node is a server runtime: undici would follow an https → http hop and
+      // send the keyed URL in clear, so the hops are walked here (#834).
+      guarded = await fetchGuardingRedirects(url, { method: "GET", headers, signal });
     } catch (err) {
       // AbortError is the SDK's caller (timeout OR dispose). The caller
       // decides whether to log FETCH_TIMEOUT or to stay silent.
@@ -94,6 +99,18 @@ export class HttpConfigFetcher implements IConfigFetcher {
         errorMessage: `Network error while fetching config (${reason}).`,
       };
     }
+
+    // A refused redirect (#834): the hop was never sent. The reason is a
+    // constant — never the Location or the URL, both of which hold the key.
+    if ("refused" in guarded) {
+      this.logger.fetchFailed(sdkKey, guarded.refused);
+      return {
+        status: "failed",
+        errorCode: SdkErrorCode.FETCH_FAILED,
+        errorMessage: `Config fetch redirect refused (${guarded.refused}).`,
+      };
+    }
+    const { response } = guarded;
 
     // 304 Not Modified — fast path, no body parse.
     if (response.status === 304) {
@@ -180,7 +197,7 @@ function isAbortError(err: unknown): boolean {
  * code — Go's `classifyError` pattern (apps/sdk-go/internal/configfetcher).
  * Node's `fetch` (undici) wraps every failure in `TypeError("fetch failed")`
  * with the real error as `cause`; only its `code` (or the one known redirect
- * message) is read, and only ever to pick a constant from this closed set.
+ * message — a fetch that follows on its own, the SDK's hop loop aside) is read, and only ever to pick a constant from this closed set.
  * Nothing of the error's text is returned.
  */
 export function classifyFetchError(err: unknown): string {

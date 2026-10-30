@@ -16,10 +16,6 @@ import io.confeature.kmp.internal.ConfigValues.selectSettingValue
  * evaluator's fail-closed frame; a prerequisite cycle throws [CircularDependencyException].
  */
 internal object ConditionEvaluator {
-    // PrerequisiteFlagComparator / SegmentComparator codes (the negated ones live on Evaluator).
-    private const val PREREQ_EQUALS = 0
-    private const val SEGMENT_IS_IN = 0
-
     private const val INVALID_OPERATOR = "Comparison operator is missing or invalid."
     private const val INVALID_SEGMENT = "Segment reference is invalid."
 
@@ -143,8 +139,8 @@ internal object ConditionEvaluator {
 
         val equal = nullSafeEquals(resolvedValue, comparisonValue)
         return when (cmp) {
-            PREREQ_EQUALS -> equal
-            Evaluator.PREREQ_NOT_EQUALS -> !equal
+            PrerequisiteComparator.EQUALS -> equal
+            PrerequisiteComparator.NOT_EQUALS -> !equal
             else -> throw MalformedConfigException(INVALID_OPERATOR)
         }
     }
@@ -170,7 +166,7 @@ internal object ConditionEvaluator {
         val segment = if (index != null && index in ctx.segments.indices) asMap(ctx.segments[index]) else null
         val segmentName = if (segment == null) null else readString(segment["n"])
         val segCmp = readInt(c["c"])
-        lb?.appendSegmentCondition(segmentName ?: "", segCmp ?: SEGMENT_IS_IN)
+        lb?.appendSegmentCondition(segmentName ?: "", segCmp ?: SegmentComparator.IS_IN)
 
         if (ctx.user == null) {
             ctx.surfaceMissingUser()
@@ -190,13 +186,13 @@ internal object ConditionEvaluator {
 
         // IsNotIn negates a boolean outcome; an error is surfaced un-negated.
         val result =
-            if (!inSegment.isError() && segCmp == Evaluator.SEGMENT_IS_NOT_IN) {
+            if (!inSegment.isError() && segCmp == SegmentComparator.IS_NOT_IN) {
                 ConditionOutcome.match(!inSegment.isMatch())
             } else {
                 inSegment
             }
 
-        if (lb != null) traceSegmentResult(lb, segmentName, segCmp ?: SEGMENT_IS_IN, inSegment, result)
+        if (lb != null) traceSegmentResult(lb, segmentName, segCmp ?: SegmentComparator.IS_IN, inSegment, result)
         return result
     }
 

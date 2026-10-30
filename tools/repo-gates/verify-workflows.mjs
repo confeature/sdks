@@ -18,7 +18,10 @@
  *   2. NO CREDENTIALS OUTSIDE AN ENVIRONMENT. A job that binds no environment
  *      requests no `id-token: write` and reads no `secrets` context, and no
  *      workflow grants either at the top level, where every job would inherit
- *      it. A pack job or a dry run is exactly such a job.
+ *      it. A pack job or a dry run is exactly such a job. The one named
+ *      exception is ID_TOKEN_EXCEPTIONS (#903: cli-release's attest job, which
+ *      signs keyless build provenance), held to its recorded shape exactly:
+ *      its permissions, no environment, no run: step, only its actions.
  *   3. CREDENTIALED JOBS FAIL CLOSED ON GRAMMAR. EVERY job bound to an
  *      environment (a registry's, or cli-release's, whose two jobs hold the R2
  *      token) is held to strict-shell.mjs's minimal grammar (simple commands,
@@ -117,24 +120,55 @@
  *      produces a required check. Each `requiredChecks` name of
  *      release-settings.json is produced by exactly one job across every
  *      workflow, and every manifest SDK has exactly one of daggerFn or
- *      ci.native (manifestProblems). Each Dagger leg runs its suite, then
- *      its live suite when the leg is `live` (daggerLegProblems); the macOS
+ *      ci.native, and every liveSuite.runner runs through the harness wrapper
+ *      with no shell operator outside the wrapped command (manifestProblems).
+ *      Each Dagger leg (gate and gate-known-red, each judged on its own parsed
+ *      steps) runs its suite, then its live suite when the leg is `live`, and
+ *      one summary step, exactly: always(), SDK, TICKET and STATUS through
+ *      env:, the known-red line when TICKET is set and the plain line
+ *      otherwise (daggerLegProblems); the macOS
  *      job does the same natively, through run-live-suite.mjs (#924,
- *      nativeLegProblems). Rules 2 and 18 already read every
- *      workflow; continueOnErrorFindings and rule 3's cache rules read it
- *      because it is listed (CACHE_FREE_WORKFLOWS, SDK_GATES_WORKFLOW).
+ *      nativeLegProblems). No env: map of the workflow, a job or a step
+ *      sets DEVELOPER_DIR, CI, GITHUB_ACTIONS or TOOLCHAINS, and no value
+ *      names /Applications/Xcode: the Xcode Swift is judged with, and what
+ *      counts as CI for it, are scripts/swift-precheck.sh's. Rules 2 and 18
+ *      already read every workflow; continueOnErrorFindings and rule 3's
+ *      cache rules read it because it is listed (CACHE_FREE_WORKFLOWS,
+ *      SDK_GATES_WORKFLOW).
+ *  20. JSR TARGETS (#935). Every `registry: "jsr"` entry of publish[] and its
+ *      `<path>/jsr.json` pass tools/sdk-pack/jsr-unit.mjs (jsrFindings): it
+ *      rides along a primary entry of the same name (one tag, one version),
+ *      and jsr.json's name, license, exports, imports and version (the drift
+ *      guard) are the unit's. Read from disk, so it runs in verifyWorkflows.
+ *  21. ONE ANCHOR, ONE ALIAS. Read from each workflow's YAML node
+ *      tree (anchorFindings): sdk-gates.yml anchors jobs.gate.steps as
+ *      `&dagger-leg` and jobs.gate-known-red.steps is `*dagger-leg`, both
+ *      required (LEG_ANCHOR). No other anchor or alias, no `<<` merge key and
+ *      no anchor name defined twice, in any workflow: where this rule's
+ *      parser and GitHub's could read one file two ways.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 unreadable input.
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import {
+  isAlias,
+  isMap as isYamlMap,
+  isScalar,
+  isSeq,
+  parse as parseYaml,
+  parseDocument,
+} from "yaml";
 import { isEntry } from "../lib/is-entry.mjs";
 import { lexStrict } from "./strict-shell.mjs";
-import { OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS } from "../sdk-pack/resolve-publish.mjs";
+import { jsrProblems } from "../sdk-pack/jsr-unit.mjs";
+import {
+  declaredVersion,
+  OUTPUT_KEYS as RESOLVER_OUTPUT_KEYS,
+} from "../sdk-pack/resolve-publish.mjs";
 import {
   DAGGER_FN,
   KINDS,
@@ -165,6 +199,14 @@ export const GATE_WORKFLOWS = [VERIFY_WORKFLOW, SDK_GATES_WORKFLOW];
 export const CACHE_FREE_WORKFLOWS = [SDK_GATES_WORKFLOW];
 
 const EXACT = /^\d+\.\d+\.\d+$/;
+/**
+ * An exact Erlang/OTP release: OTP numbers its releases with two to four
+ * parts (27.0, 27.3.4, 27.3.4.19), each one exact (#909). A range, `27`,
+ * `27.x` or `latest` is none.
+ */
+const OTP_PIN = /^\d+\.\d+(?:\.\d+){0,2}$/;
+/** The exact form each *_VERSION takes: OTP's own, every other one's X.Y.Z. */
+const exactPin = (name) => (name === "OTP_VERSION" ? OTP_PIN : EXACT);
 /** Code-unit order, the order `.sort()` gives strings, said explicitly. */
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -250,8 +292,15 @@ const triggersOf = (doc) => {
  * path each names is the checkout's.
  *   crates.io (#900): `cargo publish --no-verify` packages the commit again and
  *     compiles nothing; crates.io takes no prebuilt archive.
+ *   JSR (#935): `tar -x` unpacks the pack job's staged package (its digest
+ *     checked first) into publish-tmp/jsr, and `deno publish --config
+ *     publish-tmp/jsr/jsr.json` type-checks and uploads exactly that tree; JSR
+ *     takes TypeScript source, never a prebuilt archive. No checkout.
  *   pub.dev (#900): `dart pub publish --force` packs and uploads in one
  *     command, and pub.dev accepts it only from the OIDC job.
+ *   hex.pm (#909): one curl POST of the pack job's sha-checked tarball;
+ *     `mix hex.publish` cannot upload a prebuilt package (it packs the
+ *     checkout again, running mix.exs beside the key).
  *   maven.confeature.io (#902): maven-r2-upload.sh, whose ordering and
  *     immutability logic is outside the strict grammar (round 3).
  *   cli.confeature.io (#801): publish-r2.sh is the only writer of the bucket
@@ -265,7 +314,20 @@ export const PUBLISH_EXCEPTIONS = {
       /^cargo "\+\$\{RUST_VERSION\}" publish --no-verify --manifest-path "\$\{UNIT_PATH\}\/Cargo\.toml"$/,
     ],
     "publish-pubdev": [/^dart pub publish --force --directory "\$\{UNIT_PATH\}"$/],
+    // JSR publishes source (#935): the pack job's staged tree, unpacked into
+    // publish-tmp/, then deno type-checks it and uploads it, by OIDC.
+    "publish-jsr": [
+      /^tar -x -f "release\/\$\{ARTIFACT\}" -C publish-tmp\/jsr$/,
+      /^deno publish --config publish-tmp\/jsr\/jsr\.json$/,
+    ],
     "publish-maven": [/^bash tools\/sdk-pack\/maven-r2-upload\.sh release$/],
+    // Hex (#909): hex.pm takes the pack job's tarball as one POST, the
+    // request hex_core's publish makes; no mix, no checkout. curl imports the
+    // key from its env (`--variable %HEX_API_KEY`) into the one header, so no
+    // shell word and no argv holds it; the destination is literal.
+    "publish-hex": [
+      /^curl -sS --fail-with-body --tlsv1\.2 --proto =https --variable %HEX_API_KEY --expand-header 'authorization: \{\{HEX_API_KEY\}\}' --header 'content-type: application\/octet-stream' --data-binary "@release\/\$\{ARTIFACT\}" 'https:\/\/hex\.pm\/api\/packages\/confeature_client\/releases\?replace=false'$/,
+    ],
   },
   [CLI_WORKFLOW]: {
     // Each job holding a token re-checks that the tag is on main (round 10).
@@ -309,6 +371,7 @@ export const PIN = {
   rubygemsAuth: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a",
   setupDart: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
   setupDeno: "denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282",
+  setupBeam: "erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124",
   setupDotnet: "actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68",
   setupGo: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
   setupJava: "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
@@ -320,6 +383,22 @@ export const PIN = {
 
 /** One recorded step: its action, and its id, if:, env:, with: when it has them. */
 const step = (uses, extra = {}) => ({ uses, ...extra });
+/** Where this repository's local (composite) actions live (#868). */
+export const ACTIONS = ".github/actions";
+/**
+ * The one local action a frozen job runs (#868): how every job sets Dagger up
+ * (tools/dagger-call/engine-pin.test.mjs holds its content). A local action
+ * is repository code the job's token reaches, so rule 17 freezes its
+ * action.yml bytes by sha256 like a frozen run: step's text. To record a
+ * reviewed change, copy the `got` surface its finding prints.
+ */
+export const DAGGER_SETUP = {
+  uses: "./.github/actions/dagger-setup",
+  sha256: "43e0247bfb1e404d599526f11666a09f02181f16507c14ff1664c734786be008",
+};
+/** The setup step every Dagger job of the frozen workflows runs, as `id: pin`. */
+const daggerSetup = () =>
+  step(DAGGER_SETUP.uses, { id: "pin", action: { sha256: DAGGER_SETUP.sha256 } });
 /** A checkout of this commit only, keeping no credential: the common case. */
 const shallowCheckout = () =>
   step(PIN.checkout, { with: { "fetch-depth": 1, "persist-credentials": false } });
@@ -376,7 +455,8 @@ const onMain = () =>
  * continue-on-error, timeout-minutes, permissions, environment, outputs…).
  * cli-release's build (its on-main guard and the SHA256SUMS step decide what
  * is released, yet it holds no token, so no credential rule reads it),
- * release and upload (each re-runs the guard first), and release-gate's test
+ * release and upload (each re-runs the guard first), attest (#903, the
+ * ID_TOKEN_EXCEPTIONS job), and release-gate's test
  * (WRITE_TOKEN_EXEMPT: rules 3 and 15 skip it). Round 11: freezing only the
  * steps let a job-level `env: BASH_ENV`, `defaults.run.shell`, `container:`
  * or `runs-on: self-hosted` run other code before every frozen step.
@@ -397,9 +477,17 @@ export const FROZEN_JOB_KEYS = {
     "timeout-minutes": 10,
     permissions: { contents: "write" },
   },
+  [`${CLI_WORKFLOW}#attest`]: {
+    name: "attest ${{ github.ref_name }}",
+    needs: "build",
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 10,
+    permissions: { "id-token": "write", attestations: "write" },
+  },
   [`${CLI_WORKFLOW}#upload`]: {
     name: "upload ${{ github.ref_name }} to R2",
-    needs: ["build", "release"],
+    // attest first (#903): nothing reaches R2 unattested.
+    needs: ["build", "release", "attest"],
     "runs-on": "ubuntu-latest",
     environment: "cli-release",
     "timeout-minutes": 15,
@@ -431,6 +519,7 @@ export const ACTION_SURFACE = {
     setup: [fullCheckout()],
     gate: [
       shallowCheckout(),
+      daggerSetup(),
       step(PIN.dagger, {
         with: {
           version: "${{ steps.pin.outputs.version }}",
@@ -499,6 +588,35 @@ export const ACTION_SURFACE = {
       shallowCheckout(),
       step(PIN.setupDart, { with: { sdk: "${{ env.DART_VERSION }}" } }),
     ],
+    "pack-jsr": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupDeno, { with: { "deno-version": "${{ env.DENO_VERSION }}" } }),
+      uploadRelease("release-jsr", "*.tar"),
+    ],
+    // No checkout (ruling (b)): the pack job's staged package, by its digest.
+    "publish-jsr": [
+      step(PIN.setupDeno, { with: { "deno-version": "${{ env.DENO_VERSION }}" } }),
+      download("release-jsr", "release"),
+    ],
+    "pack-hex": [
+      shallowCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      step(PIN.setupBeam, {
+        with: {
+          "otp-version": "${{ env.OTP_VERSION }}",
+          "elixir-version": "${{ env.ELIXIR_VERSION }}",
+          "version-type": "strict",
+          "install-hex": false,
+          "install-rebar": false,
+        },
+      }),
+      uploadRelease("release-hex", "*.tar"),
+    ],
+    // No checkout: the pack job's tarball, by its digest, then one POST.
+    "publish-hex": [download("release-hex", "release")],
     "pack-go": [
       shallowCheckout(),
       step(PIN.pnpm),
@@ -583,6 +701,12 @@ export const ACTION_SURFACE = {
         { env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ github.ref_name }}" } },
       ),
     ],
+    // FROZEN_JOBS and ID_TOKEN_EXCEPTIONS (#903): the artifact, then the
+    // attestation over every file of it, nothing else.
+    attest: [
+      download("cli-dist", "dist"),
+      step(PIN.attest, { with: { "subject-path": "dist/confeature-*\ndist/SHA256SUMS\n" } }),
+    ],
     upload: [
       fullCheckout(),
       onMain(),
@@ -619,16 +743,7 @@ export const ACTION_SURFACE = {
     // FROZEN_JOBS: every step (WRITE_TOKEN_EXEMPT holds it to this instead of rule 3).
     test: [
       shallowCheckout(),
-      runStep(
-        "Read the Dagger engine version (dagger/dagger.json)",
-        "bc1813a319ed83aedff2a3493fecbac1469e30b02cbd7875191fd6d7d33e23d8",
-        { id: "pin" },
-      ),
-      runStep(
-        "Install the checksum-verified Dagger CLI",
-        "c40dfe4d9afd14936ebae93f07e9ec748be249f41270c8a6b406e0afadb79a86",
-        { env: { DAGGER_VERSION: "${{ steps.pin.outputs.version }}" } },
-      ),
+      daggerSetup(),
       step(PIN.dagger, {
         with: {
           version: "${{ steps.pin.outputs.version }}",
@@ -652,9 +767,10 @@ export const ACTION_SURFACE = {
 
 /**
  * A step's surface: its action, and its id, if:, env:, continue-on-error and
- * with: (a github-script `script:` by its sha256, so the table stays short).
+ * with: (a github-script `script:` by its sha256, so the table stays short);
+ * a local action also by its action.yml's sha256 (null when it has none).
  */
-const surfaceOf = (s) => {
+const surfaceOf = (s, actions = {}) => {
   if (typeof s?.uses !== "string") {
     const o = {
       name: s?.name,
@@ -666,6 +782,12 @@ const surfaceOf = (s) => {
   }
   const o = { uses: s.uses };
   for (const k of ["id", "if", "env", "continue-on-error"]) if (s[k] !== undefined) o[k] = s[k];
+  if (s.uses.startsWith("./")) {
+    const raw = actions[s.uses.replace(/\/+$/, "")];
+    o.action = {
+      sha256: raw === undefined ? null : createHash("sha256").update(raw).digest("hex"),
+    };
+  }
   if (s.with !== undefined) {
     o.with = { ...s.with };
     if (typeof o.with.script === "string")
@@ -688,7 +810,7 @@ const canonical = (v) =>
 export const SURFACE_WORKFLOWS = [PUBLISH_WORKFLOW, CLI_WORKFLOW, "release-gate.yml"];
 
 /** Rule 17 over every job of SURFACE_WORKFLOWS (round 9: not only the credentialed ones). */
-export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
+export function surfaceFindings(workflows, surface = ACTION_SURFACE, actions = {}) {
   const out = [];
   for (const file of SURFACE_WORKFLOWS) {
     const jobs = workflows[file]?.jobs ?? {};
@@ -705,7 +827,7 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE) {
           ? [call(job.uses, job.with ?? {})]
           : (Array.isArray(job?.steps) ? job.steps : [])
               .filter((s) => FROZEN_JOBS.has(`${file}#${jobId}`) || typeof s?.uses === "string")
-              .map(surfaceOf);
+              .map((s) => surfaceOf(s, actions));
       // A whole-frozen job counts and names its steps; any other, its actions.
       const frozen = FROZEN_JOBS.has(`${file}#${jobId}`);
       const unit = frozen ? "steps" : "actions";
@@ -822,6 +944,9 @@ export const PINNED_ENV = {
   GO_VERSION: () => VERSION_PIN,
   JAVA_VERSION: () => VERSION_PIN,
   DENO_VERSION: () => VERSION_PIN,
+  OTP_VERSION: () => OTP_PIN,
+  ELIXIR_VERSION: () => VERSION_PIN,
+  HEX_VERSION: () => VERSION_PIN,
   MAVEN_URL: () => LIT("https://maven.confeature.io"),
   MAVEN_BUCKET: () => LIT("confeature-maven"),
   // github.com's published ed25519 host key, exact (docs.github.com).
@@ -850,8 +975,11 @@ export const PINNED_ENV = {
   CLOUDFLARE_ACCOUNT_ID: () => SECRET("CLOUDFLARE_ACCOUNT_ID"),
   MAVEN_R2_ACCESS_KEY_ID: () => SECRET("MAVEN_R2_ACCESS_KEY_ID"),
   MAVEN_R2_SECRET_ACCESS_KEY: () => SECRET("MAVEN_R2_SECRET_ACCESS_KEY"),
+  HEX_API_KEY: () => SECRET("HEX_API_KEY"),
   NUGET_API_KEY: () => EXPR("steps\\.login\\.outputs\\.NUGET_API_KEY"),
   CARGO_REGISTRY_TOKEN: () => EXPR("steps\\.auth\\.outputs\\.token"),
+  // deno reads no package.json (#935): the staged JSR package has none.
+  DENO_NO_PACKAGE_JSON: () => LIT("1"),
   DOTNET_NOLOGO: () => LIT("1"),
   DOTNET_CLI_TELEMETRY_OPTOUT: () => LIT("1"),
   CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: () => LIT("fallback"),
@@ -873,6 +1001,7 @@ export const CREDENTIAL_ENV = new Set([
   "CLOUDFLARE_ACCOUNT_ID",
   "DEPLOY_KEY",
   "GH_TOKEN",
+  "HEX_API_KEY",
   "MAVEN_R2_ACCESS_KEY_ID",
   "MAVEN_R2_SECRET_ACCESS_KEY",
   "NUGET_API_KEY",
@@ -1201,6 +1330,9 @@ export const ENVIRONMENT_COMMANDS = {
     "sort",
   ],
   "sdk-publish-pubdev": [],
+  "sdk-publish-jsr": ["mkdir", "printf", "sha256sum"],
+  // The upload is its PUBLISH_EXCEPTIONS curl; these check the digest and the key.
+  "sdk-publish-hex": ["[", "echo", "exit", "printf", "sha256sum"],
   "sdk-publish-go": ["[", "curl", "echo", "exit", "git", "mkdir", "printf", "rm", "umask"],
   "sdk-publish-packagist": [
     "[",
@@ -1368,7 +1500,7 @@ function workflowPins(file, doc, add) {
   const pins = { NODE_VERSION: doc?.env?.NODE_VERSION, NPM_VERSION: doc?.env?.NPM_VERSION };
   // Every tool pin in the top-level env, not only node and npm (#900).
   for (const [k, v] of Object.entries(doc?.env ?? {}))
-    if (k.endsWith("_VERSION") && !EXACT.test(String(v)))
+    if (k.endsWith("_VERSION") && !exactPin(k).test(String(v)))
       add(file, "-", `env ${k} is ${String(v)}, not an exact version`);
   return pins;
 }
@@ -1777,6 +1909,7 @@ function credentialExposureRules(file, jobId, job, doc, add) {
  */
 export const WRITE_PERMISSIONS = {
   "cli-release.yml#release": ["contents"],
+  "cli-release.yml#attest": ["attestations", "id-token"],
   "release-gate.yml#test": ["issues"],
   "sdk-publish.yml#publish-npm": ["id-token"],
   "sdk-publish.yml#publish-pypi": ["id-token"],
@@ -1784,6 +1917,7 @@ export const WRITE_PERMISSIONS = {
   "sdk-publish.yml#publish-rubygems": ["id-token"],
   "sdk-publish.yml#publish-nuget": ["id-token"],
   "sdk-publish.yml#publish-pubdev": ["id-token"],
+  "sdk-publish.yml#publish-jsr": ["id-token"],
   "sdk-publish.yml#publish-maven": ["attestations", "id-token"],
 };
 
@@ -1893,6 +2027,58 @@ export const WRITE_TOKEN_EXEMPT = {
 };
 
 /**
+ * Rule 2's one named exception (#903): a job that requests `id-token: write`
+ * outside an environment. cli-release's attest job mints an OIDC token for
+ * attest-build-provenance, which exchanges it for a short-lived Sigstore
+ * certificate and signs keyless build provenance over the released files; an
+ * environment would add nothing but a second name for the same tag policy.
+ * The exception is its recorded shape, exactly, checked by
+ * idTokenExceptionFindings independently of the frozen tables (re-recording
+ * ACTION_SURFACE or FROZEN_JOB_KEYS never widens it): `permissions` is the
+ * recorded map and nothing more (no `contents`, no other write), no
+ * environment, no job-level env/defaults/container/services, no reusable
+ * call, no run: step (no project code runs beside the token), each step one of
+ * `actions`, in that order, and no expression naming github.token or secrets.
+ */
+export const ID_TOKEN_EXCEPTIONS = {
+  [`${CLI_WORKFLOW}#attest`]: {
+    why: "keyless build provenance (actions/attest-build-provenance) over the artifact upload puts on R2",
+    permissions: { "id-token": "write", attestations: "write" },
+    actions: [PIN.download, PIN.attest],
+  },
+};
+
+/** ID_TOKEN_EXCEPTIONS, each held to its recorded shape (#903). */
+export function idTokenExceptionFindings(workflows) {
+  const out = [];
+  for (const [key, want] of Object.entries(ID_TOKEN_EXCEPTIONS)) {
+    const [file, jobId] = key.split("#");
+    const job = workflows[file]?.jobs?.[jobId];
+    const add = (why) => out.push({ file, job: jobId, why: `ID_TOKEN_EXCEPTIONS: ${why}` });
+    if (job === undefined || job === null) {
+      add("records a job the workflow does not have");
+      continue;
+    }
+    if (canonical(job.permissions ?? null) !== canonical(want.permissions))
+      add(
+        `the job's permissions are ${canonical(job.permissions ?? null)}, the exception records ${canonical(want.permissions)}`,
+      );
+    for (const k of ["environment", "env", "defaults", "container", "services", "uses", "secrets"])
+      if (job[k] !== undefined) add(`the job sets ${k}:, which the exception does not allow`);
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    for (const s of steps)
+      if (s?.run !== undefined)
+        add(`step ${s?.name ?? "?"} has a run: block (the exception runs no project code)`);
+    const got = steps.map((s) => (typeof s?.uses === "string" ? s.uses : null));
+    if (canonical(got) !== canonical(want.actions))
+      add(`the job runs ${canonical(got)}, the exception records ${canonical(want.actions)}`);
+    if (allExpressions(job).some(readsCredentialContext))
+      add("an expression of the job names github.token or secrets");
+  }
+  return out;
+}
+
+/**
  * Whether an expression can reach the job's token or a secret (round 11):
  * any use of the secrets context, and any use of the github context other
  * than `github.<name>` with name not `token`. A pattern for `github.token`
@@ -1917,7 +2103,7 @@ export function readsCredentialContext(expr) {
  * github.token or secrets (round 10): the exemption returned before that
  * test, so `env: T: ${{ github.token }}` at step or job level passed.
  */
-export function exemptTokenFindings(workflows) {
+export function exemptTokenFindings(workflows, actions = {}) {
   const out = [];
   for (const key of Object.keys(WRITE_TOKEN_EXEMPT)) {
     const [file, jobId] = key.split("#");
@@ -1932,8 +2118,19 @@ export function exemptTokenFindings(workflows) {
       continue;
     }
     const workflowLevel = Object.fromEntries(Object.entries(doc).filter(([k]) => k !== "jobs"));
+    // A local action the job runs reaches its token as well (#868).
+    const local = (Array.isArray(job.steps) ? job.steps : [])
+      .map((st) => (typeof st?.uses === "string" ? st.uses.replace(/\/+$/, "") : ""))
+      .filter((u) => u.startsWith("./"))
+      .map((u) => {
+        try {
+          return parseYaml(actions[u] ?? "");
+        } catch {
+          return `\${{ secrets.unparsable }}`;
+        }
+      });
     for (const [where, node] of [
-      [jobId, job],
+      [jobId, [job, ...local]],
       ["-", workflowLevel],
     ])
       if (allExpressions(node).some(readsCredentialContext))
@@ -2152,7 +2349,11 @@ function jobRules(args) {
         add(file, jobId, `reads secret ${name}, which environment ${env} does not declare`);
     }
   }
-  if (env === undefined && grantsIdToken(job?.permissions))
+  if (
+    env === undefined &&
+    grantsIdToken(job?.permissions) &&
+    !Object.hasOwn(ID_TOKEN_EXCEPTIONS, `${file}#${jobId}`)
+  )
     add(file, jobId, "requests id-token: write outside an environment");
   // Rule 2: a secret only where an environment declares it.
   if (env === undefined) {
@@ -2670,7 +2871,7 @@ export const CREDENTIAL_ACTION_OUTPUTS = {
  * other is a typo or a renamed output, and resolves to "" at run time. Every
  * credential output is one of them.
  */
-export const ACTION_OUTPUTS = { ...CREDENTIAL_ACTION_OUTPUTS };
+export const ACTION_OUTPUTS = { ...CREDENTIAL_ACTION_OUTPUTS, [DAGGER_SETUP.uses]: ["version"] };
 /** The repository scripts whose outputs a step reference may name, by their exported list. */
 export const OUTPUT_SCRIPTS = ["tools/sdk-pack/resolve-publish.mjs"];
 const SCRIPT_OUTPUT_KEYS = { "tools/sdk-pack/resolve-publish.mjs": RESOLVER_OUTPUT_KEYS };
@@ -2867,14 +3068,66 @@ export function readScriptOutputs() {
   return Object.fromEntries(OUTPUT_SCRIPTS.map((f) => [f, [...SCRIPT_OUTPUT_KEYS[f]]]));
 }
 
+/**
+ * Every local action of the repository at `root`, by the `uses:` that names
+ * it (`./.github/actions/<name>`): its action.yml (or action.yaml) text.
+ */
+export function readLocalActions(root) {
+  const dir = join(root, ACTIONS);
+  if (!existsSync(dir)) return {};
+  const out = {};
+  for (const name of readdirSync(dir)) {
+    const file = ["action.yml", "action.yaml"]
+      .map((n) => join(dir, name, n))
+      .find((p) => existsSync(p));
+    if (file !== undefined) out[`./${ACTIONS}/${name}`] = readFileSync(file, "utf8");
+  }
+  return out;
+}
+
+/**
+ * Every workflow of the repository at `root`, by file name: its parsed tree
+ * (`workflows`), which every rule reads, and its text (`sources`), which only
+ * the anchor rule reads, since a parsed tree has no anchors left in it. One
+ * reader, so the two can never be of different files.
+ */
+export function readWorkflows(root) {
+  const workflows = {};
+  const sources = {};
+  for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n))) {
+    sources[f] = readFileSync(join(root, WORKFLOWS, f), "utf8");
+    workflows[f] = parseYaml(sources[f]);
+  }
+  return { workflows, sources };
+}
+
 /** Read the repository at `root` and return the findings. Throws on unreadable input. */
 export function verifyWorkflows(root) {
   const settings = JSON.parse(readFileSync(join(root, SETTINGS), "utf8"));
   const manifest = JSON.parse(readFileSync(join(root, MANIFEST), "utf8"));
-  const workflows = {};
-  for (const f of readdirSync(join(root, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
-    workflows[f] = parseYaml(readFileSync(join(root, WORKFLOWS, f), "utf8"));
-  return allFindings({ settings, manifest, workflows, scriptOutputs: readScriptOutputs() });
+  return [
+    ...allFindings({
+      settings,
+      manifest,
+      ...readWorkflows(root),
+      scriptOutputs: readScriptOutputs(),
+      actions: readLocalActions(root),
+    }),
+    ...jsrFindings(manifest, root),
+  ];
+}
+
+/**
+ * The manifest's JSR entries and each one's jsr.json (#935): the drift guard
+ * (jsr.json's version is the unit's versionSource) and the entry's shape, on
+ * every `pnpm run verify`, the same checks the resolver refuses a tag on.
+ */
+export function jsrFindings(manifest, root) {
+  return jsrProblems(manifest, root, (u) => declaredVersion(u, root, undefined)).map((why) => ({
+    file: MANIFEST,
+    job: "jsr",
+    why,
+  }));
 }
 
 /**
@@ -2882,19 +3135,121 @@ export function verifyWorkflows(root) {
  * share (round 10: the tests listed the rule functions themselves, so a rule
  * the gate forgot to run still passed its rows).
  */
-export function allFindings({ settings, manifest, workflows, scriptOutputs }) {
+export function allFindings({
+  settings,
+  manifest,
+  workflows,
+  sources,
+  scriptOutputs,
+  actions = {},
+}) {
   return [
+    ...anchorFindings(sources),
     ...findings({ settings, manifest, workflows }),
     ...publicGateFindings(workflows),
     ...releaseGateFindings(workflows),
     ...referenceFindings(workflows, scriptOutputs, settings),
-    ...surfaceFindings(workflows),
+    ...surfaceFindings(workflows, ACTION_SURFACE, actions),
     ...writePermissionFindings(workflows),
     ...continueOnErrorFindings(workflows),
-    ...exemptTokenFindings(workflows),
+    ...exemptTokenFindings(workflows, actions),
+    ...idTokenExceptionFindings(workflows),
     ...daggerFnFindings(manifest),
     ...sdkGateFindings({ settings, manifest, workflows }),
   ];
+}
+
+/**
+ * The one YAML anchor and the one alias any workflow may hold (rule 21):
+ * sdk-gates.yml writes the Dagger leg's steps once, under `gate`, and
+ * `gate-known-red` runs that same list. Paths are key paths from the root.
+ */
+export const LEG_ANCHOR = {
+  file: SDK_GATES_WORKFLOW,
+  name: "dagger-leg",
+  anchor: ["jobs", "gate", "steps"],
+  alias: ["jobs", "gate-known-red", "steps"],
+};
+
+/** Every anchor, alias and `<<` key under a YAML node, each with its key path. */
+function yamlMarks(node, path = [], out = { anchors: [], aliases: [], merges: [] }) {
+  if (isAlias(node)) {
+    out.aliases.push({ name: node.source, path });
+    return out;
+  }
+  if (typeof node?.anchor === "string") out.anchors.push({ name: node.anchor, path });
+  if (isYamlMap(node))
+    for (const pair of node.items) {
+      const key = isScalar(pair.key) ? String(pair.key.value) : String(pair.key);
+      if (key === "<<") out.merges.push({ path });
+      yamlMarks(pair.key, [...path, `${key} (key)`], out);
+      yamlMarks(pair.value, [...path, key], out);
+    }
+  else if (isSeq(node)) node.items.forEach((item, i) => yamlMarks(item, [...path, String(i)], out));
+  return out;
+}
+
+/**
+ * Rule 21: the anchors and aliases of every workflow, read from the YAML node
+ * tree, since the parsed tree the other rules read has none left. Exactly
+ * LEG_ANCHOR is allowed, and required: `&dagger-leg` on jobs.gate.steps of
+ * sdk-gates.yml and `*dagger-leg` on jobs.gate-known-red.steps, so the Dagger
+ * leg cannot drift back into two copies. Any other anchor or alias, any `<<`
+ * merge key and any anchor name defined twice is refused: those are where
+ * this rule's parser and GitHub's could read one file two ways (the `yaml`
+ * package lets a redefined anchor win silently, and GitHub reads no merge
+ * keys), and rule 19 judges the tree this parser builds.
+ */
+export function anchorFindings(sources) {
+  if (!isMap(sources))
+    return [
+      { file: WORKFLOWS, job: "-", why: "no workflow source was given: rule 21 would run blind" },
+    ];
+  const out = [];
+  const same = (a, b) => a.join("\0") === b.join("\0");
+  const allowed = (kind, m, file) =>
+    file === LEG_ANCHOR.file && m.name === LEG_ANCHOR.name && same(m.path, LEG_ANCHOR[kind]);
+  for (const [file, text] of Object.entries(sources)) {
+    const add = (path, why) =>
+      out.push({ file, job: path[0] === "jobs" && path.length > 1 ? path[1] : "-", why });
+    const doc = parseDocument(String(text));
+    if (doc.errors.length > 0) {
+      add([], `does not parse as one YAML document (${doc.errors[0].message.split("\n")[0]})`);
+      continue;
+    }
+    const { anchors, aliases, merges } = yamlMarks(doc.contents);
+    const where = (m) => m.path.join(".") || "the root";
+    const pair = `${LEG_ANCHOR.anchor.join(".")} of ${LEG_ANCHOR.file}`;
+    for (const m of anchors.filter((x) => !allowed("anchor", x, file)))
+      add(
+        m.path,
+        `defines the anchor &${m.name} at ${where(m)}; the one anchor a workflow may define is &${LEG_ANCHOR.name} on ${pair}`,
+      );
+    for (const m of aliases.filter((x) => !allowed("alias", x, file)))
+      add(
+        m.path,
+        `uses the alias *${m.name} at ${where(m)}; the one alias a workflow may use is *${LEG_ANCHOR.name} on ${LEG_ANCHOR.alias.join(".")} of ${LEG_ANCHOR.file}`,
+      );
+    for (const m of merges)
+      add(m.path, `has a << merge key at ${where(m)}: GitHub reads no merge keys`);
+    const times = new Map();
+    for (const m of anchors) times.set(m.name, (times.get(m.name) ?? 0) + 1);
+    for (const [name, n] of times)
+      if (n > 1)
+        add([], `defines the anchor &${name} ${n} times: a later one would shadow the first`);
+    if (file !== LEG_ANCHOR.file) continue;
+    if (!anchors.some((x) => allowed("anchor", x, file)))
+      add(
+        LEG_ANCHOR.anchor,
+        `${LEG_ANCHOR.anchor.join(".")} is not anchored &${LEG_ANCHOR.name}: the Dagger leg's steps are written once, there`,
+      );
+    if (!aliases.some((x) => allowed("alias", x, file)))
+      add(
+        LEG_ANCHOR.alias,
+        `${LEG_ANCHOR.alias.join(".")} is not the alias *${LEG_ANCHOR.name}: ${LEG_ANCHOR.alias[1]} runs ${LEG_ANCHOR.anchor[1]}'s steps, never its own copy`,
+      );
+  }
+  return out;
 }
 
 /**
@@ -2932,7 +3287,23 @@ export const LIVE_SCRIPT = "tools/repo-gates/run-live-suite.mjs";
 const DAILY_CRON = /^\d{1,2} \d{1,2} \* \* \*$/;
 /** Dagger's cloud and cache switches, in any env (a cache a pull request writes, a trace sent away). */
 const DAGGER_CLOUD_OR_CACHE = /DAGGER_(?:CLOUD|CACHE)/i;
+/**
+ * What scripts/swift-precheck.sh alone decides: the Xcode Swift is
+ * judged with (DEVELOPER_DIR, TOOLCHAINS) and whether it runs in CI mode (CI,
+ * GITHUB_ACTIONS). A workflow env: setting one would select another Xcode, or
+ * turn the script's red into a local WARN.
+ */
+const PRECHECK_ENV = ["DEVELOPER_DIR", "CI", "GITHUB_ACTIONS", "TOOLCHAINS"];
+/** An Xcode path in a workflow value: a second home for the pin. */
+const XCODE_PATH = "/Applications/Xcode";
 const isMap = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+/** Every string value under a parsed node (keys are not values; comments are not parsed). */
+const stringsOf = (node) =>
+  typeof node === "string"
+    ? [node]
+    : node !== null && typeof node === "object"
+      ? Object.values(node).flatMap(stringsOf)
+      : [];
 const stepsOf = (job) => (Array.isArray(job?.steps) ? job.steps : []);
 /** The check-run name a job produces: its name:, or its id when it has none. */
 const checkName = (id, job) => (typeof job?.name === "string" ? job.name : id);
@@ -2990,18 +3361,62 @@ const LIVE_ARGS = "live-suite --sdk ${{ matrix.sdk.name }} --source=.";
 const LIVE_IF = "matrix.sdk.live";
 const isDaggerAction = (st) =>
   typeof st?.uses === "string" && /^dagger\/dagger-for-github@/i.test(st.uses.trim());
+/**
+ * The Dagger leg's one summary step, exactly (FR-002). A matrix job reports
+ * one combined result, so each leg names itself. The step decides nothing:
+ * it prints the known-red line when the leg has a ticket, which only a
+ * known-red leg may carry (select-sdks.mjs legProblem), and the plain line
+ * otherwise. The ticket reaches it through env: only, never inside run:.
+ */
+const SUMMARY_IF = "always()";
+const SUMMARY_ENV = {
+  SDK: "${{ matrix.sdk.name }}",
+  TICKET: "${{ matrix.sdk.ticket }}",
+  STATUS: "${{ job.status }}",
+};
+const SUMMARY_RUN = [
+  'if [ -n "${TICKET}" ]; then',
+  '  echo "gate (${SDK}), known red ${TICKET}, not counted: ${STATUS}" >> "$GITHUB_STEP_SUMMARY"',
+  "else",
+  '  echo "gate (${SDK}): ${STATUS}" >> "$GITHUB_STEP_SUMMARY"',
+  "fi",
+].join("\n");
+const writesSummary = (st) => /GITHUB_STEP_SUMMARY/.test(String(st?.run ?? ""));
 
 /**
  * Rule 19's half over a Dagger leg's steps (gate, gate-known-red; #918): it
  * runs exactly two Dagger steps, the SDK's suite (`<daggerFn> --source=.`,
  * unconditional) and then its live suite (`live-suite --sdk <name>`, only when
- * select-sdks.mjs marks the leg `live`), through the same action. How Dagger
- * is installed and pinned is engine-pin.test.mjs's, not restated here; which
- * SDK has a live suite is the manifest's, read by the selector.
+ * select-sdks.mjs marks the leg `live`), through the same action, and one
+ * summary step, exactly SUMMARY_RUN under SUMMARY_IF and SUMMARY_ENV. Each job
+ * is judged on its own parsed steps: the alias that makes the two lists one
+ * is rule 21's, never a sameness check here. How Dagger is installed and
+ * pinned is engine-pin.test.mjs's, not restated here; which SDK has a live
+ * suite is the manifest's, read by the selector.
  */
 function daggerLegProblems(job) {
   const out = [];
   const steps = stepsOf(job);
+  const summaries = steps.filter(writesSummary);
+  if (summaries.length !== 1)
+    out.push(
+      `has ${summaries.length} steps writing $GITHUB_STEP_SUMMARY, not exactly its one summary step`,
+    );
+  else {
+    const [sum] = summaries;
+    if (String(sum.if ?? "").trim() !== SUMMARY_IF)
+      out.push(`its summary step's if: is not exactly ${SUMMARY_IF}`);
+    if (canonical(sum.env ?? null) !== canonical(SUMMARY_ENV))
+      out.push(
+        `its summary step's env: is not exactly ${Object.entries(SUMMARY_ENV)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ")}`,
+      );
+    if (String(sum.run).trim() !== SUMMARY_RUN)
+      out.push(
+        "its summary step's run: is not exactly the known-red line when TICKET is set, else the plain line",
+      );
+  }
   const dagger = steps.filter(isDaggerAction);
   const args = (st) => String(st?.with?.args ?? "").trim();
   const suite = dagger.find((st) => args(st) === SUITE_ARGS && st.if === undefined);
@@ -3151,9 +3566,22 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
     ]),
   ];
   for (const [where, map] of envMaps)
-    for (const k of Object.keys(map ?? {}))
+    for (const k of Object.keys(map ?? {})) {
       if (DAGGER_CLOUD_OR_CACHE.test(k))
         add(where, `sets ${k}: no Dagger cloud or cache configuration`);
+      if (PRECHECK_ENV.includes(k))
+        add(
+          where,
+          `sets ${k} in an env: the Xcode and its CI mode are scripts/swift-precheck.sh's`,
+        );
+    }
+  const valueSites = [
+    ["-", Object.entries(doc ?? {}).filter(([k]) => k !== "jobs")],
+    ...Object.entries(jobs),
+  ];
+  for (const [where, node] of valueSites)
+    if (stringsOf(node).some((v) => v.includes(XCODE_PATH)))
+      add(where, `a value names ${XCODE_PATH}: the Xcode pin is scripts/swift-precheck.sh's`);
   for (const [id, job] of Object.entries(jobs)) {
     if (job?.environment !== undefined) add(id, "binds an environment");
     if (!GATE_RUNNERS.includes(job?.["runs-on"]))

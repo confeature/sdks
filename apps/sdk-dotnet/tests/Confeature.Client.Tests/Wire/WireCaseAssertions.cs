@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Confeature.Client.Internal;
 using Confeature.Client.Tests.TestUtils;
@@ -75,9 +76,77 @@ internal static class WireCaseAssertions
     /// <summary>Cached parse of <c>wire-cases.json</c>.</summary>
     private static readonly Lazy<JsonDocument> CorpusDoc = new(LoadCorpusDocument);
 
-    /// <summary>The corpus's cases, in file order.</summary>
-    public static JsonElement.ArrayEnumerator Cases =>
-        CorpusDoc.Value.RootElement.GetProperty("cases").EnumerateArray();
+    /// <summary>Cached sdk-dotnet entry of <c>wire-cases-pending.json</c>: case id to ticket.</summary>
+    private static readonly Lazy<Dictionary<string, string>> PendingDoc = new(LoadPendingCases);
+
+    /// <summary>
+    /// The corpus's cases this reader runs, in file order. A case pending for
+    /// sdk-dotnet (<c>wire-cases-pending.json</c>, 1.4, #994) is left out BY
+    /// NAME, under a proof that the entry is still true: this reader still
+    /// cannot read it. The day it can, enumerating throws and the entry must go.
+    /// </summary>
+    public static IEnumerable<JsonElement> Cases
+    {
+        get
+        {
+            var pending = PendingDoc.Value;
+            var all = CorpusDoc.Value.RootElement.GetProperty("cases").EnumerateArray().ToList();
+            var missing = pending.Keys.Except(all.Select(c => c.GetProperty("id").GetString())).ToList();
+            if (missing.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"wire-cases-pending.json lists {string.Join(", ", missing)} for sdk-dotnet, not in the corpus");
+            }
+
+            foreach (var c in all)
+            {
+                var id = c.GetProperty("id").GetString()!;
+                if (!pending.TryGetValue(id, out var ticket))
+                {
+                    continue;
+                }
+
+                if (UnreadFields(c).Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"{id} is pending for sdk-dotnet ({ticket}) but this reader reads every field of it — "
+                        + "remove it from wire-cases-pending.json and run it");
+                }
+            }
+
+            return all.Where(c => !pending.ContainsKey(c.GetProperty("id").GetString()!)).ToList();
+        }
+    }
+
+    /// <summary>The case-level / given / server / expected fields this reader does not read.</summary>
+    public static IReadOnlyList<string> UnreadFields(JsonElement root)
+    {
+        static IEnumerable<string> Unread(JsonElement section, HashSet<string> known, string name) =>
+            section.EnumerateObject().Where(p => !known.Contains(p.Name)).Select(p => $"{name}.{p.Name}");
+
+        return Unread(root, KnownCaseFields, "case")
+            .Concat(Unread(root.GetProperty("given"), KnownGivenFields, "given"))
+            .Concat(Unread(root.GetProperty("server"), KnownServerFields, "server"))
+            .Concat(Unread(root.GetProperty("expected"), KnownExpectedFields, "expected"))
+            .ToList();
+    }
+
+    private static Dictionary<string, string> LoadPendingCases()
+    {
+        var path = Path.Combine(WireFixturesDir(), "wire-cases-pending.json");
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (doc.RootElement.GetProperty("pending").TryGetProperty("sdk-dotnet", out var entry))
+        {
+            var ticket = entry.GetProperty("ticket").GetString()!;
+            foreach (var id in entry.GetProperty("cases").EnumerateArray())
+            {
+                result[id.GetString()!] = ticket;
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>The directory holding <c>wire-cases.json</c> and its body fixtures.</summary>
     public static string WireFixturesDir() => Path.Combine(

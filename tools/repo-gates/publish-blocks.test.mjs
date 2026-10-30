@@ -908,6 +908,126 @@ d=""; while [ $# -gt 0 ]; do [ "$1" = --directory ] && d="$2"; shift; done
   });
 });
 
+describe("the JSR jobs, verbatim: pack-jsr stages, dry-runs and tars; publish-jsr publishes those bytes (#935)", () => {
+  // deno publish [--dry-run] --config <stage>/jsr.json, with DENO_NO_PACKAGE_JSON=1
+  // and a staged package.json-free tree; $DENO_EXTRA runs after it (a mutation).
+  const DENO = `${RECORD("deno")}
+[ "$DENO_NO_PACKAGE_JSON" = 1 ] || { echo "deno stub: DENO_NO_PACKAGE_JSON is not 1" >&2; exit 3; }
+c=""; while [ $# -gt 0 ]; do [ "$1" = --config ] && c="$2"; shift; done
+[ -f "$c" ] || { echo "error: config file $c not found" >&2; exit 1; }
+[ -f "$(dirname "$c")/src/_shared/index.ts" ] || { echo "deno stub: no bundled sdk-shared" >&2; exit 4; }
+[ ! -e "$(dirname "$c")/package.json" ] || { echo "deno stub: a package.json is staged" >&2; exit 5; }
+if [ -n "$DENO_EXTRA" ]; then eval "$DENO_EXTRA"; fi`;
+  const NODE = `exec '${process.execPath}' "$@"`;
+  const VERSION = JSON.parse(readFileSync(join(ROOT, "apps/sdk-deno/jsr.json"), "utf8")).version;
+  const TABLE = {
+    "needs.setup.outputs.name": "deno",
+    "needs.setup.outputs.version": VERSION,
+  };
+  /** A clean scratch git checkout standing in for $GITHUB_WORKSPACE. */
+  function cleanWorkspace() {
+    const ws = scratch();
+    git(ws, "init", "--quiet", "--initial-branch=main");
+    writeFileSync(join(ws, "f.txt"), "x\n");
+    git(ws, "add", "f.txt");
+    git(ws, "commit", "--quiet", "--no-verify", "-m", "clean");
+    return ws;
+  }
+  function pack({ version = VERSION, extra = "" } = {}) {
+    const temp = scratch();
+    const ws = cleanWorkspace();
+    const log = join(scratch(), "argv.log");
+    const s = step(PUBLISH, "pack-jsr", "Pack the release artifact");
+    const r = runBlock(
+      s,
+      ROOT,
+      resolveEnv(s, { ...TABLE, "needs.setup.outputs.version": version }),
+      {
+        stubs: { deno: DENO, node: NODE },
+        tools: ["git", "mkdir", "tar", "dirname"],
+        test: { ARGV_LOG: log, RUNNER_TEMP: temp, GITHUB_WORKSPACE: ws, DENO_EXTRA: extra },
+      },
+    );
+    return { r, temp, ws, argv: argvLog(log) };
+  }
+
+  it("pack-jsr stages out of the tree, dry-runs that stage, and tars exactly it", () => {
+    const { r, temp, argv } = pack();
+    expect(r.status, r.stderr).toBe(0);
+    expect(argv).toEqual([`deno publish --dry-run --config ${temp}/jsr-stage/jsr.json`]);
+    const tar = join(temp, "release", `jsr-deno-${VERSION}.tar`);
+    const list = spawnSync("tar", ["-tf", tar], { encoding: "utf8" }).stdout;
+    expect(list).toMatch(/\.\/jsr\.json/);
+    expect(list).toMatch(/\.\/src\/_shared\/index\.ts/);
+    expect(list).not.toMatch(/package\.json|node_modules|deno\.lock/);
+  });
+
+  it("pack-jsr fails when the dry run leaves the checkout dirty, and tars nothing", () => {
+    const { r, temp } = pack({ extra: 'echo x > "$GITHUB_WORKSPACE/deno.lock"' });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/the dry run changed the checkout: \?\? deno\.lock/);
+    expect(existsSync(join(temp, "release"))).toBe(false);
+  });
+
+  it("pack-jsr fails on version drift before deno runs", () => {
+    const { r, argv } = pack({ version: "9.9.9" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/--version 9\.9\.9 differs/);
+    expect(argv).toEqual([]);
+  });
+
+  function publishRun(mutate = () => {}) {
+    const { r: packed, temp } = pack();
+    expect(packed.status, packed.stderr).toBe(0);
+    const file = `jsr-deno-${VERSION}.tar`;
+    const ws = scratch();
+    mkdirSync(join(ws, "release"));
+    copyFileSync(join(temp, "release", file), join(ws, "release", file));
+    const sha = createHash("sha256")
+      .update(readFileSync(join(ws, "release", file)))
+      .digest("hex");
+    mutate(join(ws, "release", file));
+    const log = join(scratch(), "argv.log");
+    const table = { "needs.pack-jsr.outputs.sha256": sha, "needs.pack-jsr.outputs.file": file };
+    const results = [];
+    for (const name of [
+      "Check the artifact against the pack job's digest",
+      "Unpack the staged package",
+      "Upload",
+    ]) {
+      const s = step(PUBLISH, "publish-jsr", name);
+      const r = runBlock(s, ws, resolveEnv(s, table), {
+        stubs: { deno: DENO },
+        tools: ["tar", "dirname"],
+        test: { ARGV_LOG: log },
+      });
+      results.push(r);
+      if (r.status !== 0) break;
+    }
+    return { results, ws, argv: argvLog(log) };
+  }
+
+  it("publish-jsr checks the digest, unpacks into publish-tmp/ and publishes that tree by OIDC", () => {
+    const { results, ws, argv } = publishRun();
+    for (const r of results) expect(r.status, r.stderr).toBe(0);
+    expect(results).toHaveLength(3);
+    expect(argv).toEqual(["deno publish --config publish-tmp/jsr/jsr.json"]);
+    expect(existsSync(join(ws, "publish-tmp/jsr/src/_shared/index.ts"))).toBe(true);
+    const job = PUBLISH.jobs["publish-jsr"];
+    expect(job.permissions).toEqual({ contents: "read", "id-token": "write" });
+    expect(job.environment).toBe("sdk-publish-jsr");
+    expect(job.steps.some((x) => String(x.uses).startsWith("actions/checkout@"))).toBe(false);
+    expect(JSON.stringify(job)).not.toMatch(/secrets|--token|--allow-slow-types|--allow-dirty/);
+  });
+
+  it("publish-jsr refuses an artifact that is not the pack job's, before unpacking or publishing", () => {
+    const { results, argv } = publishRun((f) => writeFileSync(f, "other bytes"));
+    expect(results).toHaveLength(1);
+    expect(results[0].status).not.toBe(0);
+    expect(argv).toEqual([]);
+  });
+});
+
 describe("the digest checks accept the pack job's artifact and refuse any other", () => {
   function artifact(files) {
     const ws = scratch();
@@ -1156,5 +1276,102 @@ describe("the sandbox bin never writes through to a host file (#932)", () => {
   it("a wrapper names an absolute host program, never a bare word", () => {
     expect(() => writeWrapper(scratch(), "git", "git", BASH)).toThrow(/no host program/);
     expect(() => writeProgram(scratch(), "../escape", "exit 0", BASH)).toThrow(/not a file name/);
+  });
+});
+
+describe("the Hex jobs, verbatim: publish-hex uploads the pack job's tarball, the key never in argv (#909)", () => {
+  const MANIFEST_UNITS = JSON.parse(
+    readFileSync(join(ROOT, "dagger/sdk-manifest.json"), "utf8"),
+  ).publish;
+  const HEX = MANIFEST_UNITS.filter((u) => u.registry === "hex");
+  const FILE = "confeature_client-1.2.3.tar";
+  const TABLE = (key) => ({
+    "needs.pack-hex.outputs.sha256": "s",
+    "needs.pack-hex.outputs.file": FILE,
+    "needs.setup.outputs.coordinates": "confeature_client",
+    "needs.setup.outputs.version": "1.2.3",
+    "secrets.HEX_API_KEY": key,
+  });
+  /** curl's stub: its argv, and whether its env holds the key, one line each. */
+  const CURL_SEES = `${RECORD("curl")}
+if [ "$HEX_API_KEY" = "test-hex-key" ]; then echo "env holds the key" >> "$ARGV_LOG"; fi
+exit 0`;
+  const upload = (key) => {
+    const ws = scratch();
+    mkdirSync(join(ws, "release"));
+    writeFileSync(join(ws, "release", FILE), "tarball bytes");
+    const log = join(scratch(), "argv.log");
+    const s = step(PUBLISH, "publish-hex", "Upload");
+    const r = runBlock(s, ws, resolveEnv(s, TABLE(key)), {
+      stubs: { curl: CURL_SEES },
+      test: { ARGV_LOG: log },
+    });
+    return { r, argv: argvLog(log), ws };
+  };
+
+  it("there is exactly one Hex unit, and the upload URL names its coordinates", () => {
+    expect(HEX.map((u) => u.coordinates)).toEqual(["confeature_client"]);
+    const run = PUBLISH.jobs["publish-hex"].steps.find((x) => x.name === "Upload").run;
+    expect(run).toContain(
+      `'https://hex.pm/api/packages/${HEX[0].coordinates}/releases?replace=false'`,
+    );
+  });
+
+  it("curl POSTs ./release/<the pack job's file> to hex.pm, reading the key from its env only", () => {
+    const { r, argv, ws } = upload("test-hex-key");
+    expect(r.status, r.stderr).toBe(0);
+    expect(argv).toEqual([
+      `curl -sS --fail-with-body --tlsv1.2 --proto =https --variable %HEX_API_KEY --expand-header authorization: {{HEX_API_KEY}} --header content-type: application/octet-stream --data-binary @release/${FILE} https://hex.pm/api/packages/confeature_client/releases?replace=false`,
+      "env holds the key",
+    ]);
+    expect(argv.join("\n")).not.toContain("test-hex-key");
+    expect(existsSync(join(ws, "release", FILE))).toBe(true);
+  });
+
+  it("an unset HEX_API_KEY fails the job before curl runs", () => {
+    const { r, argv } = upload("");
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toMatch(/HEX_API_KEY is not set in environment sdk-publish-hex/);
+    expect(argv).toEqual([]);
+  });
+
+  it("the digest check accepts the pack job's tarball and refuses any other", () => {
+    const s = step(PUBLISH, "publish-hex", "Check the artifact against the pack job's digest");
+    const ws = scratch();
+    mkdirSync(join(ws, "release"));
+    writeFileSync(join(ws, "release", FILE), "tarball bytes");
+    const env = resolveEnv(s, {
+      ...TABLE("k"),
+      "needs.pack-hex.outputs.sha256": sha256Text("tarball bytes"),
+    });
+    expect(runBlock(s, ws, env).status).toBe(0);
+    writeFileSync(join(ws, "release", FILE), "other bytes");
+    expect(runBlock(s, ws, env).status).not.toBe(0);
+  });
+
+  it("pack-hex builds <coordinates>-<version>.tar with mix hex.build, MIX_ENV=prod", () => {
+    const s = step(PUBLISH, "pack-hex", "Pack the release artifact (mix hex.build, the dry run)");
+    const log = join(scratch(), "argv.log");
+    const temp = scratch();
+    const r = runBlock(
+      s,
+      scratch(),
+      {
+        ...resolveEnv(s, {
+          "needs.setup.outputs.coordinates": "confeature_client",
+          "needs.setup.outputs.version": "1.2.3",
+        }),
+        RUNNER_TEMP: temp,
+      },
+      {
+        tools: ["mkdir"],
+        stubs: { mix: `${RECORD("mix")}\n[ "$MIX_ENV" = prod ] || exit 3` },
+        test: { ARGV_LOG: log },
+      },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    expect(argvLog(log)).toEqual([
+      `mix hex.build --output ${temp}/release/confeature_client-1.2.3.tar`,
+    ]);
   });
 });

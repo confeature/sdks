@@ -11,14 +11,18 @@
 //   - Fixed, key-free failure reasons (#803 FR-002): the URL holds the
 //     SDK key, so no HTTP-library text (which may quote the URL) ever
 //     reaches a log line or `FFetchResult::Error`.
+//   - A body cap (`MaxBodyBytes`, #837): a response past it ends the fetch
+//     as `body_too_large`, enforced while the body is still arriving.
 //
 // UE's HTTP module is inherently asynchronous (`OnProcessRequestComplete`
-// delegate). For the synchronous customer-facing `ForceRefresh` path we
-// block on a `FEvent` from the calling thread; AutoPoll uses the async
-// delegate directly so its tick doesn't stall.
+// delegate). `FetchSync` blocks the calling thread until that delegate
+// fires: a worker thread waits on an `FEvent`; the game thread — which
+// delivers the delegate — pumps the HTTP manager while it waits, as
+// ConfigCat's Unreal SDK does (#832).
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+#include "HAL/CriticalSection.h"
 #include "HttpFwd.h"
 #include "Templates/SharedPointer.h"
 
@@ -27,11 +31,18 @@
 #include <atomic>
 
 class IHttpRequest;  // HttpFwd.h declares it too; FFetchTestHooks names it
+class FEvent;
 
 namespace Confeature::Internal
 {
 	inline constexpr const TCHAR* DefaultBaseUrl = TEXT("https://cdn-global.confeature.io");
 	inline constexpr int32 DefaultTimeoutSeconds = 30;
+	// Largest response body a fetch accepts before it fails with
+	// `FetchError::BodyTooLarge` (#837) — sdk-cpp's `kMaxBodyBytes`
+	// (587f4905), so the C++ ports refuse the same bodies. A config_v6
+	// document is kilobytes; this only bounds a hostile or broken origin,
+	// proxy or redirect target. A body of exactly this size is accepted.
+	inline constexpr int64 MaxBodyBytes = int64{16} * 1024 * 1024;
 
 	enum class EFetchStatus : uint8
 	{
@@ -64,6 +75,13 @@ namespace Confeature::Internal
 		inline constexpr const TCHAR* CompletionTimedOut = TEXT("Timed out waiting for HTTP completion");
 		inline constexpr const TCHAR* NotStarted = TEXT("ProcessRequest returned false");
 		inline constexpr const TCHAR* MalformedBody = TEXT("Malformed config_v6.json");
+		// The response declared or delivered more than `MaxBodyBytes`.
+		// sdk-cpp's fixed code, verbatim (a transport failure: the
+		// fetchFailed class).
+		inline constexpr const TCHAR* BodyTooLarge = TEXT("body_too_large");
+		// The fetch was cancelled by `FConfigFetcher::Cancel` (the client
+		// closed). Never logged.
+		inline constexpr const TCHAR* Cancelled = TEXT("fetch cancelled");
 	}
 
 	// Escapes one URL path segment exactly as Go's `url.PathEscape`:
@@ -83,6 +101,36 @@ namespace Confeature::Internal
 	//   - returns an EMPTY string when the key cannot be fetched (empty,
 	//     `.` or `..` — no escaper keeps those inside their segment).
 	CONFEATURE_API FString BuildConfigUrl(const FString& BaseUrl, const FString& SdkKey);
+
+	// The game-thread wait step, upstream's (configcat/unreal-engine-sdk
+	// @ 923800268dba36ad25963dcace191179de4ba936, read 2026-10-27,
+	// `ConfigCatNetworkAdapter::get`): one HTTP-manager Tick of this
+	// length, then a Sleep of it.
+	inline constexpr float GameThreadPumpSeconds = 0.05f;
+
+	// One step of that pump: ticks the HTTP manager (which runs any due
+	// HTTP delegate on this thread), then sleeps.
+	CONFEATURE_API void PumpHttpOnce();
+
+	// Waits up to `Seconds` for `Done`. Off the game thread a plain event
+	// wait; ON it, `PumpHttpOnce` until `Done` or the deadline — the game
+	// thread delivers the very completion it waits for, so a plain wait
+	// there deadlocks (#832). True when `Done` fired.
+	CONFEATURE_API bool WaitForCompletion(FEvent& Done, double Seconds);
+
+	// The header half of the body cap (#837): true when a `Content-Length`
+	// value announces more than `MaxBodyBytes`. Only a plain decimal is
+	// read (leading zeros ignored); anything else is the backend's to
+	// reject, and the received-bytes check still bounds it. The fetcher
+	// skips it only for a block known to be 1xx or 3xx (see FetchSync).
+	CONFEATURE_API bool IsDeclaredLengthOverCap(const FString& ContentLength);
+
+	// The progress half of the body cap (#837): true once a received-bytes
+	// count has passed `MaxBodyBytes`. A NEGATIVE count is over the cap —
+	// UE 5.3's int32 count wraps negative past 2 GiB, and reading the wrap
+	// as "small" would let an endless body through.
+	CONFEATURE_API bool IsReceivedCountOverCap(int64 BytesReceived);
+	CONFEATURE_API bool IsReceivedCountOverCap(uint64 BytesReceived);
 
 	// What became of each run of a fetcher's HTTP-completion delegate.
 	// Exactly one of {the completion, FetchSync giving up} claims a fetch's
@@ -132,10 +180,35 @@ namespace Confeature::Internal
 		// the SDK key redacted in any log line.
 		//
 		// Implementation: kicks off the async request, then blocks the
-		// calling thread on an `FEvent` until the OnProcessRequestComplete
-		// delegate fires. Must NOT be called from the game thread when
-		// the HTTP manager is also pumped from the game thread — the
-		// AutoPoll worker thread is the canonical caller.
+		// calling thread until the OnProcessRequestComplete delegate fires
+		// (`WaitForCompletion`). The HTTP manager delivers that delegate
+		// on game-thread ticks, so on the game thread the wait pumps the
+		// manager itself (Tick 0.05 s + Sleep 0.05 s, upstream's loop):
+		// the frame stalls for the request's duration — at most the
+		// give-up bound — but never deadlocks (#832). The body cap's
+		// header and progress delegates fire from those same ticks.
+		//
+		// The body is capped at `MaxBodyBytes` (#837): a `Content-Length`
+		// over the cap is refused when its header arrives — unless the
+		// block's status is KNOWN to be 1xx or 3xx (an interim block, a
+		// followed redirect or a 304 declares no body of this response); an
+		// unknown status (0) is checked, since a backend may report the code
+		// only after the headers — and a body
+		// without one (chunked) is cancelled once the received count
+		// passes the cap; a completed response over the cap is refused
+		// too. Either way the fetch fails with `body_too_large` and the
+		// body is never parsed.
+		//
+		// What the cap bounds: PARSING, not peak memory. UE delivers the
+		// header and progress delegates on HTTP-manager ticks (the game
+		// thread by default), so the cancel lands on the first tick after
+		// the cap is crossed, and the backend buffers whatever arrives
+		// within that tick — on a fast link, megabytes past the cap. UE 5.3
+		// has no hook inside the backend's read loop (sdk-cpp aborts in
+		// curl's write callback; 5.3 offers no equivalent), so the bound
+		// is per game-thread tick there. UE 5.4+ reads 64-bit progress
+		// counts (OnRequestProgress64); 5.3's int32 count wraps past 2 GiB
+		// and a negative count is treated as over the cap.
 		//
 		// When the completion never arrives within the give-up bound
 		// (timeout + 5 s) the request is cancelled (it targets the
@@ -168,6 +241,14 @@ namespace Confeature::Internal
 		// Tests only (see `FFetchTestHooks`). Set before `FetchSync` runs.
 		void SetTestHooks(FFetchTestHooks InHooks) { TestHooks = MoveTemp(InHooks); }
 
+		// Cancels the fetch in flight, if any (the client's Close, #832
+		// review). Its completion — which UE delivers on a later
+		// HTTP-manager tick — reports `FetchError::Cancelled` without a log
+		// line, and the blocked `FetchSync` returns that; if the completion
+		// never comes, it returns at its give-up bound as before. Any thread.
+		// One fetch is tracked at a time (the client serialises them).
+		void Cancel();
+
 	private:
 		FString SdkKey;
 		FString BaseUrl;
@@ -180,5 +261,10 @@ namespace Confeature::Internal
 		// `FetchSync` and this fetcher.
 		TSharedRef<FCompletionCounts, ESPMode::ThreadSafe> Counts;
 		FFetchTestHooks TestHooks;
+
+		// How to cancel the fetch in flight; empty when none runs.
+		void TrackInFlight(TFunction<void()> Canceller);
+		FCriticalSection InFlightMutex;
+		TFunction<void()> CancelInFlight;
 	};
 }

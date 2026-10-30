@@ -59,10 +59,43 @@ describe("runWithHarness — an interrupted run is never a pass (#783 review)", 
 });
 
 describe("execAgainstHarness — the CLI's exec-mode exit code (#783 review)", () => {
-  const handle = (stop: () => Promise<void>, served = 1) => ({
+  const handle = (stop: () => Promise<void>, served = 1, unserved: string[] = []) => ({
     url: "http://127.0.0.1:1",
     stop,
     served: () => served,
+    unserved: () => unserved,
+  });
+
+  // #926 A1: the zero-request floor let a suite that sent one request and
+  // skipped the rest pass. Every key the runner's seed declares (the corpus
+  // seed: every seeded case) must have been asked for. MUTATION: drop the
+  // per-key floor from execAgainstHarness and this passes with exit 0.
+  it("a <cmd> that exits 0 with a declared key never asked for fails (1), naming it", async () => {
+    let stopped = false;
+    const partial = handle(
+      async () => {
+        stopped = true;
+      },
+      1,
+      ["http-403", "timeout"],
+    );
+    const lines: string[] = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => (
+      lines.push(String(chunk)),
+      true
+    )) as typeof process.stderr.write;
+    let code: number;
+    try {
+      code = await execAgainstHarness(partial, [node, "-e", "process.exit(0)"]);
+    } finally {
+      process.stderr.write = write;
+    }
+    expect(code).toBe(1);
+    expect(stopped).toBe(true);
+    expect(lines.join("")).toMatch(/no seeded request for 2 declared key\(s\): http-403, timeout/);
+    // A failure keeps its own code.
+    expect(await execAgainstHarness(partial, [node, "-e", "process.exit(4)"])).toBe(4);
   });
 
   it("a <cmd> that exits 0 having asked the harness nothing fails (1), and still stops it", async () => {

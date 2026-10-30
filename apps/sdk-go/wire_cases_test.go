@@ -73,6 +73,12 @@ func TestWireCorpus_UnknownFieldFails(t *testing.T) {
 func TestWireCases(t *testing.T) {
 	corpus := loadWireCorpus(t)
 
+	// A pending case is reported by name, never dropped (1.4, #994).
+	for _, p := range corpus.Pending {
+		t.Run(p.ID, func(t *testing.T) {
+			t.Skipf("pending (%s): this reader cannot read it yet — %s", p.Ticket, p.Reason)
+		})
+	}
 	for _, c := range corpus.Cases {
 		c := c // capture per-iteration
 		t.Run(c.ID, func(t *testing.T) {

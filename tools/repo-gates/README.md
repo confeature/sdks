@@ -7,6 +7,21 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
   jobs, pinned env, the frozen action surface, expression references, …).
 - `verify-declarations.mjs` checks that every gate is wired where
   `CONTRIBUTING.md`'s table says.
+- `lockfile-versions.test.mjs` fails if `pnpm-lock.yaml` resolves more than
+  one `@types/node` (or none): two versions make Node's global types depend
+  on which one pnpm hoists.
+- `run-live-suite.mjs` is the one implementation that runs an SDK's live
+  suite: it finds its manifest `liveSuite.runner`, refuses it on any
+  `manifestProblems` finding about that SDK or the whole manifest, and runs it
+  from the repository root as `bash` under its `runnerArgv`, passing its exit
+  code through. Dagger's `live-suite --sdk` runs it in the live
+  container and the macOS job runs it natively; nothing else runs a runner.
+- `swift-precheck.test.mjs` holds `scripts/swift-precheck.sh`, the one home of
+  the Xcode the Swift SDK is judged with: in CI mode (`CI` non-empty or
+  `GITHUB_ACTIONS=true`) anything but the pinned Xcode is red, and the pin is
+  handed to the job's later steps through `GITHUB_ENV`; locally a missing pin
+  is a loud WARN. It runs a sandbox copy against fake Apple tools, so it runs
+  on Linux too.
 - The `*.test.mjs` files run under `pnpm vp run -F @confeature/repo-gates test`.
 
 ## Row snapshots

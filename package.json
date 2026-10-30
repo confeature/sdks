@@ -21,6 +21,7 @@
     "verify:workflows": "node tools/repo-gates/verify-workflows.mjs",
     "check:npm-tarball": "node tools/sdk-pack/check-npm-tarball.mjs",
     "check:maven-release": "node tools/sdk-pack/check-maven-release.mjs",
+    "check:hex-tarball": "bash tools/sdk-pack/check-hex-tarball.sh",
     "split-mirror": "bash tools/sdk-pack/split-mirror.sh",
     "verify:codeowners": "node tools/repo-gates/verify-codeowners.mjs",
     "verify:manifest-author": "node tools/manifest-author.mjs",

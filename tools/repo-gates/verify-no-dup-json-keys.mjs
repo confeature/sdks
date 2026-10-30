@@ -117,6 +117,11 @@ export function findDuplicateKeys(json) {
   }
 
   parseValue();
+  // The tokenizer tolerates EOF anywhere, so a file cut short (an unterminated
+  // string, object or array) used to read as clean (#870 item 7). JSON.parse
+  // then judges the whole syntax: malformed or truncated input throws, and the
+  // CLI exits 2.
+  JSON.parse(json);
   return dups;
 }
 

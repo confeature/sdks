@@ -92,8 +92,7 @@ class ConfigOverrideDataSource : public OverrideDataSource {
   // `setting.v.{b,s,i,d}`), so `getAllKeys` / `getAllValues` can enumerate the
   // override's flag keys. Rule resolution never goes through this map — the
   // router evaluates the full config through the real evaluator.
-  std::optional<std::unordered_map<std::string, nlohmann::json>> getOverridesSync()
-      const override {
+  std::optional<std::unordered_map<std::string, nlohmann::json>> getOverridesSync() const override {
     return baseValues_;
   }
 

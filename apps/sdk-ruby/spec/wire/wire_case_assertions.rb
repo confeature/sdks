@@ -34,12 +34,42 @@ module WireCaseAssertions
     "connection_reset", "network_error", Confeature::Internal::ConfigFetcher::INVALID_REQUEST
   ].freeze
 
+  # Every case this reader runs. A case pending for sdk-ruby
+  # (wire-cases-pending.json, 1.4, #994) is left out BY NAME, under a proof
+  # that the entry is still true: this reader still cannot read it. The day
+  # it can, loading fails and the entry must go. The left-out cases are
+  # under "pending", so a suite reports them rather than dropping them.
   def self.load_corpus
     raw = File.read(File.join(FIXTURES_DIR, "wire-cases.json"))
-    JSON.parse(raw).tap do |doc|
-      raise "wire-cases.json malformed: missing 'cases'" unless doc.is_a?(Hash) && doc["cases"].is_a?(Array)
-      raise "wire-cases.json carries no cases — fixture is FROZEN" if doc["cases"].empty?
+    doc = JSON.parse(raw)
+    raise "wire-cases.json malformed: missing 'cases'" unless doc.is_a?(Hash) && doc["cases"].is_a?(Array)
+    raise "wire-cases.json carries no cases — fixture is FROZEN" if doc["cases"].empty?
+
+    pending = pending_cases
+    missing = pending.keys - doc["cases"].map { |c| c["id"] }
+    raise "wire-cases-pending.json lists #{missing} for sdk-ruby, not in the corpus" unless missing.empty?
+
+    held, runnable = doc["cases"].partition { |c| pending.key?(c["id"]) }
+    held.each do |c|
+      next unless unread_fields(c).empty?
+
+      raise "#{c["id"]} is pending for sdk-ruby (#{pending[c["id"]]}) but this reader reads every field " \
+            "of it — remove it from wire-cases-pending.json and run it"
     end
+    doc.merge("cases" => runnable, "pending" => held.to_h { |c| [c["id"], pending[c["id"]]] })
+  end
+
+  # sdk-ruby's entry of wire-cases-pending.json: case id -> ticket.
+  def self.pending_cases
+    entry = JSON.parse(File.read(File.join(FIXTURES_DIR, "wire-cases-pending.json")))["pending"]["sdk-ruby"]
+    return {} if entry.nil?
+
+    entry["cases"].to_h { |id| [id, entry["ticket"]] }
+  end
+
+  # The given / expected fields of a case this reader does not read.
+  def self.unread_fields(wire_case)
+    (wire_case["given"].keys - KNOWN_GIVEN_FIELDS) + (wire_case["expected"].keys - KNOWN_EXPECTED_FIELDS)
   end
 
   # Maps the fetcher's stringly-typed `FetchResult.error` onto the

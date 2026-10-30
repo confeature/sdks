@@ -58,8 +58,7 @@ class Hooks {
 
   // ── Internal emit helpers — listener exceptions caught + logged.
   void invokeOnClientReady();
-  void invokeOnConfigChanged(
-      const std::unordered_map<std::string, nlohmann::json>& settings);
+  void invokeOnConfigChanged(const std::unordered_map<std::string, nlohmann::json>& settings);
   void invokeOnFlagEvaluated(const FlagEvaluatedPayload& payload);
   void invokeOnError(const std::string& message);
 

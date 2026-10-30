@@ -2,16 +2,21 @@
 
 #include "ConfeatureClient.h"
 
+#include "CoreGlobals.h"
+
 #include "Async/Async.h"
 #include "Async/TaskGraphInterfaces.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformAtomics.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/ScopeLock.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Templates/UniquePtr.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 
 #include "ConfeatureVersion.h"
 #include "Internal/ConfigFetcher.h"
@@ -20,9 +25,11 @@
 #include "Internal/OverrideEval.h"
 #include "Internal/SdkKey.h"
 
+#include <atomic>
+
 DEFINE_LOG_CATEGORY_STATIC(LogConfeatureClient, Log, All);
 
-// Pimpl. Holding implementation state in a `TUniquePtr<FImpl>` keeps
+// Pimpl. Holding implementation state in a `TSharedPtr<FImpl>` keeps
 // the public header free of `FConfigFetcher` / `FFilesystemCache` /
 // FJsonObject internals so customers compiling against the UCLASS need
 // no transitive includes.
@@ -47,6 +54,25 @@ struct UConfeatureClient::FImpl
 
 	// Spec 102 / #267 — mirrors cross-SDK offline flag.
 	FThreadSafeBool bOffline{false};
+
+	// One fetch at a time (#832 review): every fetching refresh — the
+	// async worker and a synchronous ForceRefresh alike — holds this from
+	// its ETag read to its config write, so two refreshes never interleave
+	// and an older response never overwrites a newer one. The game thread
+	// never BLOCKS on it (see RefreshNow).
+	FCriticalSection RefreshMutex;
+
+	// Held around a refresh's config + cache write and around Close()'s
+	// flag flip, so once Close() returned no refresh writes anything.
+	// Never held across a fetch, so Close() never waits on the network.
+	FCriticalSection WriteMutex;
+
+	// Async coalescing (#832 review): while one async refresh runs, later
+	// callers attach their completion to it instead of starting another.
+	// Both fields are guarded by `WaitersMutex`.
+	FCriticalSection WaitersMutex;
+	bool bAsyncInFlight = false;
+	TArray<TFunction<void(const FConfeatureRefreshResult&)>> Waiters;
 };
 
 namespace
@@ -87,28 +113,77 @@ namespace
 		return Out;
 	}
 
-	// Outcome of a single fetch + cache update, distinguished so the
-	// caller can fire the right hook (ConfigChanged on a NEW config,
-	// nothing on a 304, OnError on a failure). Mirrors sdk-go's
-	// fetchAndApply switch over StatusFetched / StatusNotModified / default.
+	// Outcome of a single refresh, distinguished so the caller can fire
+	// the right hook (ConfigChanged on a NEW config, nothing on a 304,
+	// OnError on a failure). Mirrors sdk-go's fetchAndApply switch over
+	// StatusFetched / StatusNotModified / default.
 	enum class EUpdateOutcome : uint8
 	{
 		Fetched,      // a NEW config.json landed — fire OnConfigChanged.
 		NotModified,  // 304 — config unchanged, no hook.
 		Failed,       // fetch/parse/transport failure — fire OnError.
+		LocalOnly,    // LocalOnly overrides — nothing to fetch, success, no hook.
+		Refused,      // closed or offline — no HTTP, failure, no hook.
 	};
 
-	struct FUpdateResult
+	// The refresh's verdict, the old `bool ForceRefresh()` return: the
+	// config is current (fetched, unchanged, or LocalOnly needs none).
+	bool IsSuccess(EUpdateOutcome Outcome)
 	{
-		EUpdateOutcome Outcome = EUpdateOutcome::Failed;
-		// Setting keys (the `f` map keys) of the newly-fetched config —
-		// populated only on the Fetched path, carried into the
-		// OnConfigChanged settings wrapper.
-		TArray<FString> SettingKeys;
-		// Stringly-typed failure reason (never carries the raw SDK key) —
-		// populated only on the Failed path, carried into OnError.
-		FString Error;
-	};
+		return Outcome == EUpdateOutcome::Fetched || Outcome == EUpdateOutcome::NotModified
+			|| Outcome == EUpdateOutcome::LocalOnly;
+	}
+
+	// The fixed refusal reasons a refresh can report without fetching.
+	constexpr const TCHAR* ClientClosed = TEXT("CLIENT_CLOSED");
+	// The UObject was never built through `Create` / `Builder` (e.g. a bare
+	// NewObject), so it has no fetcher at all.
+	constexpr const TCHAR* ClientNotInitialized = TEXT("CLIENT_NOT_INITIALIZED");
+}
+
+struct UConfeatureClient::FUpdateResult
+{
+	EUpdateOutcome Outcome = EUpdateOutcome::Failed;
+	// Setting keys (the `f` map keys) of the newly-fetched config —
+	// populated only on the Fetched path, carried into the
+	// OnConfigChanged settings wrapper.
+	TArray<FString> SettingKeys;
+	// Stringly-typed failure reason (never carries the raw SDK key) —
+	// populated on the Failed and Refused paths, carried into OnError
+	// (Failed only) and the refresh result.
+	FString Error;
+};
+
+namespace
+{
+	using FUpdateResult = UConfeatureClient::FUpdateResult;
+
+	// The caller-facing outcome of a refresh — the one place an update
+	// becomes an FConfeatureRefreshResult.
+	FConfeatureRefreshResult MakeRefreshResult(const FUpdateResult& Update)
+	{
+		FConfeatureRefreshResult Result;
+		Result.bSuccess = IsSuccess(Update.Outcome);
+		Result.ErrorMessage = Result.bSuccess ? FString() : Update.Error;
+		return Result;
+	}
+
+	FUpdateResult Refused(const TCHAR* Reason)
+	{
+		FUpdateResult Out;
+		Out.Outcome = EUpdateOutcome::Refused;
+		Out.Error = Reason;
+		return Out;
+	}
+
+	// A refresh that finishes after Close() is void (#832 review): no hook,
+	// CLIENT_CLOSED — whatever the fetch did, and whether or not the client
+	// UObject still exists.
+	FUpdateResult VoidIfClosed(const UConfeatureClient::FImpl* Impl, const FUpdateResult& Update)
+	{
+		const bool bVoid = Impl != nullptr && Impl->bClosed && Update.Outcome != EUpdateOutcome::Refused;
+		return bVoid ? Refused(ClientClosed) : Update;
+	}
 
 	// Extracts the setting keys (`f` map keys) from a parsed config so the
 	// OnConfigChanged settings wrapper can surface "what changed" without
@@ -156,18 +231,109 @@ namespace
 			return Out;
 		}
 		{
-			FScopeLock Guard(&Impl.ConfigMutex);
-			Impl.CachedConfig = Result.Body;
-			Impl.CachedETag = Result.ETag;
-		}
-		if (Impl.Cache.IsValid())
-		{
-			const FString Tail = CacheKeyTail(DeriveCacheKey(Impl.SdkKey));
-			Impl.Cache->Write(Tail, SerialiseConfig(Result.Body.ToSharedRef()));
+			// A refresh still in flight when Close() ran writes nothing
+			// (#832 review): Close() flips the flag under this same lock.
+			FScopeLock Write(&Impl.WriteMutex);
+			if (Impl.bClosed)
+			{
+				return Refused(ClientClosed);
+			}
+			{
+				FScopeLock Guard(&Impl.ConfigMutex);
+				Impl.CachedConfig = Result.Body;
+				Impl.CachedETag = Result.ETag;
+			}
+			if (Impl.Cache.IsValid())
+			{
+				const FString Tail = CacheKeyTail(DeriveCacheKey(Impl.SdkKey));
+				Impl.Cache->Write(Tail, SerialiseConfig(Result.Body.ToSharedRef()));
+			}
 		}
 		Out.Outcome = EUpdateOutcome::Fetched;
 		Out.SettingKeys = ExtractSettingKeys(Result.Body.ToSharedRef());
 		return Out;
+	}
+
+	// The states that fetch nothing — closed, LocalOnly, offline, in that
+	// order (as before #832). True when `Out` holds the outcome; cheap and
+	// lock-free, so callers resolve them on their own thread.
+	bool TryResolveWithoutFetch(const UConfeatureClient::FImpl& Impl, FUpdateResult& Out)
+	{
+		if (Impl.bClosed)
+		{
+			Out = Refused(ClientClosed);
+			return true;
+		}
+		if (Impl.bHasOverrides && Impl.Overrides.Behaviour == EConfeatureOverrideBehaviour::LocalOnly)
+		{
+			Out.Outcome = EUpdateOutcome::LocalOnly;
+			return true;
+		}
+		if (Impl.bOffline)
+		{
+			// Spec 102 / #267 — no HTTP while offline. ConfigCat cpp-sdk's
+			// forceRefresh reason, verbatim.
+			Out = Refused(TEXT("Client is in offline mode, it cannot initiate HTTP calls."));
+			return true;
+		}
+		return false;
+	}
+
+	// One refresh, start to finish, on the calling thread. Fires no hook.
+	FUpdateResult RefreshNow(UConfeatureClient::FImpl& Impl)
+	{
+		FUpdateResult Out;
+		if (TryResolveWithoutFetch(Impl, Out))
+		{
+			return Out;
+		}
+		if (!IsInGameThread())
+		{
+			FScopeLock Serialised(&Impl.RefreshMutex);
+			return FetchAndUpdate(Impl);
+		}
+		// The game thread must not block on RefreshMutex: the holder may be
+		// an async refresh whose completion only this thread's HTTP ticks
+		// deliver — a plain lock would deadlock (#832). It pumps instead
+		// until the holder finishes; the holder's FetchSync is bounded by
+		// its give-up bound, so this loop is too.
+		while (!Impl.RefreshMutex.TryLock())
+		{
+			PumpHttpOnce();
+		}
+		ON_SCOPE_EXIT { Impl.RefreshMutex.Unlock(); };
+		return FetchAndUpdate(Impl);
+	}
+
+	// Schedules `Work` for a later game-thread tick — never runs it inside
+	// the call, even on the game thread. Dropped once the engine is
+	// exiting (#832 review): the task graph may never run it, and the
+	// UObjects it would touch are being torn down.
+	template <typename FuncType>
+	void RunOnGameThreadLater(FuncType&& Work)
+	{
+		if (IsEngineExitRequested())
+		{
+			return;
+		}
+		AsyncTask(ENamedThreads::GameThread, Forward<FuncType>(Work));
+	}
+
+	// Runs `Work` on the game thread now (if already there) or schedules
+	// it for the next game-thread tick otherwise. UE dynamic-multicast
+	// delegates + UObject wrappers (UConfeature*Wrapper) must only be
+	// touched on the game thread, so every emission funnels through here.
+	template <typename FuncType>
+	void RunOnGameThread(FuncType&& Work)
+	{
+		if (IsInGameThread())
+		{
+			Work();
+		}
+		else
+		{
+			RunOnGameThreadLater(Forward<FuncType>(Work));
+		}
 	}
 }
 
@@ -250,7 +416,7 @@ FConfeatureClientBuilder UConfeatureClient::Builder(FString SdkKey)
 
 void UConfeatureClient::InitializeFromBuilder(const FConfeatureClientBuilder& InBuilder)
 {
-	Impl = MakeUnique<FImpl>();
+	Impl = MakeShared<FImpl, ESPMode::ThreadSafe>();
 	Impl->SdkKey = InBuilder.SdkKey;
 	Impl->PollingModeConfig = InBuilder.PollingModeConfig;
 	Impl->Overrides = InBuilder.OverridesConfig;
@@ -672,41 +838,141 @@ FConfeatureEvaluationDetails UConfeatureClient::GetValueDetailsDouble(
 	return Details;
 }
 
-bool UConfeatureClient::ForceRefresh()
+// Upstream's semantics: the fetch runs on the calling thread and this
+// returns when it ended and its outcome is applied. On the game thread
+// FetchSync (and RefreshNow's lock) pump the HTTP manager while waiting,
+// and ReportRefresh's hooks run inline, so they have fired on return.
+void UConfeatureClient::ForceRefresh()
 {
-	if (!Impl.IsValid() || Impl->bClosed)
+	if (!Impl.IsValid())
 	{
-		return false;
+		return;  // CLIENT_NOT_INITIALIZED: no fetcher, no hooks to fire
 	}
-	if (Impl->bHasOverrides
-		&& Impl->Overrides.Behaviour == EConfeatureOverrideBehaviour::LocalOnly)
+	ReportRefresh(RefreshNow(*Impl));
+}
+
+void UConfeatureClient::ForceRefreshWithCallback(FConfeatureOnRefreshCompletedBp OnCompleted)
+{
+	ForceRefreshAsync(
+		[OnCompleted](const FConfeatureRefreshResult& Result) { OnCompleted.ExecuteIfBound(Result); });
+}
+
+// The fetch runs on a thread of its own: `FetchSync` blocks it for up to
+// the request timeout + 5 s, which must not hold a shared task-pool worker.
+// The game thread keeps ticking the HTTP manager meanwhile, so the
+// completion it delivers there is never waited on by the game thread
+// itself — the #832 freeze.
+//
+// States that fetch nothing (closed, LocalOnly, offline) are resolved here,
+// on the calling thread, without spawning. A call made while an async
+// refresh runs attaches to it: one fetch, one set of hooks, every
+// completion called with its outcome.
+void UConfeatureClient::ForceRefreshAsync(TFunction<void(const FConfeatureRefreshResult&)> OnCompleted)
+{
+	if (!Impl.IsValid())
 	{
-		return true;
+		DeliverAlone(Refused(ClientNotInitialized), MoveTemp(OnCompleted));
+		return;
 	}
-	if (Impl->bOffline)
+	FUpdateResult Immediate;
+	if (TryResolveWithoutFetch(*Impl, Immediate))
 	{
-		// Spec 102 / #267 — no HTTP while offline.
-		return false;
+		DeliverAlone(MoveTemp(Immediate), MoveTemp(OnCompleted));
+		return;
 	}
-	const FUpdateResult Update = FetchAndUpdate(*Impl);
+	if (IsEngineExitRequested())
+	{
+		// Shutting down: no new fetch, and no game-thread tick left to
+		// report one on.
+		return;
+	}
+	{
+		FScopeLock Guard(&Impl->WaitersMutex);
+		if (OnCompleted)
+		{
+			Impl->Waiters.Add(MoveTemp(OnCompleted));
+		}
+		if (Impl->bAsyncInFlight)
+		{
+			return;  // attached to the refresh already running
+		}
+		Impl->bAsyncInFlight = true;
+	}
+	Async(EAsyncExecution::Thread,
+		[ImplRef = Impl, WeakSelf = TWeakObjectPtr<UConfeatureClient>(this)]()
+		{
+			FUpdateResult Update = RefreshNow(*ImplRef);
+			TArray<TFunction<void(const FConfeatureRefreshResult&)>> Attached;
+			{
+				FScopeLock Guard(&ImplRef->WaitersMutex);
+				Attached = MoveTemp(ImplRef->Waiters);
+				ImplRef->Waiters.Reset();
+				ImplRef->bAsyncInFlight = false;
+			}
+			DeliverRefresh(WeakSelf, ImplRef, MoveTemp(Update), MoveTemp(Attached));
+		});
+}
+
+void UConfeatureClient::DeliverAlone(
+	FUpdateResult Update, TFunction<void(const FConfeatureRefreshResult&)> OnCompleted)
+{
+	TArray<TFunction<void(const FConfeatureRefreshResult&)>> Callbacks;
+	if (OnCompleted)
+	{
+		Callbacks.Add(MoveTemp(OnCompleted));
+	}
+	DeliverRefresh(TWeakObjectPtr<UConfeatureClient>(this), Impl, MoveTemp(Update), MoveTemp(Callbacks));
+}
+
+// Always a later game-thread tick: hooks first (once), then each
+// completion with the same outcome. `ImplRef` outlives the UObject, so the
+// closed check holds even after GC.
+void UConfeatureClient::DeliverRefresh(TWeakObjectPtr<UConfeatureClient> WeakSelf,
+	TSharedPtr<FImpl, ESPMode::ThreadSafe> ImplRef,
+	FUpdateResult Update,
+	TArray<TFunction<void(const FConfeatureRefreshResult&)>> Callbacks)
+{
+	RunOnGameThreadLater(
+		[WeakSelf, ImplRef = MoveTemp(ImplRef), Update = MoveTemp(Update), Callbacks = MoveTemp(Callbacks)]()
+		{
+			const FUpdateResult Final = VoidIfClosed(ImplRef.Get(), Update);
+			// The client may be gone: nobody to fire hooks on, but the
+			// callers still hear how their refresh ended.
+			const UConfeatureClient* Self = WeakSelf.Get();
+			const FConfeatureRefreshResult Result = Self ? Self->ReportRefresh(Final) : MakeRefreshResult(Final);
+			for (const TFunction<void(const FConfeatureRefreshResult&)>& Callback : Callbacks)
+			{
+				Callback(Result);
+			}
+		});
+}
+
+FConfeatureRefreshResult UConfeatureClient::ReportRefresh(const FUpdateResult& InUpdate) const
+{
+	const FUpdateResult Update = VoidIfClosed(Impl.Get(), InUpdate);
 	switch (Update.Outcome)
 	{
 		case EUpdateOutcome::Fetched:
 			// A NEW config.json landed → fire OnConfigChanged (the FETCHED
-			// path only; a 304 below does NOT fire it). Mirrors sdk-go's
+			// path only; a 304 does NOT fire it). Mirrors sdk-go's
 			// fetchAndApply StatusFetched branch.
 			EmitConfigChanged(Update.SettingKeys);
-			return true;
-		case EUpdateOutcome::NotModified:
-			return true;
+			break;
 		case EUpdateOutcome::Failed:
-		default:
 			// Fire OnError on a failed fetch — mirrors sdk-go's default
 			// branch. The detail is the fetcher's stringly-typed reason
 			// (never the raw SDK key).
 			EmitError(TEXT("config fetch failed"), Update.Error);
-			return false;
+			break;
+		case EUpdateOutcome::NotModified:
+		case EUpdateOutcome::LocalOnly:
+		case EUpdateOutcome::Refused:
+		default:
+			// No hook: nothing changed, or (closed / offline) no fetch was
+			// attempted — as before #832.
+			break;
 	}
+	return MakeRefreshResult(Update);
 }
 
 // Spec 102 / #267 slice 14/14 — online/offline triplet. Mirrors the
@@ -763,13 +1029,26 @@ void UConfeatureClient::Close()
 		return;
 	}
 	// AtomicSet returns the prior value; only the first transition to
-	// `true` runs the teardown so the call is idempotent.
-	if (Impl->bClosed.AtomicSet(true))
+	// `true` runs the teardown so the call is idempotent. Under WriteMutex:
+	// a refresh writing now finishes first, and none writes afterwards.
 	{
-		return;
+		FScopeLock Write(&Impl->WriteMutex);
+		if (Impl->bClosed.AtomicSet(true))
+		{
+			return;
+		}
 	}
-	// v0.1 has no AutoPoll ticker yet; once that lands here we cancel
-	// the FTSTicker handle + flush any pending HTTP request.
+	// Stop the fetch in flight: its completion discards itself, and the
+	// refresh thread blocked on it returns once the HTTP module delivers
+	// the cancel (a later HTTP-manager tick) or at its give-up bound. Not
+	// joined — Close() may run on the game thread, which that delivery
+	// needs.
+	if (Impl->Fetcher.IsValid())
+	{
+		Impl->Fetcher->Cancel();
+	}
+	// v0.1 has no AutoPoll ticker yet; once that lands its FTSTicker
+	// handle is removed here too.
 }
 
 bool UConfeatureClient::IsClosed() const
@@ -789,35 +1068,18 @@ void UConfeatureClient::BeginDestroy()
 // subsystem, which broadcasts each `OnX` + `OnXBp` from a single site.
 // ---------------------------------------------------------------------
 
-namespace
-{
-	// Runs `Work` on the game thread now (if already there) or schedules
-	// it for the next game-thread tick otherwise. UE dynamic-multicast
-	// delegates + UObject wrappers (UConfeature*Wrapper) must only be
-	// touched on the game thread, so every emission funnels through here.
-	template <typename FuncType>
-	void RunOnGameThread(FuncType&& Work)
-	{
-		if (IsInGameThread())
-		{
-			Work();
-		}
-		else
-		{
-			AsyncTask(ENamedThreads::GameThread, Forward<FuncType>(Work));
-		}
-	}
-}
-
 void UConfeatureClient::EmitClientReady() const
 {
 	// const_cast: the broadcast is a logically-const observable side
 	// effect (the read-side details methods that fire OnFlagEvaluated are
-	// const). The captured `Self` is a UObject; the AsyncTask may run on a
-	// later tick, but a closed/GC'd client simply no-ops via IsValid().
-	UConfeatureClient* Self = const_cast<UConfeatureClient*>(this);
-	RunOnGameThread([Self]()
+	// const). The AsyncTask may run on a later tick, after the client was
+	// garbage-collected: a raw pointer would dangle there (IsValid on freed
+	// memory is undefined), so every emission captures a weak pointer and a
+	// GC'd client simply no-ops.
+	const TWeakObjectPtr<UConfeatureClient> WeakSelf(const_cast<UConfeatureClient*>(this));
+	RunOnGameThread([WeakSelf]()
 	{
+		UConfeatureClient* Self = WeakSelf.Get();
 		if (!IsValid(Self))
 		{
 			return;
@@ -829,12 +1091,13 @@ void UConfeatureClient::EmitClientReady() const
 
 void UConfeatureClient::EmitConfigChanged(const TArray<FString>& SettingKeys) const
 {
-	UConfeatureClient* Self = const_cast<UConfeatureClient*>(this);
-	RunOnGameThread([Self, SettingKeys]()
+	const TWeakObjectPtr<UConfeatureClient> WeakSelf(const_cast<UConfeatureClient*>(this));
+	RunOnGameThread([WeakSelf, SettingKeys]()
 	{
-		if (!IsValid(Self))
+		UConfeatureClient* Self = WeakSelf.Get();
+		if (!IsValid(Self) || (Self->Impl.IsValid() && Self->Impl->bClosed))
 		{
-			return;
+			return;  // a closed client fires no refresh hook (#832 review)
 		}
 		// The settings wrapper is a fresh transient UObject; it is rooted
 		// for the duration of the synchronous broadcast (no listener may
@@ -848,9 +1111,10 @@ void UConfeatureClient::EmitConfigChanged(const TArray<FString>& SettingKeys) co
 
 void UConfeatureClient::EmitFlagEvaluated(const FConfeatureEvaluationDetails& Details) const
 {
-	UConfeatureClient* Self = const_cast<UConfeatureClient*>(this);
-	RunOnGameThread([Self, Details]()
+	const TWeakObjectPtr<UConfeatureClient> WeakSelf(const_cast<UConfeatureClient*>(this));
+	RunOnGameThread([WeakSelf, Details]()
 	{
+		UConfeatureClient* Self = WeakSelf.Get();
 		if (!IsValid(Self))
 		{
 			return;
@@ -864,12 +1128,13 @@ void UConfeatureClient::EmitFlagEvaluated(const FConfeatureEvaluationDetails& De
 
 void UConfeatureClient::EmitError(const FString& Message, const FString& Detail) const
 {
-	UConfeatureClient* Self = const_cast<UConfeatureClient*>(this);
-	RunOnGameThread([Self, Message, Detail]()
+	const TWeakObjectPtr<UConfeatureClient> WeakSelf(const_cast<UConfeatureClient*>(this));
+	RunOnGameThread([WeakSelf, Message, Detail]()
 	{
-		if (!IsValid(Self))
+		UConfeatureClient* Self = WeakSelf.Get();
+		if (!IsValid(Self) || (Self->Impl.IsValid() && Self->Impl->bClosed))
 		{
-			return;
+			return;  // a closed client fires no refresh hook (#832 review)
 		}
 		Self->OnError.Broadcast(Message, Detail);
 		Self->OnErrorBp.Broadcast(Message, Detail);

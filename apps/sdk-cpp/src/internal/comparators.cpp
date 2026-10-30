@@ -2,11 +2,10 @@
 
 #include "internal/comparators.h"
 
-#include <nlohmann/json.hpp>
-
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <regex>
 #include <string>
@@ -106,8 +105,7 @@ bool sensitiveTextIsOneOf(const std::string& text, const std::vector<std::string
   return found != negate;
 }
 
-bool sensitiveTextSliceEqualsAnyOf(const std::string& text,
-                                   const std::vector<std::string>& values,
+bool sensitiveTextSliceEqualsAnyOf(const std::string& text, const std::vector<std::string>& values,
                                    const std::string& configSalt, const std::string& contextSalt,
                                    bool startsWith, bool negate) {
   for (const auto& item : values) {
@@ -286,7 +284,8 @@ NumberConvert attributeAsNumber(const std::string& attr, const std::string& valu
   if (trim(value) == "NaN") {
     return NumberConvert{true, std::nan(""), std::string()};
   }
-  return NumberConvert{false, 0, invalidAttr(attr, "'" + value + "' is not a valid decimal number")};
+  return NumberConvert{false, 0,
+                       invalidAttr(attr, "'" + value + "' is not a valid decimal number")};
 }
 
 NumberConvert attributeAsUnixTimeSeconds(const std::string& attr, const std::string& value) {
@@ -312,28 +311,26 @@ NumberConvert attributeAsUnixTimeSeconds(const std::string& attr, const std::str
 ArrayConvert attributeAsStringArray(const std::string& attr, const std::string& value) {
   // A string attribute is JSON-parsed; the result must be a string array
   // (common-js getUserAttributeValueAsStringArray).
+  // A non-JSON string is not an error to log but an expected input that falls
+  // through to the validation error (matches common-js), so it is parsed
+  // without exceptions: a discarded result is not an array.
   ArrayConvert out;
-  try {
-    const auto parsed = nlohmann::json::parse(value);
-    if (parsed.is_array()) {
-      bool allStrings = true;
-      std::vector<std::string> arr;
-      for (const auto& e : parsed) {
-        if (!e.is_string()) {
-          allStrings = false;
-          break;
-        }
-        arr.push_back(e.get<std::string>());
+  const auto parsed = nlohmann::json::parse(value, nullptr, /*allow_exceptions=*/false);
+  if (parsed.is_array()) {
+    bool allStrings = true;
+    std::vector<std::string> arr;
+    for (const auto& e : parsed) {
+      if (!e.is_string()) {
+        allStrings = false;
+        break;
       }
-      if (allStrings) {
-        out.ok = true;
-        out.value = std::move(arr);
-        return out;
-      }
+      arr.push_back(e.get<std::string>());
     }
-  } catch (...) {
-    // Non-JSON string falls through to the validation error (no-op catch,
-    // matches common-js).
+    if (allStrings) {
+      out.ok = true;
+      out.value = std::move(arr);
+      return out;
+    }
   }
   out.ok = false;
   out.error = invalidAttr(attr, "'" + value + "' is not a valid string array");

@@ -120,3 +120,24 @@ describe("AdminState fault map", () => {
     expect(state.getFault("k1")).toBeUndefined();
   });
 });
+
+describe("AdminState per-key floor (#926 A1)", () => {
+  const req = { url: "/x", ifNoneMatch: null };
+  it("names the declared keys no request asked for, counting since boot", () => {
+    const state = new AdminState();
+    for (const k of ["a", "b", "c"]) state.keys.add(k);
+    state.recordRequest("a", req);
+    expect(state.unserved(["a", "b", "c"])).toEqual(["b", "c"]);
+    // A replacing seed clears the request log, never what was served.
+    state.requests.clear();
+    expect(state.unserved(["a", "b", "c"])).toEqual(["b", "c"]);
+    state.recordRequest("b", req);
+    state.recordRequest("c", req);
+    expect(state.unserved(["a", "b", "c"])).toEqual([]);
+  });
+  it("an unseeded key's request serves nothing", () => {
+    const state = new AdminState();
+    state.recordRequest("a", req);
+    expect(state.unserved(["a"])).toEqual(["a"]);
+  });
+});

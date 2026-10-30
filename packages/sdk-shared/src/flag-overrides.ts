@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { type IConfig, type ISetting, type ISettingValue, SettingType } from "./config-json.ts";
+import { keyedRecord } from "./own-key.ts";
 
 /**
  * How `FlagOverrides` interacts with the remote config — mirrors
@@ -87,7 +88,7 @@ export class MapOverrideDataSource implements IOverrideDataSource {
    * contract).
    */
   getOverridesSync(): Record<string, ISetting> {
-    const settings: Record<string, ISetting> = {};
+    const settings = keyedRecord<ISetting>();
     for (const [key, value] of Object.entries(this.map)) {
       settings[key] = settingFromValue(value);
     }
@@ -142,7 +143,7 @@ export function createFlagOverridesFromMap(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   watchChanges?: boolean,
 ): FlagOverrides {
-  const settingValues: Record<string, ISettingValue> = {};
+  const settingValues = keyedRecord<ISettingValue>();
   for (const [key, value] of Object.entries(map)) {
     if (typeof value === "boolean") settingValues[key] = { b: value };
     else if (typeof value === "string") settingValues[key] = { s: value };

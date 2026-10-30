@@ -74,11 +74,59 @@ final class WireCaseAssertions {
     if (cases == null || cases.isEmpty()) {
       throw new IllegalStateException("wire-cases.json carries no cases.");
     }
+    final Map<String, String> pending = pendingCases();
     final Map<String, Map<String, Object>> byId = new LinkedHashMap<>();
     for (Map<String, Object> wireCase : cases) {
-      byId.put((String) wireCase.get("id"), wireCase);
+      final String id = (String) wireCase.get("id");
+      final String ticket = pending.remove(id);
+      if (ticket != null) {
+        // Left out BY NAME (wire-cases-pending.json, 1.4, #994), under a proof that the entry is
+        // still true: this reader still cannot read the case. The day it can, the entry must go.
+        final Set<String> unread =
+            new HashSet<>(((Map<String, Object>) wireCase.get("given")).keySet());
+        unread.removeAll(KNOWN_GIVEN);
+        final Set<String> unreadExpected =
+            new HashSet<>(((Map<String, Object>) wireCase.get("expected")).keySet());
+        unreadExpected.removeAll(KNOWN_EXPECTED);
+        unread.addAll(unreadExpected);
+        if (unread.isEmpty()) {
+          throw new IllegalStateException(
+              id
+                  + " is pending for sdk-java ("
+                  + ticket
+                  + ") but this reader reads every field of it — remove it from"
+                  + " wire-cases-pending.json and run it");
+        }
+        System.err.println(
+            "pending (" + ticket + "): " + id + " — this reader cannot read " + unread);
+        continue;
+      }
+      byId.put(id, wireCase);
+    }
+    if (!pending.isEmpty()) {
+      throw new IllegalStateException(
+          "wire-cases-pending.json lists " + pending.keySet() + " for sdk-java, not in the corpus");
     }
     return byId;
+  }
+
+  /** sdk-java's entry of {@code wire-cases-pending.json}: case id to ticket. */
+  @SuppressWarnings("unchecked")
+  static Map<String, String> pendingCases() throws Exception {
+    final Map<String, Object> manifest =
+        MAPPER.readValue(
+            Files.readAllBytes(
+                WorkspaceRoot.wireCasesPath().resolveSibling("wire-cases-pending.json")),
+            Map.class);
+    final Map<String, Object> entry =
+        (Map<String, Object>) ((Map<String, Object>) manifest.get("pending")).get("sdk-java");
+    final Map<String, String> out = new LinkedHashMap<>();
+    if (entry != null) {
+      for (Object id : (List<Object>) entry.get("cases")) {
+        out.put((String) id, (String) entry.get("ticket"));
+      }
+    }
+    return out;
   }
 
   /**

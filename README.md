@@ -2,8 +2,9 @@
 
 The client SDKs and the command-line tool for [Confeature](https://confeature.io), the hosted
 feature-flag service. Every SDK is a drop-in replacement for the matching ConfigCat SDK: same
-method names, same options, same polling and cache behaviour. Moving from ConfigCat means changing
-the base URL, or the SDK key, and nothing else.
+method names, same options, same polling and cache behaviour. Moving from ConfigCat means swapping
+the package for the Confeature one and using your Confeature SDK key; no call site changes. A stock
+ConfigCat SDK works too, pointed at `https://cdn.confeature.io` with that same key.
 
 Everything here is MIT-licensed (see [LICENSE](LICENSE)). All 21 SDKs, the shared evaluation
 engine and the wire-case corpus they are tested against live in this one repository, so a change to

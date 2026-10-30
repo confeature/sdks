@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <sstream>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include "internal/config_fetcher.h"
+#include "require_value.h"
 #include "workspace_root.h"
 
 namespace confeature::tests::wire {
@@ -96,16 +98,57 @@ inline std::optional<std::string> firstUnknownField(const json& block,
 
 // A request target's PATH (still escaped, query excluded), so #807's query
 // parameter never breaks a path pin.
-inline std::string pathOf(const std::string& target) { return target.substr(0, target.find('?')); }
+inline std::string pathOf(const std::string& target) {
+  return target.substr(0, target.find('?'));
+}
 
 // Loads the wire-cases corpus from the shared fixtures package (see
 // wire-cases.json's $schema for the authoritative shape).
+//
+// A case pending for sdk-cpp (wire-cases-pending.json, 1.4, #994) is left
+// out BY NAME, under a proof that the entry is still true: this reader
+// still cannot read it. The day it can, loading fails and the entry must go.
 inline json loadCorpus() {
   std::ifstream stream(fixturesPath() / "wire-cases.json");
   REQUIRE(stream.is_open());
   std::ostringstream buf;
   buf << stream.rdbuf();
-  return json::parse(buf.str());
+  json corpus = json::parse(buf.str());
+
+  std::ifstream pendingStream(fixturesPath() / "wire-cases-pending.json");
+  REQUIRE(pendingStream.is_open());
+  std::ostringstream pendingBuf;
+  pendingBuf << pendingStream.rdbuf();
+  const json manifest = json::parse(pendingBuf.str());
+  std::map<std::string, std::string> pending;
+  if (manifest.at("pending").contains("sdk-cpp")) {
+    const auto& entry = manifest.at("pending").at("sdk-cpp");
+    for (const auto& id : entry.at("cases")) {
+      pending[id.get<std::string>()] = entry.at("ticket").get<std::string>();
+    }
+  }
+
+  json runnable = json::array();
+  for (const auto& wireCase : corpus.at("cases")) {
+    const auto id = wireCase.at("id").get<std::string>();
+    const auto held = pending.find(id);
+    if (held == pending.end()) {
+      runnable.push_back(wireCase);
+      continue;
+    }
+    const bool unread =
+        firstUnknownField(wireCase.at("given"), kKnownGivenFields).has_value() ||
+        firstUnknownField(wireCase.at("expected"), kKnownExpectedFields).has_value();
+    INFO(id << " is pending for sdk-cpp (" << held->second
+            << ") but this reader reads every field of it — remove it from "
+               "wire-cases-pending.json and run it");
+    REQUIRE(unread);
+    pending.erase(held);
+  }
+  INFO("wire-cases-pending.json lists a case for sdk-cpp that is not in the corpus");
+  REQUIRE(pending.empty());
+  corpus["cases"] = runnable;
+  return corpus;
 }
 
 // The key a suite configures its fetcher with: the corpus's given.sdkKey
@@ -161,13 +204,13 @@ inline void assertRequest(const json& wireCase, const std::string& sdkKey,
   // case's host is not routable from a test.
   REQUIRE(given.contains("baseUrl") == expected.contains("requestUrlPrefix"));
   if (given.contains("baseUrl")) {
-    const confeature::internal::ConfigFetcher custom(
-        sdkKey, "0.0.0-wire-test", given["baseUrl"].get<std::string>(), std::chrono::seconds(1),
-        nullptr);
-    REQUIRE(custom.url().has_value());
+    const confeature::internal::ConfigFetcher custom(sdkKey, "0.0.0-wire-test",
+                                                     given["baseUrl"].get<std::string>(),
+                                                     std::chrono::seconds(1), nullptr);
+    const auto url = confeature::tests::requireValue(custom.url(), "the custom base url");
     const auto prefix = expected["requestUrlPrefix"].get<std::string>();
-    INFO("url=" << *custom.url() << " prefix=" << prefix);
-    CHECK(custom.url()->rfind(prefix, 0) == 0);
+    INFO("url=" << url << " prefix=" << prefix);
+    CHECK(url.rfind(prefix, 0) == 0);
   }
   if (expected.contains("requestHeaderIfNoneMatch")) {
     const auto& want = expected["requestHeaderIfNoneMatch"];
@@ -175,7 +218,7 @@ inline void assertRequest(const json& wireCase, const std::string& sdkKey,
       CHECK_FALSE(sent.ifNoneMatch.has_value());
     } else {
       REQUIRE(sent.ifNoneMatch.has_value());
-      CHECK(*sent.ifNoneMatch == want.get<std::string>());
+      CHECK(sent.ifNoneMatch == want.get<std::string>());
     }
   }
 }
@@ -194,12 +237,12 @@ inline void assertOutcome(const json& wireCase, const confeature::internal::Fetc
     CHECK(result.body.has_value() == fetched);
     if (expected.contains("resultingEtag") && !expected["resultingEtag"].is_null()) {
       REQUIRE(result.etag.has_value());
-      CHECK(result.etag.value() == expected["resultingEtag"].get<std::string>());
+      CHECK(result.etag == expected["resultingEtag"].get<std::string>());
     }
   } else if (outcome == "failed") {
     REQUIRE(result.status == FetchStatus::Failed);
-    REQUIRE(result.error.has_value());
-    CHECK(cppErrorToClass(result.error.value()) == expected.at("errorClass").get<std::string>());
+    CHECK(cppErrorToClass(confeature::tests::requireValue(result.error, "the fetch error")) ==
+          expected.at("errorClass").get<std::string>());
   } else {
     FAIL("unknown outcome in corpus: " << outcome);
   }
@@ -210,8 +253,7 @@ inline void assertOutcome(const json& wireCase, const confeature::internal::Fetc
 
 // Judges one fetch of a case — the request it sent and the result it
 // returned — by the corpus's expectations.
-inline void assertWireCase(const json& wireCase, const std::string& sdkKey,
-                           const SentRequest& sent,
+inline void assertWireCase(const json& wireCase, const std::string& sdkKey, const SentRequest& sent,
                            const confeature::internal::FetchResult& result) {
   assertRequest(wireCase, sdkKey, sent);
   assertOutcome(wireCase, result);

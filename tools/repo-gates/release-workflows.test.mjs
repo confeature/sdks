@@ -5,14 +5,14 @@
 // attacker or a mistake would, and the real verifier, with the real settings,
 // manifest and per-environment command table, must report a new finding.
 
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ACTION_SURFACE,
+  DAGGER_SETUP,
   CREDENTIAL_ACTION_OUTPUTS,
   ACTION_OUTPUTS,
   CREDENTIAL_ENV,
@@ -30,10 +30,14 @@ import {
   SETTINGS,
   WORKFLOWS,
   allFindings,
+  readLocalActions,
   readScriptOutputs,
   referenceFindings,
   surfaceFindings,
   exemptTokenFindings,
+  idTokenExceptionFindings,
+  ID_TOKEN_EXCEPTIONS,
+  readWorkflows,
   verifyWorkflows,
 } from "./verify-workflows.mjs";
 import { lexStrict } from "./strict-shell.mjs";
@@ -42,17 +46,22 @@ import { rowSnapshots } from "./row-snapshots.mjs";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const settings = JSON.parse(readFileSync(join(ROOT, SETTINGS), "utf8"));
 const manifest = JSON.parse(readFileSync(join(ROOT, MANIFEST), "utf8"));
-const BASE = {};
-for (const f of readdirSync(join(ROOT, WORKFLOWS)).filter((n) => /\.ya?ml$/.test(n)))
-  BASE[f] = parseYaml(readFileSync(join(ROOT, WORKFLOWS, f), "utf8"));
+/** The real workflows, parsed, and their text, which rule 21 (anchors) reads. */
+const { workflows: BASE, sources: SOURCES } = readWorkflows(ROOT);
 const P = "sdk-publish.yml";
 const SCRIPTS = readScriptOutputs(ROOT);
+const ACTIONS = readLocalActions(ROOT);
 const C = "cli-release.yml";
 
 const all = (w) =>
-  allFindings({ settings, manifest, workflows: w, scriptOutputs: SCRIPTS }).map(
-    (f) => `${f.file}: ${f.job}: ${f.why}`,
-  );
+  allFindings({
+    settings,
+    manifest,
+    workflows: w,
+    sources: SOURCES,
+    scriptOutputs: SCRIPTS,
+    actions: ACTIONS,
+  }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
 /** The findings `mutate` adds to the real tree, which itself has none. */
 function added(mutate) {
   const w = structuredClone(BASE);
@@ -386,7 +395,7 @@ describe("the values an exception trusts are pinned (round 5, MED)", () => {
       [
         "T2 cli upload: a job-level TAG",
         (w) => {
-          w[C].jobs.upload.env = { ...(w[C].jobs.upload.env ?? {}), TAG: "cli-v0.0.1" };
+          w[C].jobs.upload.env = { ...w[C].jobs.upload.env, TAG: "cli-v0.0.1" };
         },
         /TAG is cli-v0\.0\.1, not its pinned expression/,
       ],
@@ -507,7 +516,7 @@ describe("the reviewers' round-4 driver cases, each refused for its own reason",
         "M4 job env MAVEN_URL",
         (w) => {
           w[P].jobs["publish-maven"].env = {
-            ...(w[P].jobs["publish-maven"].env ?? {}),
+            ...w[P].jobs["publish-maven"].env,
             MAVEN_URL: "https://evil.example",
           };
         },
@@ -1112,7 +1121,7 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
         (w) => {
           const j = w[C].jobs.upload;
           const s = upload(w);
-          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          j.env = { ...j.env, R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
           delete s.env.R2_SECRET_ACCESS_KEY;
           j.environment = {
             name: "cli-release",
@@ -1126,7 +1135,7 @@ describe("a credential is readable only by a run: block (round 7, HIGH)", () => 
         (w) => {
           const j = w[C].jobs.upload;
           const s = upload(w);
-          j.env = { ...(j.env ?? {}), R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
+          j.env = { ...j.env, R2_SECRET_ACCESS_KEY: s.env.R2_SECRET_ACCESS_KEY };
           delete s.env.R2_SECRET_ACCESS_KEY;
         },
         /the credential R2_SECRET_ACCESS_KEY is set in the job's env/,
@@ -1245,7 +1254,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
         "C2 rubygems gem-server to an attacker",
         (w) => {
           const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...(s.with ?? {}), "gem-server": "https://attacker.example" };
+          s.with = { ...s.with, "gem-server": "https://attacker.example" };
         },
         SURFACE,
       ],
@@ -1253,7 +1262,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
         "C2b rubygems audience override",
         (w) => {
           const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...(s.with ?? {}), audience: "attacker.example" };
+          s.with = { ...s.with, audience: "attacker.example" };
         },
         SURFACE,
       ],
@@ -1427,7 +1436,7 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
           const s = j(w, P_, "publish-go").steps.find(
             (x) => x.name === "Ask the Go proxy for the release",
           );
-          s.env = { ...(s.env ?? {}), DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
+          s.env = { ...s.env, DEPLOY_KEY: "${{ secrets.GO_TAG_DEPLOY_KEY }}" };
           s.run = `# \${DEPLOY_KEY}\n${s.run}`;
         },
         /sets the credential DEPLOY_KEY but its run: does not read it/,
@@ -1467,6 +1476,23 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  // #868: a local action is frozen by its action.yml's bytes.
+  it.each([
+    ["changed", (y) => `${y}# one more line\n`],
+    ["missing", () => undefined],
+  ])("refuses the frozen jobs' Dagger setup action when its action.yml is %s", (_n, edit) => {
+    const actions = { ...ACTIONS, [DAGGER_SETUP.uses]: edit(ACTIONS[DAGGER_SETUP.uses]) };
+    const got = surfaceFindings(BASE, ACTION_SURFACE, actions).map(
+      (f) => `${f.file}: ${f.job}: ${f.why}`,
+    );
+    for (const where of ["release-gate.yml: test: step 2", "sdk-publish.yml: gate: action 2"])
+      expect(
+        got.some((g) => g.startsWith(where) && g.includes("./.github/actions/dagger-setup")),
+        got.join("\n"),
+      ).toBe(true);
+  });
+  it("records the setup action's real bytes", () =>
+    expect(surfaceFindings(BASE, ACTION_SURFACE, ACTIONS)).toEqual([]));
   it("refuses a recorded job the workflow no longer has", () =>
     expect(
       surfaceFindings({
@@ -1524,6 +1550,7 @@ describe("CREDENTIAL_ENV is an explicit, complete list (round 8)", () => {
       "CLOUDFLARE_ACCOUNT_ID",
       "DEPLOY_KEY",
       "GH_TOKEN",
+      "HEX_API_KEY",
       "MAVEN_R2_ACCESS_KEY_ID",
       "MAVEN_R2_SECRET_ACCESS_KEY",
       "NUGET_API_KEY",
@@ -1693,7 +1720,7 @@ describe("the write token, the build and every job's surface (round 9)", () => {
         "X27 release: GH_TOKEN on the digest step",
         (w) => {
           const s = j(w, C, "release").steps.find((x) => /build job's digest/.test(x.name ?? ""));
-          s.env = { ...(s.env ?? {}), GH_TOKEN: "${{ github.token }}" };
+          s.env = { ...s.env, GH_TOKEN: "${{ github.token }}" };
         },
         /sets the credential GH_TOKEN but its run: does not read it/,
       ],
@@ -2070,6 +2097,26 @@ describe("the write-token exemption skips rules 3 and 15 only (round 10, MED-2)"
       got.join("\n") || "no finding",
     ).toBe(true);
   });
+  // #868: the frozen job's local action is code its token reaches.
+  it.each([
+    [
+      "names github.token",
+      (y) => y.replace('version="$(jq', 't="${{ github.token }}"; version="$(jq'),
+    ],
+    [
+      "names a secret",
+      (y) => y.replace("shell: bash", "shell: bash\n      env: { X: '${{ secrets.X }}' }"),
+    ],
+    ["does not parse", () => "runs: [\n"],
+  ])("refuses a WRITE_TOKEN_EXEMPT job whose local action %s", (_n, edit) => {
+    const actions = { ...ACTIONS };
+    actions[DAGGER_SETUP.uses] = edit(actions[DAGGER_SETUP.uses]);
+    expect(exemptTokenFindings(BASE, actions).map((f) => f.why)).toContainEqual(
+      expect.stringMatching(/names github\.token or secrets in a WRITE_TOKEN_EXEMPT job/),
+    );
+  });
+  it("the real exempt job's local action names neither", () =>
+    expect(exemptTokenFindings(BASE, ACTIONS)).toEqual([]));
   it("refuses an exemption for a job the workflow no longer has", () => {
     const w = structuredClone(BASE);
     delete w[G].jobs.test;
@@ -2159,9 +2206,14 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
   it.each(ROWS.rows(fnRows))("refuses %s", (label, fn) => {
     const m = structuredClone(manifest);
     m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = fn;
-    const got = allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
-      (f) => `${f.file}: ${f.job}: ${f.why}`,
-    );
+    const got = allFindings({
+      settings,
+      manifest: m,
+      workflows: BASE,
+      sources: SOURCES,
+      scriptOutputs: SCRIPTS,
+      actions: ACTIONS,
+    }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
     expectFindings(label, got);
     expect(daggerFnFindings(m).map((f) => f.why)).toEqual([
       `daggerFn ${JSON.stringify(fn)} is not one Dagger function name (^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$)`,
@@ -2175,9 +2227,14 @@ describe("every workflow sets its permissions, and every daggerFn is one functio
     const m = structuredClone(manifest);
     m.sdks.find((s) => s.daggerFn !== undefined).daggerFn = "x;y";
     expect(
-      allFindings({ settings, manifest: m, workflows: BASE, scriptOutputs: SCRIPTS }).map(
-        (f) => f.why,
-      ),
+      allFindings({
+        settings,
+        manifest: m,
+        workflows: BASE,
+        sources: SOURCES,
+        scriptOutputs: SCRIPTS,
+        actions: ACTIONS,
+      }).map((f) => f.why),
     ).toContainEqual(expect.stringMatching(/daggerFn "x;y" is not one Dagger function name/));
   });
 });
@@ -2449,7 +2506,7 @@ describe("continue-on-error in any workflow holding a credentialed job (round 11
         "COE cli-windows-install-verify: a secret makes a job credentialed, its continue-on-error refused",
         (w) => {
           const job = Object.values(w["cli-windows-install-verify.yml"].jobs)[0];
-          job.env = { ...(job.env ?? {}), T: "${{ secrets.X }}" };
+          job.env = { ...job.env, T: "${{ secrets.X }}" };
           job["continue-on-error"] = true;
         },
         /cli-windows-install-verify\.yml: \S+: sets continue-on-error: \(its failure would be reported green\)/,
@@ -2462,5 +2519,261 @@ describe("continue-on-error in any workflow holding a credentialed job (round 11
       got.some((g) => why.test(g)),
       got.join("\n") || "no finding",
     ).toBe(true);
+  });
+});
+
+describe("the attest job is rule 2's one named exception, and no wider (#903)", () => {
+  const A = (w) => w[C].jobs.attest;
+  const step0 = { name: "injected", run: "bash apps/cli/scripts/check-on-main.sh" };
+  const checkout = {
+    name: "Checkout",
+    uses: "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+    with: { "fetch-depth": 1, "persist-credentials": false },
+  };
+  it("control: the real attest job fits its exception", () =>
+    expect(idTokenExceptionFindings(BASE)).toEqual([]));
+  it("records the attest job, by name, with exactly its two permissions", () =>
+    expect(ID_TOKEN_EXCEPTIONS).toEqual({
+      "cli-release.yml#attest": expect.objectContaining({
+        permissions: { "id-token": "write", attestations: "write" },
+      }),
+    }));
+  it.each(
+    ROWS.rows([
+      [
+        "I1 attest: gains contents: read",
+        (w) => void (A(w).permissions.contents = "read"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I2 attest: gains contents: write",
+        (w) => void (A(w).permissions.contents = "write"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I3 attest: gains packages: write",
+        (w) => void (A(w).permissions.packages = "write"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I4 attest: permissions: write-all",
+        (w) => void (A(w).permissions = "write-all"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job's permissions are/,
+      ],
+      [
+        "I5 attest: bound to an environment",
+        (w) => void (A(w).environment = "cli-release"),
+        /attest: ID_TOKEN_EXCEPTIONS: the job sets environment:/,
+      ],
+      [
+        "I6 attest: a run: step of project code",
+        (w) => void A(w).steps.splice(1, 0, { ...step0 }),
+        /attest: ID_TOKEN_EXCEPTIONS: step injected has a run: block/,
+      ],
+      [
+        "I7 attest: a checkout beside the token",
+        (w) => void A(w).steps.unshift({ ...checkout }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job runs \[/,
+      ],
+      [
+        "I8 attest: another action after the attestation",
+        (w) =>
+          void A(w).steps.push({
+            name: "x",
+            uses: "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
+            with: { script: "1" },
+          }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job runs \[/,
+      ],
+      [
+        "I9 attest: a secret in the attest step's env",
+        (w) => void (A(w).steps[1].env = { T: "${{ secrets.R2_SECRET_ACCESS_KEY }}" }),
+        /attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github\.token or secrets/,
+      ],
+      [
+        "I10 attest: the token handed to the attest step",
+        (w) => void (A(w).steps[1].with["github-token"] = "${{ github.token }}"),
+        /attest: ID_TOKEN_EXCEPTIONS: an expression of the job names github\.token or secrets/,
+      ],
+      [
+        "I11 attest: a job-level env",
+        (w) => void (A(w).env = { BASH_ENV: "x" }),
+        /attest: ID_TOKEN_EXCEPTIONS: the job sets env:/,
+      ],
+      [
+        "I12 attest: a forged subject",
+        (w) =>
+          void (A(w).steps[1].with = {
+            "subject-name": "confeature-x86_64-unknown-linux-gnu",
+            "subject-digest": `sha256:${"0".repeat(64)}`,
+          }),
+        /attest: step 2 \(Attest every released file/,
+      ],
+      [
+        "I13 attest: renamed, its exception names no job",
+        (w) => {
+          w[C].jobs.provenance = A(w);
+          delete w[C].jobs.attest;
+          w[C].jobs.upload.needs = ["build", "release", "provenance"];
+        },
+        /attest: ID_TOKEN_EXCEPTIONS: records a job the workflow does not have/,
+      ],
+      [
+        "I14 build: gains id-token: write",
+        (w) => void (w[C].jobs.build.permissions["id-token"] = "write"),
+        /cli-release\.yml: build: requests id-token: write outside an environment/,
+      ],
+      [
+        "I15 release: gains id-token: write",
+        (w) => void (w[C].jobs.release.permissions["id-token"] = "write"),
+        /cli-release\.yml: release: requests id-token: write outside an environment/,
+      ],
+      [
+        "I16 sdk-publish setup: gains id-token: write",
+        (w) => void (w[P].jobs.setup.permissions = { contents: "read", "id-token": "write" }),
+        /sdk-publish\.yml: setup: requests id-token: write outside an environment/,
+      ],
+      [
+        "I17 a new workflow's attest-shaped job, outside the exception",
+        (w) =>
+          void (w["new.yml"] = {
+            on: { push: { tags: ["cli-v*"] } },
+            permissions: { contents: "read" },
+            jobs: { attest: structuredClone(A(w)) },
+          }),
+        /new\.yml: attest: requests id-token: write outside an environment/,
+      ],
+    ]),
+  )("refuses %s", (label, mutate, why) => {
+    const got = added(mutate);
+    expectFindings(label, got);
+    expect(
+      got.some((g) => why.test(g)),
+      got.join("\n") || "no finding",
+    ).toBe(true);
+  });
+});
+
+describe("the Hex pair is held to every rule (#909)", () => {
+  const upload = (w) => w[P].jobs["publish-hex"].steps.find((s) => s.name === "Upload");
+  const swapRun = (from, to) => (w) => {
+    const s = upload(w);
+    if (!s.run.includes(from)) throw new Error(`the Upload step has no ${from}`);
+    s.run = s.run.replace(from, to);
+  };
+  const beam = (w) =>
+    w[P].jobs["pack-hex"].steps.find((s) => String(s.uses).startsWith("erlef/setup-beam@"));
+  it.each([
+    [
+      "the key as a shell word in curl's argv",
+      swapRun("--variable %HEX_API_KEY", '-H "authorization: ${HEX_API_KEY}"'),
+      /curl is not a command environment sdk-publish-hex's job runs|credential HEX_API_KEY/,
+    ],
+    [
+      "another destination",
+      swapRun("https://hex.pm/api/", "https://hex.attacker.example/api/"),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "replacing a published version",
+      swapRun("replace=false", "replace=true"),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "another uploaded file",
+      swapRun('"@release/${ARTIFACT}"', '"@publish-tmp/other.tar"'),
+      /curl is not a command environment sdk-publish-hex's job runs/,
+    ],
+    [
+      "an OTP range",
+      (w) => {
+        w[P].env.OTP_VERSION = "27";
+      },
+      /env OTP_VERSION is 27, not an exact version/,
+    ],
+    [
+      "an Elixir minor only",
+      (w) => {
+        w[P].env.ELIXIR_VERSION = "1.17";
+      },
+      /env ELIXIR_VERSION is 1\.17, not an exact version/,
+    ],
+    [
+      "an unpinned Hex",
+      (w) => {
+        w[P].env.HEX_VERSION = "latest";
+      },
+      /env HEX_VERSION is latest, not an exact version/,
+    ],
+    [
+      "setup-beam guessing versions",
+      (w) => {
+        beam(w).with["version-type"] = "loose";
+      },
+      /pack-hex/,
+    ],
+    [
+      "setup-beam installing the latest Hex",
+      (w) => {
+        beam(w).with["install-hex"] = true;
+      },
+      /pack-hex/,
+    ],
+    [
+      "setup-beam by tag",
+      (w) => {
+        beam(w).uses = "erlef/setup-beam@v1";
+      },
+      /uses erlef\/setup-beam@v1 without a full commit SHA/,
+    ],
+    [
+      "an OIDC token on the key's job",
+      (w) => {
+        w[P].jobs["publish-hex"].permissions["id-token"] = "write";
+      },
+      /publish-hex/,
+    ],
+  ])("refuses %s", (_, mutate, why) => {
+    expect(added(mutate)).toEqual(expect.arrayContaining([expect.stringMatching(why)]));
+  });
+
+  const withSettings = (edit) => {
+    const s = structuredClone(settings);
+    edit(s);
+    return allFindings({
+      settings: s,
+      manifest,
+      workflows: BASE,
+      sources: SOURCES,
+      scriptOutputs: SCRIPTS,
+      actions: ACTIONS,
+    }).map((f) => `${f.file}: ${f.job}: ${f.why}`);
+  };
+  it("refuses setup-beam once it is no longer allowed", () =>
+    expect(
+      withSettings((s) => {
+        s.allowedActions = s.allowedActions.filter((a) => a !== "erlef/setup-beam@*");
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/uses erlef\/setup-beam, which .* does not allow/),
+      ]),
+    ));
+  it("refuses HEX_API_KEY once the inventory no longer declares it", () =>
+    expect(
+      withSettings((s) => {
+        s.environments.find((e) => e.name === "sdk-publish-hex").secrets = [];
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /reads secret HEX_API_KEY, which environment sdk-publish-hex does not declare/,
+        ),
+      ]),
+    ));
+  it("declares HEX_API_KEY with a rotation date", () => {
+    const [secret] = settings.environments.find((e) => e.name === "sdk-publish-hex").secrets;
+    expect(secret).toMatchObject({ name: "HEX_API_KEY", kind: "token" });
+    expect(secret.rotateBy).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

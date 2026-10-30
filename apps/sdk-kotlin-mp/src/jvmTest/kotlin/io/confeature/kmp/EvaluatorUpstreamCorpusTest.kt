@@ -4,6 +4,7 @@ package io.confeature.kmp
 import io.confeature.kmp.internal.Comparators
 import io.confeature.kmp.internal.EvalTraceLog
 import io.confeature.kmp.internal.Evaluator
+import io.confeature.kmp.internal.SettingType
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -346,7 +347,7 @@ class EvaluatorUpstreamCorpusTest {
         fun defaultFor(expected: Any?, settingType: Int?): Any {
             if (expected is Boolean) return false
             if (expected is Number) {
-                return if (settingType != null && settingType == Evaluator.SETTING_TYPE_DOUBLE) {
+                return if (settingType != null && settingType == SettingType.DOUBLE) {
                     0.0
                 } else {
                     0
@@ -358,10 +359,10 @@ class EvaluatorUpstreamCorpusTest {
         /** Cast a JSON-decoded eval-log default to the type implied by `t`. */
         fun coerceDefault(def: Any?, settingType: Int?): Any? {
             if (def is Boolean) return def
-            if (settingType == Evaluator.SETTING_TYPE_DOUBLE && def is Number) {
+            if (settingType == SettingType.DOUBLE && def is Number) {
                 return def.toDouble()
             }
-            if (settingType == Evaluator.SETTING_TYPE_INT && def is Number && def !is Boolean) {
+            if (settingType == SettingType.INT && def is Number && def !is Boolean) {
                 return def.toInt()
             }
             return def
@@ -981,7 +982,7 @@ class EvaluatorUpstreamCorpusTest {
 
         override fun level(): EvalTraceLog.Level = EvalTraceLog.Level.INFO
 
-        override fun log(level: EvalTraceLog.Level, eventId: String, message: String) {
+        override fun log(level: EvalTraceLog.Level, eventId: String, message: String, exception: Throwable?) {
             lines.add(traceLabel(level) + ": [" + eventId + "] " + message)
         }
 

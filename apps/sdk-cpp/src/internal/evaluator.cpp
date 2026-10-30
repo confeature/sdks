@@ -2,11 +2,10 @@
 
 #include "internal/evaluator.h"
 
-#include <nlohmann/json.hpp>
-
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -62,21 +61,21 @@ struct Outcome {
 // Per-evaluation context threaded through rule / condition / prerequisite
 // resolution. `visitedFlags` is the shared cycle-detection stack.
 struct EvalContext {
-  const json* settings;            // config["f"] object
-  const json* segments;            // config["s"] array (may be null)
-  std::string configSalt;          // config["p"]["s"]
-  const User* user;                // optional
+  const json* settings;    // config["f"] object
+  const json* segments;    // config["s"] array (may be null)
+  std::string configSalt;  // config["p"]["s"]
+  const User* user;        // optional
   std::vector<std::string>* visitedFlags;
-  std::string* evalError;          // first surfaced condition error
-  bool* missingUserLogged;         // dedups the no-user surface
-  EvalTraceLog* log;               // trace logger (WARN/ERROR sink)
-  EvaluateLogBuilder* lb;          // trace builder (nullptr when tracing off)
-  const std::string* currentKey;   // setting key currently under evaluation
+  std::string* evalError;         // first surfaced condition error
+  bool* missingUserLogged;        // dedups the no-user surface
+  EvalTraceLog* log;              // trace logger (WARN/ERROR sink)
+  EvaluateLogBuilder* lb;         // trace builder (nullptr when tracing off)
+  const std::string* currentKey;  // setting key currently under evaluation
 };
 
 // The resolved value envelope + matched-rule/option identity.
 struct SettingResult {
-  json value;            // the resolved `v` envelope ({b}/{s}/{i}/{d})
+  json value;  // the resolved `v` envelope ({b}/{s}/{i}/{d})
   std::string variationId;
   bool matchedRule{false};
   bool matchedOption{false};
@@ -142,86 +141,13 @@ json selectSettingValue(const json* value, int type) {
 
 // ── canonical user-attribute stringification (userAttributeValueToString) ────
 //
-// Ports `packages/sdk-shared/src/comparators.ts::userAttributeValueToString`
-// and `numberToCanonicalString` (the ECMAScript `Number.toString` shape). A
+// Ports `packages/sdk-shared/src/comparators.ts::userAttributeValueToString`;
+// numbers render through eval_log.h's `evalLogNumberToString` (the ECMAScript
+// `Number.toString` shape), the one home of that rule in the SDK. A
 // string attribute is used verbatim; a non-string custom attribute (number /
 // date_time_t / string array) is canonicalised here ConfigCat-exactly so the
 // comparators (which are string-only by contract) see the same text the
 // upstream SDK would produce.
-
-// Render a finite double exactly as ECMAScript `Number.toString`: the shortest
-// round-tripping digit sequence, fixed-point unless the magnitude warrants
-// exponential. nlohmann's dump() yields the shortest round-tripping repr; we
-// reshape it into the ECMAScript [digits, point] form. (The corpus carries no
-// NaN/Inf, but they are handled for completeness / parity with the TS port.)
-std::string numberToCanonicalString(double value) {
-  if (std::isnan(value)) {
-    return "NaN";
-  }
-  if (std::isinf(value)) {
-    return value > 0 ? "Infinity" : "-Infinity";
-  }
-  if (value == 0.0) {
-    return "0";
-  }
-
-  const std::string sign = value < 0 ? "-" : "";
-  const double av = std::fabs(value);
-  const std::string shortest = json(av).dump();
-
-  std::string mant = shortest;
-  long long expVal = 0;
-  const auto ePos = shortest.find_first_of("eE");
-  if (ePos != std::string::npos) {
-    mant = shortest.substr(0, ePos);
-    expVal = std::stoll(shortest.substr(ePos + 1));
-  }
-
-  std::string intPart;
-  std::string fracPart;
-  const auto dotPos = mant.find('.');
-  if (dotPos != std::string::npos) {
-    intPart = mant.substr(0, dotPos);
-    fracPart = mant.substr(dotPos + 1);
-  } else {
-    intPart = mant;
-  }
-
-  std::string raw = intPart + fracPart;
-  long long point = static_cast<long long>(intPart.size()) + expVal;
-
-  // Strip leading zeros (adjusting point), then trailing zeros.
-  std::size_t lead = 0;
-  while (lead + 1 < raw.size() && raw[lead] == '0') {
-    ++lead;
-    --point;
-  }
-  raw = raw.substr(lead);
-  while (raw.size() > 1 && raw.back() == '0') {
-    raw.pop_back();
-  }
-  if (raw == "0") {
-    return "0";
-  }
-
-  const long long k = static_cast<long long>(raw.size());
-  const long long n = point;
-
-  if (n >= k && n <= 21) {
-    return sign + raw + std::string(static_cast<std::size_t>(n - k), '0');
-  }
-  if (n > 0 && n <= 21) {
-    return sign + raw.substr(0, static_cast<std::size_t>(n)) + "." +
-           raw.substr(static_cast<std::size_t>(n));
-  }
-  if (n > -6 && n <= 0) {
-    return sign + "0." + std::string(static_cast<std::size_t>(-n), '0') + raw;
-  }
-  const long long e = n - 1;
-  const std::string expSign = e >= 0 ? "+" : "-";
-  const std::string mantOut = (k == 1) ? raw : raw.substr(0, 1) + "." + raw.substr(1);
-  return sign + mantOut + "e" + expSign + std::to_string(std::llabs(e));
-}
 
 // Stringify a typed `User::AttributeValue`: string verbatim; date_time_t → Unix
 // **seconds** (ConfigCat `getTime()/1000`); string array → compact
@@ -232,14 +158,14 @@ std::string userAttributeValueToString(const User::AttributeValue& value) {
     return std::get<std::string>(value);
   }
   if (std::holds_alternative<double>(value)) {
-    return numberToCanonicalString(std::get<double>(value));
+    return evalLogNumberToString(std::get<double>(value));
   }
   if (std::holds_alternative<User::date_time_t>(value)) {
     const auto tp = std::get<User::date_time_t>(value);
-    const double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
-                          tp.time_since_epoch())
-                          .count();
-    return numberToCanonicalString(ms / 1000.0);
+    const double ms =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(tp.time_since_epoch())
+            .count();
+    return evalLogNumberToString(ms / 1000.0);
   }
   // string array → JSON.stringify (compact, slashes + UTF-8 raw, ensure_ascii
   // off so unicode codepoints stay literal — matching JS).
@@ -404,10 +330,11 @@ bool comparisonValueInvalid(int cmp, const std::string& sv, const json* dvJson,
     case kNumberGreaterOrEquals: {
       if (dvJson == nullptr || !dvJson->is_number() || std::isnan(dvJson->get<double>())) {
         const std::string v =
-            dvJson != nullptr ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>()
-                                                                          : std::nan(""))
-                              : "undefined";
-        *error = "comparison value '" + v + "' is invalid ('" + v + "' is not a valid decimal "
+            dvJson != nullptr
+                ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>() : std::nan(""))
+                : "undefined";
+        *error = "comparison value '" + v + "' is invalid ('" + v +
+                 "' is not a valid decimal "
                  "number)";
         return true;
       }
@@ -417,9 +344,9 @@ bool comparisonValueInvalid(int cmp, const std::string& sv, const json* dvJson,
     case kDateTimeAfter: {
       if (dvJson == nullptr || !dvJson->is_number() || std::isnan(dvJson->get<double>())) {
         const std::string v =
-            dvJson != nullptr ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>()
-                                                                          : std::nan(""))
-                              : "undefined";
+            dvJson != nullptr
+                ? evalLogNumberToString(dvJson->is_number() ? dvJson->get<double>() : std::nan(""))
+                : "undefined";
         *error = "comparison value '" + v + "' is invalid ('" + v +
                  "' is not a valid Unix timestamp (number of seconds elapsed since Unix epoch))";
         return true;
@@ -515,8 +442,8 @@ Outcome evaluateUserCondition(EvalContext& ctx, const json& condition,
       break;
     case kSensitiveTextEquals:
     case kSensitiveTextNotEquals:
-      matched = sensitiveTextEquals(attrValue, sv, salt, contextSalt,
-                                    cmp == kSensitiveTextNotEquals);
+      matched =
+          sensitiveTextEquals(attrValue, sv, salt, contextSalt, cmp == kSensitiveTextNotEquals);
       break;
     case kTextIsOneOf:
     case kTextIsNotOneOf:
@@ -524,8 +451,8 @@ Outcome evaluateUserCondition(EvalContext& ctx, const json& condition,
       break;
     case kSensitiveTextIsOneOf:
     case kSensitiveTextIsNotOneOf:
-      matched = sensitiveTextIsOneOf(attrValue, list, salt, contextSalt,
-                                     cmp == kSensitiveTextIsNotOneOf);
+      matched =
+          sensitiveTextIsOneOf(attrValue, list, salt, contextSalt, cmp == kSensitiveTextIsNotOneOf);
       break;
     case kTextStartsWithAnyOf:
     case kTextNotStartsWithAnyOf:
@@ -630,8 +557,8 @@ Outcome evaluateSegmentCondition(EvalContext& ctx, const json& condition) {
        static_cast<std::size_t>(segIndex) < ctx.segments->size())
           ? &(*ctx.segments)[static_cast<std::size_t>(segIndex)]
           : nullptr;
-  const std::string segNameForTrace = segmentForName != nullptr ? getString(*segmentForName, "n")
-                                                                : std::string();
+  const std::string segNameForTrace =
+      segmentForName != nullptr ? getString(*segmentForName, "n") : std::string();
   if (lb != nullptr) {
     lb->appendSegmentCondition(segNameForTrace, segCmp);
   }
@@ -913,8 +840,8 @@ bool evaluatePercentageOptions(EvalContext& ctx, const json& options, const std:
         out->matchedRule = matchedRule;
         out->matchedOption = true;
         if (lb != nullptr) {
-          const json optValue = selectSettingValue(out->value.is_object() ? &out->value : nullptr,
-                                                   settingType);
+          const json optValue =
+              selectSettingValue(out->value.is_object() ? &out->value : nullptr, settingType);
           lb->newLine("- Hash value " + std::to_string(hashValue) + " selects % option " +
                       std::to_string(index + 1) + " (" + std::to_string(width) + "%), '" +
                       settingValueToLogString(optValue) + "'.");
@@ -998,8 +925,7 @@ SettingResult evaluateSetting(EvalContext& ctx, const std::string& key, const js
   ctx.currentKey = &key;
 
   const json* tJson = findObject(setting, "t");
-  const int settingType =
-      (tJson != nullptr && tJson->is_number_integer()) ? tJson->get<int>() : -1;
+  const int settingType = (tJson != nullptr && tJson->is_number_integer()) ? tJson->get<int>() : -1;
 
   // 1. Targeting rules — first-match-wins (US1).
   const json* rules = findObject(setting, "r");
@@ -1138,10 +1064,9 @@ static EvalResult evaluateImpl(const nlohmann::json* config, const std::string& 
       }
     }
 
-    EvalContext ctx{&(*fIt),       segments,   std::move(configSalt),
-                    user,          &visitedFlags, &evalError,
-                    &missingUserLogged, &traceLog, lbPtr,
-                    &key};
+    EvalContext ctx{&(*fIt),       segments,   std::move(configSalt), user,
+                    &visitedFlags, &evalError, &missingUserLogged,    &traceLog,
+                    lbPtr,         &key};
     const SettingResult resolved = evaluateSetting(ctx, key, setting);
 
     // Select the typed value by `t`; an absent / wrong-typed slot is "missing".
@@ -1166,8 +1091,8 @@ static EvalResult evaluateImpl(const nlohmann::json* config, const std::string& 
     }
     if (!typeOk) {
       // Preserve the pre-existing differentiated codes for the boolean slot.
-      return fail(defaultValue, settingType == kSettingTypeBool ? "VALUE_NOT_BOOL"
-                                                                : "MALFORMED_VALUE");
+      return fail(defaultValue,
+                  settingType == kSettingTypeBool ? "VALUE_NOT_BOOL" : "MALFORMED_VALUE");
     }
 
     EvalResult out;

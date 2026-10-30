@@ -133,13 +133,22 @@ bindings, loopback only) it is safe inside the Dagger sandbox.
 Each SDK's live suite runs inside that SDK's leg of `.github/workflows/sdk-gates.yml`, as a step
 after its suite (`live-suite --sdk <name>`), so a red live suite reddens the leg (#918; the
 release-time `contract-live.yml` matrix it replaces is retired). **To add an SDK**, give it a
-`liveSuite` in `dagger/sdk-manifest.json` (`runner` + `path`) and its builder in `LIVE_TOOLCHAINS`
-in `dagger/src/index.ts`: no workflow edit. Swift, which no Dagger container can build, runs
-its `runner` natively in the macOS job after its precheck, through
-`tools/repo-gates/run-live-suite.mjs` (#924): the harness starts there on the darwin workerd the
-workspace install brings. Every `runner` goes through the harness wrapper
+`liveSuite` in `dagger/sdk-manifest.json` (`runner`, `path`, and `toolchain`: the id of the live
+toolchain recipe in `dagger/src/index.ts` that builds its container, adding a recipe there when
+none fits): no workflow edit. `pnpm run verify` refuses a Dagger SDK's live suite that names no
+`toolchain`. Every `runner` is run by `tools/repo-gates/run-live-suite.mjs`, the one
+implementation: Dagger's `live-suite` runs it in the SDK's live container, and Swift, which no
+Dagger container can build, runs it natively in the macOS job after its precheck (#924), where the
+harness starts on the darwin workerd the workspace install brings. Every `runner` goes through the harness wrapper
 (`--corpus-seed --exec -- …`), so no path can run a live suite without `CONFEATURE_LIVE=1` and a
-live suite never passes by skipping (#783). An SDK that cannot have one carries `liveExempt:
+live suite never passes by skipping (#783). Its `--corpus-seed` declares the cases the suite must
+exercise, every seeded corpus case, and `--exec` fails a suite that exits 0 having sent no request
+for any of them, naming them (#926). Nothing outside the wrapped command is a shell
+operator: a runner's `&&` or `||` goes inside a quoted `bash -c '…'`, never after it, where bash and
+not the wrapper would decide the leg (#926). A test runner exits 0 when it skips a test, so every
+live suite also refuses a run in which a test was skipped or none ran: its runner reads the test
+report, or, for the suites built on `defineLiveWireSuite()`, the helper counts its own tests
+(#926; `tests/live-suite-runners.test.ts` runs each runner's check against a fake toolchain). An SDK that cannot have one carries `liveExempt:
 "<reason>"` instead; since #924 every SDK has one or the other, and
 `tests/live-suite-runners.test.ts` fails on an SDK with neither. `scripts/live-coverage-report.mjs`
 lists the roster: live, or exempt with its reason.

@@ -87,9 +87,9 @@ struct EvalTraceSink {
 //
 // Renders a finite double exactly as ECMAScript `Number.toString`: the shortest
 // round-tripping digit sequence reshaped into fixed-point / exponential form.
-// Mirrors evaluator.cpp's private copy + the corpus test's reference — kept
-// here so the eval-log builder can render numeric setting values / datetime
-// operands without a cross-TU dependency.
+// The SDK's one home of this rule: the eval-log builder and the evaluator's
+// user-attribute stringification both render through it. The corpus test
+// keeps its own independent reference as the oracle.
 inline std::string evalLogNumberToString(double value) {
   if (std::isnan(value)) {
     return "NaN";
@@ -139,7 +139,7 @@ inline std::string evalLogNumberToString(double value) {
     return "0";
   }
 
-  const long long k = static_cast<long long>(raw.size());
+  const auto k = static_cast<long long>(raw.size());
   const long long n = point;
 
   if (n >= k && n <= 21) {
@@ -167,7 +167,7 @@ inline bool evalLogUnixSecondsToIso(double seconds, std::string* iso) {
     iso->clear();
     return false;
   }
-  const long long ms = static_cast<long long>(std::llround(seconds * 1000.0));
+  const long long ms = std::llround(seconds * 1000.0);
   // Decompose the epoch-millisecond count into a UTC civil datetime. The corpus
   // datetimes are all post-epoch; the algorithm (Howard Hinnant's days_from_civil
   // inverse) is exact for the full valid range.
@@ -246,8 +246,7 @@ inline bool comparatorMeta(int comparator, ComparatorMeta* out) {
       {kSensitiveTextEndsWithAnyOf, {"ENDS WITH ANY OF", ComparatorKind::kList, true}},
       {kSensitiveTextNotEndsWithAnyOf, {"NOT ENDS WITH ANY OF", ComparatorKind::kList, true}},
       {kSensitiveArrayContainsAnyOf, {"ARRAY CONTAINS ANY OF", ComparatorKind::kList, true}},
-      {kSensitiveArrayNotContainsAnyOf,
-       {"ARRAY NOT CONTAINS ANY OF", ComparatorKind::kList, true}},
+      {kSensitiveArrayNotContainsAnyOf, {"ARRAY NOT CONTAINS ANY OF", ComparatorKind::kList, true}},
       {kTextEquals, {"EQUALS", ComparatorKind::kStr, false}},
       {kTextNotEquals, {"NOT EQUALS", ComparatorKind::kStr, false}},
       {kTextStartsWithAnyOf, {"STARTS WITH ANY OF", ComparatorKind::kList, false}},
@@ -415,8 +414,8 @@ class EvaluateLogBuilder {
     const std::string comparatorText = formatUserComparator(comparator);
     if (isSensitive) {
       const std::string word = values.size() == 1 ? "value" : "values";
-      return append("User." + attr + " " + comparatorText + " [<" +
-                    std::to_string(values.size()) + " hashed " + word + ">]");
+      return append("User." + attr + " " + comparatorText + " [<" + std::to_string(values.size()) +
+                    " hashed " + word + ">]");
     }
     return append("User." + attr + " " + comparatorText + " [" +
                   formatStringList(values, kStringListMaxLength) + "]");

@@ -2,6 +2,7 @@
 
 import { isConfigShape, type IConfig } from "./config-json.ts";
 import type { LoggerWrapper } from "./logger.ts";
+import { fetchGuardingRedirects, type GuardedFetchResult } from "./redirect.ts";
 import { isValidConfeatureKeyFormat } from "./sdk-key.ts";
 import { SdkErrorCode } from "./types.ts";
 
@@ -86,6 +87,9 @@ export interface IConfigFetcher {
  * failure is therefore reduced to a FIXED, key-free reason before it reaches
  * the logger or the outcome; no exception is logged or forwarded.
  *
+ * Redirects (#834): the keyed URL is never sent over `http` after an `https`
+ * request — {@link fetchGuardingRedirects} picks the policy per runtime.
+ *
  * Caller owns the `AbortSignal` lifetime — the fetcher honours it for
  * timeout + dispose semantics but does not create its own controller.
  *
@@ -146,9 +150,9 @@ export class HttpConfigFetcher implements IConfigFetcher {
       }
     }, this.requestTimeoutMs);
 
-    let response: Response;
+    let guarded: GuardedFetchResult;
     try {
-      response = await fetch(url, { method: "GET", headers, signal: ac.signal });
+      guarded = await fetchGuardingRedirects(url, { method: "GET", headers, signal: ac.signal });
     } catch (err) {
       // Key-free by construction: only the error's name is inspected.
       if (isAbortError(err)) {
@@ -168,6 +172,18 @@ export class HttpConfigFetcher implements IConfigFetcher {
       clearTimeout(timeoutHandle);
       signal.removeEventListener("abort", onCallerAbort);
     }
+
+    // A refused redirect (#834): the hop was never sent. The reason is a
+    // constant — never the Location or the URL, both of which hold the key.
+    if ("refused" in guarded) {
+      this.logger.fetchFailed(this.sdkKey, guarded.refused);
+      return {
+        status: "failed",
+        errorCode: SdkErrorCode.FETCH_FAILED,
+        errorMessage: `Config fetch redirect refused (${guarded.refused}).`,
+      };
+    }
+    const { response } = guarded;
 
     // 304 Not Modified — fast path, no body parse.
     if (response.status === 304) {
