@@ -9,7 +9,10 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
   `CONTRIBUTING.md`'s table says.
 - `lockfile-versions.test.mjs` fails if `pnpm-lock.yaml` resolves more than
   one `@types/node` (or none): two versions make Node's global types depend
-  on which one pnpm hoists.
+  on which one pnpm hoists. It also fails if `undici-types` resolves more
+  than once, or if `bun-types` loses the `undici-types` edge that
+  `packageExtensions` in `pnpm-workspace.yaml` declares for it: without it,
+  sdk-bun's Request and Headers types depend on pnpm's hoist link.
 - `run-live-suite.mjs` is the one implementation that runs an SDK's live
   suite: it finds its manifest `liveSuite.runner`, refuses it on any
   `manifestProblems` finding about that SDK or the whole manifest, and runs it

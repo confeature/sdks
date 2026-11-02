@@ -32,6 +32,19 @@ overrides:
   vitest: "catalog:"
   vite-plus: "catalog:"
 
+# bun-types (via @types/bun, sdk-bun) types Request, Headers and Response as
+# `import("undici-types").…` but declares only `@types/node: "*"`, so the
+# import resolved only through pnpm's private hoist link. An incremental
+# install that dropped the undici-types version the link pointed at (#867
+# dropped 7.16.0) left no link, and sdk-bun lost Request.url and Headers.get.
+# Declared here, the edge no longer depends on hoisting. The range is the one
+# @types/node depends on, so one undici-types copy resolves:
+# tools/repo-gates/lockfile-versions.test.mjs fails if they drift apart.
+packageExtensions:
+  bun-types:
+    dependencies:
+      undici-types: ~7.21.0
+
 peerDependencyRules:
   allowAny:
     - vite
