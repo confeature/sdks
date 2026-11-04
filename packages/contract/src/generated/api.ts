@@ -355,7 +355,7 @@ export interface paths {
     put?: never;
     /**
      * Invite one or more members
-     * @description Invite one or more members in a single call — the request shape aligns to ConfigCat's `InviteMembersRequest` (`emails[]` + `permissionGroupId`). `permissionGroupId` is a v1 placeholder: Confeature has no permission-groups feature yet, so the only accepted value is `0` (the same rule as `InvitationModel.permissionGroupId`) — a non-zero value is a 400. The `201` array response — one `{ email, invite_token, expires_at }` entry per submitted email — is a deliberate, documented Confeature-original divergence from ConfigCat's `204 No Content`: Confeature has no server-side email delivery, so the operator receives each invite token to relay (the back-office builds `<origin>/signup?invite=<token>`). The hashed-at-rest, 7-day, single-use token model and the best-effort per-email duplicate-email guard are unchanged from the single-email path. Any authenticated principal can call this in v0.1 (every session carries scope `*`; no RBAC).
+     * @description Invite one or more members in a single call — the request shape aligns to ConfigCat's `InviteMembersRequest` (`emails[]` + `permissionGroupId`). `permissionGroupId` is a v1 placeholder: Confeature has no permission-groups feature yet, so the only accepted value is `0` (the same rule as `InvitationModel.permissionGroupId`) — a non-zero value is a 400. The `201` array response — one `{ email, invite_token, expires_at }` entry per submitted email — is a deliberate, documented Confeature-original divergence from ConfigCat's `204 No Content`: Confeature has no server-side email delivery, so the operator receives each invite token to relay (the back-office builds `<origin>/signup?invite=<token>`). The hashed-at-rest, 7-day, single-use token model and the best-effort per-email duplicate-email guard are unchanged from the single-email path. Inviting needs the `member:write` scope: a user's own credential carries every scope, so only a management token minted without it is refused. Any member of an Organization may invite into it, whatever their role, except in the founder Organization, the one that runs the Confeature service itself, where only a platform operator may (see the `403`).
      */
     post: operations["createInvite"];
     delete?: never;
@@ -455,7 +455,10 @@ export interface paths {
     /** List management tokens */
     get: operations["listTokens"];
     put?: never;
-    /** Create a management token */
+    /**
+     * Create a management token
+     * @description The caller must be a platform operator holding `token:write`, and every scope of the new token must be one the caller holds: a management token holds its own scopes, and a dashboard session holds every scope. Holding the requested scopes is necessary but not sufficient: a dashboard session acting outside the founder Organization, the one that runs the Confeature service itself, holds them all and is still refused (see the `403`).
+     */
     post: operations["createToken"];
     delete?: never;
     options?: never;
@@ -1132,6 +1135,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/organizations/{organizationId}/members/{userId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete Member from Organization
+     * @description This endpoint removes a Member identified by the `userId` from the given Organization identified by the `organizationId` parameter. ConfigCat's `delete-organization-member`, in this contract's camelCase operationId convention. `userId` is a UUID here, where ConfigCat declares a plain string, because every Confeature user id is one (see `OrganizationMemberModel.userId`).
+     *     The caller is an admin of this Organization, acting in it with any credential type, or a management token. Either needs the `member:write` scope. In the founder Organization, the one that runs the Confeature service itself, the caller must be a platform operator (see the `403`).
+     *     The removal is one atomic write and binds on the next request. In this Organization, the pending invitations the Member issued, and those addressed to their email (compared case-insensitively), are deleted. Another Organization's invitation to that email is not touched. If this was the Member's only Organization, their account is deleted too, which ends every session and credential they hold and lets their email be invited again. A Member of another Organization keeps the account and that Organization, and loses their sessions in this one. Removing a Member of the founder Organization also revokes the management tokens recorded as theirs, and deletes the pending invitations issued through any of those tokens, including one already revoked. A token records as its owner the user whose dashboard session minted it or, when a token minted it, that token's owner if it has one. A token from before owners were recorded has one only if its mint from a session is on record, so a token that a token minted back then has none, even when its parent does. A token with no recorded owner, which includes one seeded outside the API, is not revoked.
+     */
+    delete: operations["deleteOrganizationMember"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/organizations/{organizationId}/invitations": {
     parameters: {
       query?: never;
@@ -1208,7 +1233,7 @@ export interface paths {
     post?: never;
     /**
      * Revoke a pending Invitation.
-     * @description Revoke a pending Invitation, removing it permanently. Only pending invitations can be revoked; a redeemed invitation, an invitation belonging to another Organization, and a non-existent invitationId all return the same generic 404 (anti-enumeration). After a successful revoke the invitation's token can no longer be redeemed.
+     * @description Revoke a pending Invitation, removing it permanently. Only pending invitations can be revoked; a redeemed invitation, an invitation belonging to another Organization, and a non-existent invitationId all return the same generic 404 (anti-enumeration). After a successful revoke the invitation's token can no longer be redeemed. Revoking needs the `member:write` scope and, in the founder Organization, the one that runs the Confeature service itself, a platform operator (see the `403`).
      */
     delete: operations["deleteInvitation"];
     options?: never;
@@ -4302,6 +4327,15 @@ export interface operations {
           "application/json": components["schemas"]["AuthError"];
         };
       };
+      /** @description Forbidden. `insufficient_scope`: the management token lacks `member:write`. `forbidden`: the invitation would join the founder Organization and the caller is not a platform operator, meaning a dashboard session of that Organization's admin, or a management token. No invitation is minted. ConfigCat's swagger lists no `403` on `invite-member`; Confeature adds it because the request is sound and only the caller lacks the right. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       /** @description Whole-batch rejection — at least one submitted address already belongs to a registered user (`email_taken`). The batch is all-or-nothing: nothing is minted. */
       409: {
         headers: {
@@ -4439,7 +4473,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description Forbidden. `forbidden`: the caller is not a platform operator, meaning a dashboard session of the founder Organization's admin, acting in that Organization, or a management token. Any other credential is refused, whatever its scopes. `insufficient_scope`: the management token lacks `token:read`. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -4492,7 +4526,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description Forbidden. `forbidden`: the caller is not a platform operator, meaning a dashboard session of the founder Organization's admin, acting in that Organization, or a management token. Any other credential is refused, whatever its scopes. `insufficient_scope`: the management token lacks `token:write`, or the request names a scope the caller does not hold, where `*` holds every scope and `member:*` holds every `member:` scope. Nothing is minted. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -4533,7 +4567,7 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
-      /** @description Token lacks the required scope. */
+      /** @description Forbidden. `forbidden`: the caller is not a platform operator, meaning a dashboard session of the founder Organization's admin, acting in that Organization, or a management token. Any other credential is refused, whatever its scopes. `insufficient_scope`: the management token lacks `token:write`. Nothing is revoked. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -7613,6 +7647,67 @@ export interface operations {
       429: components["responses"]["TooManyAttempts"];
     };
   };
+  deleteOrganizationMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Organization. */
+        organizationId: string;
+        /** @description The identifier of the Member. */
+        userId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description When the delete was successful. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad request. A path parameter is not a UUID, or the Member is the Organization's last admin, whom nobody can remove: an Organization always keeps an admin. Nothing is changed. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid credential presented. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthError"];
+        };
+      };
+      /** @description Forbidden. `insufficient_scope`: the management token lacks `member:write`. `forbidden`: the caller acts in this Organization and is not its admin, removing themself included; or this is the founder Organization and the caller is not a platform operator, meaning a dashboard session of that Organization's admin, or a management token. Nothing is changed. ConfigCat's swagger lists no `403` on this operation; Confeature adds it so that a caller who can list this Organization's Members is told they lack the right, not that the Member does not exist. A caller outside the Organization gets the `404`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Organization not found, the caller does not act in it, OR the user is not one of its Members. Generic envelope — no enumeration of which case triggered the 404. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
   listInvitations: {
     parameters: {
       query?: never;
@@ -7848,6 +7943,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AuthError"];
+        };
+      };
+      /** @description Forbidden. `insufficient_scope`: the management token lacks `member:write`. `forbidden`: the caller acts in the founder Organization and is not a platform operator, meaning a dashboard session of that Organization's admin, or a management token. Nothing is changed. ConfigCat's swagger lists no `403` on `delete-invitation`; Confeature adds it because only the caller lacks the right. A caller outside that Organization gets the `404`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
       };
       /** @description The invitation is not a pending invitation visible to the caller — it does not exist, has already been redeemed, or belongs to another Organization. Generic envelope, byte-identical for every case (anti-enumeration). */
