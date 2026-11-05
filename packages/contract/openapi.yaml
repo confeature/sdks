@@ -4374,6 +4374,16 @@ paths:
         a session is on record, so a token that a token minted back then has
         none, even when its parent does. A token with no recorded owner, which
         includes one seeded outside the API, is not revoked.
+
+        If the Organization's billing customer has the removed Member's email
+        (compared case-insensitively), that email is replaced by the address of
+        the Organization's oldest remaining admin, the one who joined it first.
+        This runs asynchronously, normally within minutes of the removal, and
+        is retried while the billing provider is unavailable. The removal's
+        outcome and its response do not depend on the billing provider. Any
+        other email on the billing customer stays, whoever set it. This does not
+        cover extra billing recipients set in the billing provider's dashboard,
+        or invoices already issued.
       tags: [Organizations]
       parameters:
         - in: path
