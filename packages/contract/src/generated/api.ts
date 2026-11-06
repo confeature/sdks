@@ -557,7 +557,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a product
-     * @description Takes every SDK key of the product off the edge, so a management token also needs config:publish.
+     * @description Takes every SDK key of the product off the edge, so a management token also needs config:publish. Records a `productDeleted` audit-log entry with the delete. Never requires a change note, whatever the product's reasonRequired: ConfigCat's delete takes none.
      */
     delete: operations["deleteProduct"];
     options?: never;
@@ -1756,9 +1756,9 @@ export interface components {
     ConfigV6: {
       [key: string]: unknown;
     };
-    /** @description Optional body of a write that otherwise takes none (publish, and the environment, config and setting deletes): it carries only the change note. A request with no body, or a body that is not JSON, carries no note. */
+    /** @description Optional body of a write that otherwise takes none (publish, and the product, environment, config and setting deletes): it carries only the change note. A request with no body, or a body that is not JSON, carries no note. */
     ChangeNoteRequest: {
-      /** @description The change note for the audit log. Required (400 reason_required) when the product, or for an environment-scoped change the environment, requires a reason for changes. */
+      /** @description The change note for the audit log. Required (400 reason_required) when the product, or for an environment-scoped change the environment, requires a reason for changes, except on the product delete, which never requires one. */
       reason?: string;
     };
     /** @description Uniform error envelope returned by 4xx responses on /v1/* routes. `error` is a stable machine-readable token (e.g., `not_found`, `conflict`, `forbidden`, `unauthorized`); `message` is a human-readable explanation. */
@@ -5024,7 +5024,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ChangeNoteRequest"];
+      };
+    };
     responses: {
       /** @description Product deleted. */
       204: {
@@ -5033,7 +5037,15 @@ export interface operations {
         };
         content?: never;
       };
-      400: components["responses"]["NotJsonWrite"];
+      /** @description `bad_request`: the change note (reason) is over 1000 characters, or the request carries a Confeature cookie and its body is not JSON. Nothing is deleted. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       /** @description Missing or invalid bearer token. */
       401: {
         headers: {
@@ -5322,7 +5334,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -6752,7 +6764,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7082,7 +7094,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description A change note (reason) is required for this change, or the setting is a prerequisite of other settings (the message names them). Nothing is deleted. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      /** @description A change note (reason) is required for this change, or the setting is a prerequisite of other settings (the message names them). Nothing is deleted. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7774,7 +7786,7 @@ export interface operations {
           "application/json": components["schemas"]["PublishResponse"];
         };
       };
-      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      /** @description A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed. */
       400: {
         headers: {
           [name: string]: unknown;

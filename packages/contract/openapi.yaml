@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.6.0
+  version: 0.7.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -1640,7 +1640,9 @@ paths:
       summary: Delete a product
       description: >
         Takes every SDK key of the product off the edge, so a management
-        token also needs config:publish.
+        token also needs config:publish. Records a `productDeleted` audit-log
+        entry with the delete. Never requires a change note, whatever the
+        product's reasonRequired: ConfigCat's delete takes none.
       tags: [Products]
       security:
         - bearerAuth: []
@@ -1653,11 +1655,24 @@ paths:
             type: string
             format: uuid
           description: Identifier of the Product (UUID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNoteRequest"
       responses:
         "204":
           description: Product deleted.
         "400":
-          $ref: "#/components/responses/NotJsonWrite"
+          description: >
+            `bad_request`: the change note (reason) is over 1000 characters, or
+            the request carries a Confeature cookie and its body is not JSON.
+            Nothing is deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           headers:
             WWW-Authenticate:
@@ -1929,6 +1944,7 @@ paths:
         "400":
           description: >
             A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
+            Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed.
           content:
             application/json:
               schema:
@@ -3307,6 +3323,7 @@ paths:
         "400":
           description: >
             A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
+            Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed.
           content:
             application/json:
               schema:
@@ -3680,6 +3697,7 @@ paths:
             is a prerequisite of other settings (the message names them).
             Nothing is deleted.
             Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
+            Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed.
           content:
             application/json:
               schema:
@@ -4487,6 +4505,7 @@ paths:
         "400":
           description: >
             A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
+            Also `bad_request` when the change note (reason) is over 1000 characters; nothing is changed.
           content:
             application/json:
               schema:
@@ -6603,16 +6622,18 @@ components:
       properties:
         reason:
           type: string
+          maxLength: 1000
           writeOnly: true
           description: >
             The change note for the audit log. Required (400 reason_required)
             when the product, or for an environment-scoped change the
-            environment, requires a reason for changes.
+            environment, requires a reason for changes, except on the product
+            delete, which never requires one.
       description: >
         Optional body of a write that otherwise takes none (publish, and the
-        environment, config and setting deletes): it carries only the change
-        note. A request with no body, or a body that is not JSON, carries no
-        note.
+        product, environment, config and setting deletes): it carries only the
+        change note. A request with no body, or a body that is not JSON,
+        carries no note.
     Error:
       type: object
       description: >
