@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.5.0
+  version: 0.6.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
