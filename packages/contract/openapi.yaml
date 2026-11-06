@@ -60,6 +60,10 @@ paths:
                 email: { type: string, format: email, minLength: 5, maxLength: 254 }
                 password: { type: string, minLength: 12, maxLength: 256, writeOnly: true }
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "201":
           description: Admin user created; bootstrap endpoint is now disabled.
           content:
@@ -84,11 +88,13 @@ paths:
       summary: Sign in with email + password
       description: >
         Verifies the credential and, on success, issues a session cookie
-        (`__Host-cfsession`, HttpOnly, Secure, SameSite=Strict, Path=/,
+        (`__Host-cfsession`, HttpOnly, Secure, SameSite=Lax, Path=/,
         Max-Age=604800). The cookie value is opaque; revocation is
         server-side via POST /v1/auth/logout. Failures return the SAME
         shape and timing whether the email does not exist or the password
-        is wrong (auth-side enumeration defence).
+        is wrong (auth-side enumeration defence). Failed passwords are
+        budgeted per IP and per address, and over budget the attempt is
+        refused before verification.
       tags: [Auth]
       requestBody:
         required: true
@@ -105,23 +111,26 @@ paths:
                   maxLength: 254
                 password:
                   type: string
-                  minLength: 12
+                  minLength: 1
                   maxLength: 256
                   writeOnly: true
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Sign-in succeeded; session cookie set in headers.
           headers:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
-          description: Malformed request body (e.g. password too short).
+          description: >
+            Malformed request body (e.g. not an email, or an empty password). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -132,6 +141,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyPasswordAttempts"
+        "503":
+          $ref: "#/components/responses/PasswordCheckUnavailable"
   /v1/auth/signup:
     post:
       operationId: authSignup
@@ -153,19 +166,22 @@ paths:
             schema:
               $ref: "#/components/schemas/SignupRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "201":
           description: Account created; session cookie set in headers.
           headers:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
         "400":
-          description: Malformed request body. Same body as the 409.
+          description: >
+            Malformed request body. Same body as the 409. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -188,13 +204,17 @@ paths:
         without a session still returns 204.
       tags: [Auth]
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "204":
           description: Session deleted (if present); cookie cleared.
           headers:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=; Max-Age=0; HttpOnly; Secure; SameSite=Lax; Path=/
   /v1/auth/me:
     get:
       operationId: authMe
@@ -326,13 +346,17 @@ paths:
             schema:
               $ref: "#/components/schemas/AcceptInviteRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Invite redeemed; user created; session cookie set.
           headers:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
@@ -358,8 +382,9 @@ paths:
       description: >
         Confeature-original endpoint. Accepts an email and,
         for a registered account that HAS a password, mints a single-use
-        30-minute reset token and emails a reset link. ALWAYS returns the same
-        generic 200 acknowledgement — for a real account, an SSO/OAuth-only
+        30-minute reset token and emails a reset link. An account that signs in
+        through a provider instead is emailed how it signs in, with no token.
+        ALWAYS returns the same generic 200 acknowledgement — for a real account, an SSO/OAuth-only
         account (no password), a non-existent account, or a rate-limited caller
         — so the endpoint cannot be used to discover which emails are
         registered (mirrors /v1/auth/login's "SAME shape and timing" defence).
@@ -380,6 +405,8 @@ paths:
                   minLength: 5
                   maxLength: 254
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: >
             Generic acknowledgement, identical in every case. No body field
@@ -389,7 +416,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PasswordResetAck"
         "400":
-          description: Malformed request body (e.g. not an email).
+          description: >
+            Malformed request body (e.g. not an email). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -402,8 +430,13 @@ paths:
         Confeature-original endpoint. Exchanges a valid,
         unexpired, unconsumed reset token plus a new password for an updated
         credential. On success the new argon2id hash is written, the token is
-        consumed (single-use), and ALL of the account's sessions are revoked —
-        the user must sign in again with the new password. A rejected (weak)
+        consumed (single-use), the address counts as verified, and ALL of the
+        account's sessions, CLI tokens, MCP tokens and Public API credentials
+        are revoked, with a device sign-in approved but not yet collected. Only
+        the account's own sessions and credentials end: nobody is removed from
+        an organization and no invitation is withdrawn, and the notice names the
+        people who joined through invitations this account sent. The user must
+        sign in again with the new password. A rejected (weak)
         password does NOT consume the token, so the same link can be retried
         within its lifetime. A malformed body, a weak password, or an
         invalid/expired/consumed token all return a single uniform 400 (no
@@ -428,6 +461,8 @@ paths:
                   maxLength: 256
                   writeOnly: true
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Password changed. No session cookie is issued; sign in again.
           content:
@@ -439,6 +474,7 @@ paths:
             Malformed body, weak new password, OR an invalid/expired/consumed
             token — returned as a single uniform outcome (no distinction that
             reveals which condition failed). The token is not consumed.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -473,8 +509,20 @@ paths:
             schema:
               $ref: "#/components/schemas/SsoStartRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Provider authorization URL minted; client opens it in the same tab.
+          headers:
+            Set-Cookie:
+              description: >
+                `__Host-cfsso`, a 10-minute cookie binding the state to this
+                browser. The callback refuses a request that does not carry it.
+              schema:
+                type: string
+                example: __Host-cfsso=<secret>; Max-Age=600; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
@@ -542,18 +590,21 @@ paths:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SsoCallbackResult"
         "400":
           description: >
-            State missing / consumed / malformed / tampered, or userinfo
+            State missing / consumed / malformed / tampered, or started by
+            another browser (no `__Host-cfsso`, or not the one its start set:
+            login CSRF), or userinfo
             returned no `email`, or — for the `google` provider — the
             `email_verified` claim was absent or false, or malformed body
             — same generic body for ALL branches. No session is issued; the KV
             state entry IS consumed when present, to prevent replay.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -565,6 +616,7 @@ paths:
             session whose user id does NOT equal `link_user_id`. The link is
             bound to the session that initiated it; a mismatched/absent
             session is rejected and NOTHING is changed.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -623,13 +675,13 @@ paths:
         leg of the no-silent-merge linking flow: the `google` callback
         verified the Google identity server-side and minted a single-use
         link challenge (returned as `challenge_id` in the callback's
-        `link_required` branch). This endpoint consumes that challenge,
-        loads the user by the challenge's email, verifies the supplied
-        password with argon2id (timing-equalised on a wrong/unknown
-        password), and — on success — attaches `sso_provider_id='google'`
-        + `sso_subject`, creates a session, and sets the `__Host-cfsession`
-        cookie. The challenge is single-use (deleted on read). No token or
-        password is ever logged.
+        `link_required` branch). This endpoint loads the user by the
+        challenge's email, verifies the supplied password with argon2id
+        (timing-equalised on a wrong/unknown password), and — on success —
+        spends the challenge, attaches `sso_provider_id='google'` +
+        `sso_subject`, creates a session, and sets the `__Host-cfsession`
+        cookie. A wrong password spends one of the challenge's 5 attempts, not
+        the challenge. No token or password is ever logged.
       tags: [Auth]
       requestBody:
         required: true
@@ -638,13 +690,17 @@ paths:
             schema:
               $ref: "#/components/schemas/LinkGoogleRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Google linked; session cookie set. Password still valid.
           headers:
             Set-Cookie:
               schema:
                 type: string
-                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Strict; Path=/
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
@@ -652,24 +708,187 @@ paths:
         "401":
           description: >
             Wrong password (timing-equalised against the unknown-user
-            branch). Nothing is written; no session is issued.
+            branch). No session is issued, and the same challenge may be
+            retried.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LinkGoogleError"
         "409":
           description: >
-            The Google `sub` carried by the challenge is already linked to
-            a different account (partial-unique `(sso_provider_id,
-            sso_subject)` conflict). No silent reassignment.
+            `identity_conflict` — the account already holds another identity
+            (a different Google `sub` or an enterprise provider), or the
+            Google `sub` carried by the challenge is already linked to a
+            different account. Nothing is written: an identity on an account
+            is never silently replaced.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LinkGoogleError"
         "410":
           description: >
-            The link challenge is missing, expired, or already used.
-            Single-use + ~10 minute TTL.
+            The link challenge is missing, expired, already used, or just
+            spent its fifth wrong password. ~10 minute TTL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleError"
+        "429":
+          $ref: "#/components/responses/TooManyPasswordAttempts"
+        "503":
+          $ref: "#/components/responses/PasswordCheckUnavailable"
+  /v1/auth/link/google/email:
+    post:
+      operationId: authLinkGoogleEmail
+      summary: Email a link that connects the pending Google identity
+      description: >
+        Confeature-original endpoint. The other way out of the `link_required`
+        branch, for someone who owns the address and does not know the password:
+        mails the account's address a single-use link, valid 30 minutes, that
+        attaches the Google identity frozen in the challenge. The challenge stays
+        usable, so the password leg still works afterwards. No session cookie, no
+        mutation; the link's token never appears in a response, and travels in
+        the link's fragment (`/connect-google#token=…&email=…`), which a browser
+        never sends to a server. The response binds the link to this browser with
+        `__Host-cflink`; a newer link supersedes the older one, and a failed send
+        leaves no usable link. Rate limited per address. It answers truthfully, unlike the reset request: only a holder of
+        a challenge reaches it, and the callback has already said the account
+        exists.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkGoogleEmailRequest"
+      responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
+        "200":
+          description: The link was handed to the mail transport.
+          headers:
+            Set-Cookie:
+              description: >
+                `__Host-cflink`, 30 minutes: binds the link to this browser.
+              schema:
+                type: string
+                example: __Host-cflink=<secret>; Max-Age=1800; HttpOnly; Secure; SameSite=Lax; Path=/
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleEmailAck"
+        "410":
+          description: The link challenge is missing or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleEmailError"
+        "429":
+          description: >
+            `too_many_attempts` — too many links for this address in the last
+            hour. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              required: true
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleEmailError"
+        "503":
+          description: "`email_unavailable` — the email could not be sent."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleEmailError"
+  /v1/auth/link/google/email/confirm:
+    post:
+      operationId: authLinkGoogleEmailConfirm
+      summary: Spend an emailed link, attach Google and sign in
+      description: >
+        Confeature-original endpoint. Spends the token of the link
+        /v1/auth/link/google/email mailed, attaches `sso_provider_id='google'` +
+        `sso_subject` from the frozen identity, creates a session and sets the
+        `__Host-cfsession` cookie, but only from the browser that asked for the
+        link (its `__Host-cflink`). From any other browser it attaches nothing
+        and answers 202: that browser is given an approval (a new `__Host-cflink`,
+        10 minutes) that a Google sign-in in it, as the same address and the same
+        Google `sub`, finishes at the callback. So neither a stranger's browser
+        nor a stranger's Google account can finish what the mailbox approved. The
+        dashboard's link opens a screen that POSTs here on a click, never on the
+        page load, so a mail scanner following the link connects nothing. An
+        account already holding an identity keeps it.
+        The link proves the mailbox: on an account whose address nobody had
+        verified it also removes the password and revokes every session, token
+        and credential, as they may be a stranger's who registered the address
+        first. Only the account's own sessions and credentials end: nobody is
+        removed from an organization and no invitation is withdrawn, and the
+        notice names the people who joined through invitations this account
+        sent. A verified account only gains Google.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkGoogleEmailConfirmRequest"
+      responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
+        "200":
+          description: Google attached; session cookie set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: __Host-cfsession=<uuid>; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "202":
+          description: >
+            From a browser that did not ask for the link: nothing attached. The
+            body names the address; a Google sign-in as it finishes the link.
+          headers:
+            Set-Cookie:
+              description: "`__Host-cflink`, the approval, 10 minutes."
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleEmailPending"
+        "400":
+          description: >
+            The body is not JSON, from either of two sources: a body declared
+            `application/json` that does not parse (a plain-text answer from the
+            request parser), or, when the request carries a Confeature cookie, a
+            body of another content type (the JSON `bad_request` envelope). Any other
+            malformed body is the 410.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+            text/plain:
+              schema:
+                type: string
+        "409":
+          description: >
+            `identity_conflict` — the account already holds another identity, or
+            the Google `sub` is linked to another account. Nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkGoogleError"
+        "410":
+          description: >
+            The link is unknown, expired or already used, or malformed: one
+            uniform answer. Nothing is written.
           content:
             application/json:
               schema:
@@ -704,10 +923,22 @@ paths:
             schema:
               $ref: "#/components/schemas/LinkGoogleStartRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: >
             Google authorization URL minted (link-mode). The client opens it
             in the same tab; on return the callback completes the link.
+          headers:
+            Set-Cookie:
+              description: >
+                `__Host-cfsso`, a 10-minute cookie binding the state to this
+                browser. The callback refuses a request that does not carry it.
+              schema:
+                type: string
+                example: __Host-cfsso=<secret>; Max-Age=600; HttpOnly; Secure; SameSite=Lax; Path=/
           content:
             application/json:
               schema:
@@ -749,6 +980,10 @@ paths:
             schema:
               $ref: "#/components/schemas/SetPasswordRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Password set; the account can now also sign in with email+password.
           content:
@@ -798,6 +1033,10 @@ paths:
         - bearerAuth: []
         - basicAuth: []
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: >
             Google disconnected, or already not connected (idempotent no-op).
@@ -877,6 +1116,7 @@ paths:
             Malformed request — an empty or omitted `emails` array, a
             malformed address inside the batch, or a non-zero
             `permissionGroupId`. No invitation row is minted.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -899,6 +1139,7 @@ paths:
             token. No invitation is minted. ConfigCat's swagger lists no `403`
             on `invite-member`; Confeature adds it because the request is sound
             and only the caller lacks the right.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1062,7 +1303,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreatedToken"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1085,6 +1327,7 @@ paths:
             the management token lacks `token:write`, or the request names a
             scope the caller does not hold, where `*` holds every scope and
             `member:*` holds every `member:` scope. Nothing is minted.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1146,6 +1389,8 @@ paths:
       responses:
         "204":
           description: Token revoked.
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
         "401":
           headers:
             WWW-Authenticate:
@@ -1164,6 +1409,7 @@ paths:
             acting in that Organization, or a management token. Any other
             credential is refused, whatever its scopes. `insufficient_scope`:
             the management token lacks `token:write`. Nothing is revoked.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1196,7 +1442,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1211,7 +1458,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1357,7 +1605,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1372,7 +1621,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1406,6 +1656,8 @@ paths:
       responses:
         "204":
           description: Product deleted.
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
         "401":
           headers:
             WWW-Authenticate:
@@ -1419,6 +1671,7 @@ paths:
           description: >
             The token lacks product:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1461,7 +1714,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EnvironmentModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1476,7 +1730,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1611,7 +1866,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EnvironmentModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1626,7 +1882,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1670,7 +1927,8 @@ paths:
         "204":
           description: Environment deleted (cascades to setting_values and sdk_keys).
         "400":
-          description: A change note (reason) is required for this change.
+          description: >
+            A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1688,6 +1946,7 @@ paths:
           description: >
             The token lacks environment:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -1838,6 +2097,7 @@ paths:
             envelope would wipe: nothing is written, and the message names
             the v2 value route
             (`/v2/environments/{environmentId}/settings/{settingId}/value`).
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -1852,7 +2112,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2075,6 +2336,7 @@ paths:
           description: >
             The token lacks setting-value:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2151,6 +2413,7 @@ paths:
           description: >
             The token lacks setting-value:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2265,7 +2528,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SegmentModel"
         "400":
-          description: A field outside ConfigCat's bounds, a list longer than maxComparisonValueListLength or with an item longer than maxComparisonValueListItemLength, or a comparison value its comparator cannot read (a number or a semantic version). The message names the field, never the value.
+          description: >
+            A field outside ConfigCat's bounds, a list longer than maxComparisonValueListLength or with an item longer than maxComparisonValueListItemLength, or a comparison value its comparator cannot read (a number or a semantic version). The message names the field, never the value. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2280,7 +2544,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks segment:write, or it is a management token without config:publish.
+          description: >
+            The token lacks segment:write, or it is a management token without config:publish. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2381,7 +2646,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SegmentModel"
         "400":
-          description: A field outside ConfigCat's bounds, a comparison value its comparator cannot read (the message names the field, never the value), or a segment used in more than 500 (config, environment) pairs. Nothing is written.
+          description: >
+            A field outside ConfigCat's bounds, a comparison value its comparator cannot read (the message names the field, never the value), or a segment used in more than 500 (config, environment) pairs. Nothing is written. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2396,7 +2662,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks segment:write, or it is a management token without config:publish.
+          description: >
+            The token lacks segment:write, or it is a management token without config:publish. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2431,7 +2698,8 @@ paths:
         "204":
           description: The segment was deleted.
         "400":
-          description: Targeting rules still reference the segment (the message names its usage). Nothing is deleted.
+          description: >
+            Targeting rules still reference the segment (the message names its usage). Nothing is deleted. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2446,7 +2714,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks segment:write, or it is a management token without config:publish.
+          description: >
+            The token lacks segment:write, or it is a management token without config:publish. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2544,7 +2813,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TagModel"
         "400":
-          description: A field outside ConfigCat's bounds (the message names the field).
+          description: >
+            A field outside ConfigCat's bounds (the message names the field). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2559,7 +2829,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks tag:write.
+          description: >
+            The token lacks tag:write. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2656,7 +2927,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TagModel"
         "400":
-          description: A field outside ConfigCat's bounds, or an empty name (the message names the field). Nothing is written.
+          description: >
+            A field outside ConfigCat's bounds, or an empty name (the message names the field). Nothing is written. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2671,7 +2943,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks tag:write.
+          description: >
+            The token lacks tag:write. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2697,7 +2970,8 @@ paths:
         "204":
           description: The tag was deleted.
         "400":
-          description: The tag id is not a positive integer.
+          description: >
+            The tag id is not a positive integer. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2712,7 +2986,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks tag:write.
+          description: >
+            The token lacks tag:write. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2820,7 +3095,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConfigModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2835,7 +3111,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -2970,7 +3247,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConfigModel"
         "400":
-          description: Invalid request body.
+          description: >
+            Invalid request body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -2985,7 +3263,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3026,7 +3305,8 @@ paths:
         "204":
           description: Config deleted (cascades to settings and sdk-keys).
         "400":
-          description: A change note (reason) is required for this change.
+          description: >
+            A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3044,6 +3324,7 @@ paths:
           description: >
             The token lacks config:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3110,6 +3391,7 @@ paths:
             a tag cannot be assigned (one fixed body, see
             `CreateSettingRequest.tags`), a field Confeature does not support
             yet is not empty, or a change note is required.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3128,6 +3410,7 @@ paths:
             The token lacks setting:write, or it is a management token
             without config:publish. With initial values, it also needs
             setting-value:write.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3325,6 +3608,7 @@ paths:
           description: >
             Invalid request body, or a tag cannot be assigned (one fixed
             body, see `UpdateSettingRequest.tags`).
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3339,7 +3623,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3394,6 +3679,7 @@ paths:
             A change note (reason) is required for this change, or the setting
             is a prerequisite of other settings (the message names them).
             Nothing is deleted.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3411,6 +3697,7 @@ paths:
           description: >
             The token lacks setting:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3565,6 +3852,7 @@ paths:
             ConfigCat documents no such limit; it answers 400, the only status
             of the ones ConfigCat documents for this operation that fits.
             Nothing is written in either case, not even the prune.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3579,7 +3867,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks the code-reference:write scope.
+          description: >
+            The token lacks the code-reference:write scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3639,6 +3928,7 @@ paths:
           description: >
             `bad_request`: the body is not JSON, misses a required field, or
             breaks a length of `DeleteRepositoryReportsRequest`.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3653,7 +3943,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks the code-reference:write scope.
+          description: >
+            The token lacks the code-reference:write scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -3881,6 +4172,7 @@ paths:
             variations have the same served value; or a
             `predefinedVariationId` is not a variation of this setting; or a
             variation in use would be deleted or have its value changed.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -3895,7 +4187,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: The token lacks the setting:write scope.
+          description: >
+            The token lacks the setting:write scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4023,6 +4316,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SdkKeysModel"
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
         "401":
           headers:
             WWW-Authenticate:
@@ -4033,7 +4328,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4106,7 +4402,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SdkKeysModel"
         "400":
-          description: Invalid path parameter (a non-UUID id, or a slot other than `primary` / `secondary`).
+          description: >
+            Invalid path parameter (a non-UUID id, or a slot other than `primary` / `secondary`). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -4124,6 +4421,7 @@ paths:
           description: >
             The token lacks sdk-key:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4187,7 +4485,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublishResponse"
         "400":
-          description: A change note (reason) is required for this change.
+          description: >
+            A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -4202,7 +4501,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Token lacks the required scope.
+          description: >
+            Token lacks the required scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4412,6 +4712,7 @@ paths:
             Bad request. A path parameter is not a UUID, or the Member is the
             Organization's last admin, whom nobody can remove: an Organization
             always keeps an admin. Nothing is changed.
+            Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -4437,6 +4738,7 @@ paths:
             list this Organization's Members is told they lack the right, not
             that the Member does not exist. A caller outside the Organization
             gets the `404`.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4738,6 +5040,8 @@ paths:
           description: >
             The pending invitation was revoked. No content — a revoked
             invitation ceases to exist; there is no model to return.
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
         "401":
           headers:
             WWW-Authenticate:
@@ -4756,6 +5060,7 @@ paths:
             is changed. ConfigCat's swagger lists no `403` on `delete-invitation`;
             Confeature adds it because only the caller lacks the right. A caller
             outside that Organization gets the `404`.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -4894,6 +5199,10 @@ paths:
           schema:
             type: string
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "202":
           description: Signal accepted (whether or not it correlated).
         "404":
@@ -4930,7 +5239,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/GuardianIntegrationCreated"
         "400":
-          description: The outbound webhook URL failed the SSRF guard.
+          description: >
+            The outbound webhook URL failed the SSRF guard. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -4945,7 +5255,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          description: Missing guardian:write scope.
+          description: >
+            Missing guardian:write scope. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -5020,6 +5331,8 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateGuardianIntegrationRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "401":
           description: Missing or invalid credential.
           headers:
@@ -5036,7 +5349,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/GuardianIntegration"
         "400":
-          description: The outbound webhook URL failed the SSRF guard.
+          description: >
+            The outbound webhook URL failed the SSRF guard. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5065,6 +5379,10 @@ paths:
             type: string
             format: uuid
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "401":
           description: Missing or invalid credential.
           headers:
@@ -5101,6 +5419,10 @@ paths:
             type: string
             format: uuid
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "401":
           description: Missing or invalid credential.
           headers:
@@ -5186,6 +5508,10 @@ paths:
             type: integer
             format: int64
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "401":
           description: Missing or invalid credential.
           headers:
@@ -5226,6 +5552,10 @@ paths:
             type: integer
             format: int64
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "401":
           description: Missing or invalid credential.
           headers:
@@ -5303,7 +5633,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/GuardianRollbackResult"
         "400":
-          description: A change note (reason) is required for this change.
+          description: >
+            A change note (reason) is required for this change. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5312,6 +5643,7 @@ paths:
           description: >
             The token lacks guardian:write, or it is a management token
             without config:publish.
+            Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one.
           content:
             application/json:
               schema:
@@ -5362,6 +5694,10 @@ paths:
             schema:
               $ref: "#/components/schemas/CliDeviceAuthorizeRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Device + user codes and the verification URIs (RFC 8628).
           content:
@@ -5388,6 +5724,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CliDeviceTokenRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Approved — the minted token (returned ONCE) + identity.
           content:
@@ -5395,7 +5733,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CliDeviceTokenSuccess"
         "400":
-          description: RFC 8628 poll state (authorization_pending / slow_down / expired_token / access_denied).
+          description: >
+            RFC 8628 poll state (authorization_pending / slow_down / expired_token / access_denied). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5420,6 +5759,10 @@ paths:
             schema:
               $ref: "#/components/schemas/CliDeviceDecisionRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Approved — the waiting poll will mint a token.
           content:
@@ -5452,6 +5795,10 @@ paths:
             schema:
               $ref: "#/components/schemas/CliDeviceDecisionRequest"
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Denied — the waiting poll will end cleanly.
           content:
@@ -5479,6 +5826,10 @@ paths:
         - bearerAuth: []
         - basicAuth: []
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Token revoked (idempotent).
           content:
@@ -5539,6 +5890,10 @@ paths:
           schema:
             type: string
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "204":
           description: Token revoked (idempotent).
         "401":
@@ -5576,6 +5931,8 @@ paths:
             schema:
               $ref: "#/components/schemas/McpAuthorizeApproveRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Approved — the callback URL the MCP server completes the grant with.
           content:
@@ -5583,7 +5940,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/McpAuthorizeRedirectResponse"
         "400":
-          description: Unknown / expired `state` or client mismatch.
+          description: >
+            Unknown / expired `state` or client mismatch. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5613,6 +5971,8 @@ paths:
             schema:
               $ref: "#/components/schemas/McpAuthorizeDenyRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "200":
           description: Denied — the callback URL carrying error=access_denied.
           content:
@@ -5620,7 +5980,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/McpAuthorizeRedirectResponse"
         "400":
-          description: Unknown / expired `state`.
+          description: >
+            Unknown / expired `state`. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5680,6 +6041,10 @@ paths:
           schema:
             type: string
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "204":
           description: Credential revoked (idempotent).
         "401":
@@ -5743,6 +6108,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CreatePublicApiCredentialRequest"
       responses:
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "201":
           description: Created. The only response that carries the password.
           headers:
@@ -5755,7 +6122,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublicApiCredentialCreated"
         "400":
-          description: The label is missing, empty or longer than 100 characters.
+          description: >
+            The label is missing, empty or longer than 100 characters. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
           content:
             application/json:
               schema:
@@ -5795,6 +6163,10 @@ paths:
           schema:
             type: string
       responses:
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
         "204":
           description: Credential revoked (idempotent).
         "401":
@@ -5846,7 +6218,7 @@ components:
       name: __Host-cfsession
       description: >
         Opaque session id (UUID v4). Issued by POST /v1/auth/login.
-        The cookie is HttpOnly, Secure, SameSite=Strict, Path=/,
+        The cookie is HttpOnly, Secure, SameSite=Lax, Path=/,
         Max-Age=604800. The api validates by point-reading the
         `sessions` table in D1; sign-out (POST /v1/auth/logout)
         deletes the session row globally.
@@ -5901,6 +6273,57 @@ components:
         The `lastVersionId` the client last read. When it no longer matches
         the stored value, the write is refused with 409 and nothing changes.
   responses:
+    CrossOriginWrite:
+      description: >
+        `forbidden` (cross-origin request refused): the request carries a
+        Confeature cookie and comes from neither the dashboard's own origin
+        (`Sec-Fetch-Site: same-origin`) nor an allowlisted Origin. A request with
+        an `Authorization` header, or with no Confeature cookie, is never refused
+        this way.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotJsonWrite:
+      description: >
+        `bad_request`: the request carries a Confeature cookie and its body is not
+        JSON.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyPasswordAttempts:
+      description: >
+        `too_many_attempts` — too many failed passwords, refused before
+        verification, right password included. Each attempt is spent before the
+        password is checked and given back when it was right. From one IP (a
+        burst of 20, then one per 6 s) and on one address (a burst of 10, then
+        one per minute), whatever the account's state, so a refusal reveals
+        neither who has an account nor who signed in lately. A browser that
+        signed in to the address with its password holds a `__Host-cfdevice`
+        cookie (set on that 200, 30 days) and spends its own budget instead (a
+        burst of 10, then one per minute). Signing in with Google and the
+        password reset do not read this budget, and a confirmed reset clears the
+        address's, browsers included. Wait `Retry-After` seconds. The body names
+        no key.
+      headers:
+        Retry-After:
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PasswordCheckUnavailable:
+      description: >
+        `temporarily_unavailable` — the failed-password budget cannot answer,
+        so the attempt is refused rather than left unbounded. Try again shortly.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     TooManyAttempts:
       description: >
         `too_many_attempts` — too many FAILED HTTP Basic attempts. From one IP
@@ -5979,6 +6402,7 @@ components:
         formula larger than 900000 bytes, a missing required reason,
         environment and setting in different products, or a config whose
         evaluationVersion is not v2.
+        Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
       content:
         application/json:
           schema:
@@ -6069,10 +6493,15 @@ components:
             - "ambiguous_credential"
             - "bootstrap_consumed"
             - "bootstrap_unauthorized"
+            - "bad_request"
+        message:
+          type: string
       description: >
         Auth-surface error envelope. On /v1/auth/login an unknown email and
         a wrong password return the same error, so the response never
-        reveals whether an account exists.
+        reveals whether an account exists. `bad_request`, with a `message`,
+        is the same-origin guard's: the request carried a Confeature cookie
+        and a body that is not JSON (#1166).
     PasswordResetAck:
       type: object
       required: [message]
@@ -6310,13 +6739,14 @@ components:
       properties:
         error:
           type: string
-          enum: ["signup_unavailable"]
+          enum: ["signup_unavailable", "bad_request"]
         message:
           type: string
           description: One constant, user-facing message for every failure.
       description: >
         The one body every POST /v1/auth/signup failure answers, whatever
-        its cause.
+        its cause, but one: `bad_request` is the same-origin guard's, when the
+        request carried a Confeature cookie and a body that is not JSON (#1166).
     SsoStartRequest:
       type: object
       properties:
@@ -6374,8 +6804,12 @@ components:
           enum:
             - "invalid_sso_state"
             - "sso_provider_unavailable"
+            - "bad_request"
+            - "forbidden"
           description: >
-            Failure-class signal. `invalid_sso_state` accompanies a 400
+            Failure-class signal. `bad_request` (a 400) and `forbidden` (a 403)
+            are the same-origin guard's, when the request carried a Confeature
+            cookie with a body that is not JSON, or from another origin (#1166). `invalid_sso_state` accompanies a 400
             (state missing / consumed / malformed / tampered, userinfo
             missing email, malformed body — all five branches share
             this code). `sso_provider_unavailable`
@@ -6477,8 +6911,10 @@ components:
           description: >
             Single-use link-challenge id (~10 min TTL, stored in KV). The
             back-office prompts for the existing password and POSTs it
-            with this id to /v1/auth/link/google. Carries no session
-            authority on its own and never contains a token or password.
+            with this id to /v1/auth/link/google, or POSTs the id alone to
+            /v1/auth/link/google/email to have a link mailed. Carries no
+            session authority on its own and never contains a token or
+            password.
         email:
           type: string
           format: email
@@ -6573,7 +7009,7 @@ components:
           description: The single-use link-challenge id from the callback's link_required branch.
         password:
           type: string
-          minLength: 12
+          minLength: 1
           maxLength: 256
           writeOnly: true
           description: >
@@ -6593,11 +7029,65 @@ components:
           description: >
             Failure-class signal. `invalid_credentials` (401) — wrong
             password; `invalid_link_challenge` (410) — challenge missing /
-            expired / already used; `identity_conflict` (409) — the Google
-            `sub` is already linked to another account.
+            expired / already used / out of attempts; `identity_conflict`
+            (409) — the account holds another identity, or the Google `sub` is
+            already linked to another account.
         message:
           type: string
       description: Uniform error envelope for POST /v1/auth/link/google failures.
+    LinkGoogleEmailRequest:
+      type: object
+      required: [challenge_id]
+      properties:
+        challenge_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The challenge from the callback's `link_required` branch.
+      description: Request body for POST /v1/auth/link/google/email.
+    LinkGoogleEmailAck:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+      description: 200 response of POST /v1/auth/link/google/email.
+    LinkGoogleEmailError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum:
+            - "invalid_link_challenge"
+            - "too_many_attempts"
+            - "email_unavailable"
+        message:
+          type: string
+      description: Error envelope for POST /v1/auth/link/google/email.
+    LinkGoogleEmailPending:
+      type: object
+      required: [status, email]
+      properties:
+        status:
+          type: string
+          enum: ["google_required"]
+        email:
+          type: string
+          format: email
+          description: The account the link is for, to show before the Google sign-in.
+      description: 202 response of POST /v1/auth/link/google/email/confirm.
+    LinkGoogleEmailConfirmRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 16
+          maxLength: 128
+          writeOnly: true
+          description: The single-use token from the emailed link. Never logged.
+      description: Request body for POST /v1/auth/link/google/email/confirm.
     SetPasswordRequest:
       type: object
       required: [password]
@@ -9764,6 +10254,7 @@ components:
       enum:
         - session_login
         - session_logout
+        - oauth_sign_in
         - oauth_linked
         - oauth_unlinked
         - cli_device_approved
@@ -9774,6 +10265,8 @@ components:
         - management_token_revoked
         - public_api_credential_created
         - public_api_credential_revoked
+        - invite_accepted
+        - password_reset
     AuditLogType:
       type: string
       description: >
@@ -10158,8 +10651,13 @@ components:
             - "slow_down"
             - "expired_token"
             - "access_denied"
+            - "bad_request"
+        message:
+          type: string
       description: >
-        RFC 8628 poll error envelope. NEVER carries a token — an unknown /
+        RFC 8628 poll error envelope. `bad_request`, with a `message`, is the
+        same-origin guard's, when the poll carried a Confeature cookie and a
+        body that is not JSON (#1166). NEVER carries a token — an unknown /
         expired / denied / pending code yields the appropriate error here, never
         account data (auth separation).
     CliDeviceDecisionRequest:
