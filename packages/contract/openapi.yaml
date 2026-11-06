@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.7.0
+  version: 0.7.1
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -1080,7 +1080,7 @@ paths:
         Confeature-original divergence from ConfigCat's `204 No Content`:
         Confeature has no server-side email delivery, so the operator
         receives each invite token to relay (the back-office builds
-        `<origin>/signup?invite=<token>`). The hashed-at-rest, 7-day,
+        `<origin>/signup#invite=<token>`). The hashed-at-rest, 7-day,
         single-use token model and the best-effort per-email
         duplicate-email guard are unchanged from the single-email path.
         Inviting needs the `member:write` scope: a user's own credential
@@ -6705,7 +6705,7 @@ components:
             chars>` (≈ 288 bits of entropy). Returned ONCE; never
             persisted server-side (only its SHA-256 digest is stored).
             The back-office UI constructs the full link
-            (`<origin>/signup?invite=<token>`).
+            (`<origin>/signup#invite=<token>`).
         expires_at:
           type: integer
           description: Unix epoch seconds at which this invitation expires (created_at + 7 days).
@@ -6721,7 +6721,7 @@ components:
         invite_token:
           type: string
           pattern: "^confeature_invite_[A-Za-z0-9_-]{48}$"
-          description: The plaintext token from the invite link's `?invite=` parameter.
+          description: The plaintext token from the invite link's `#invite=` fragment.
         password:
           type: string
           minLength: 12

@@ -395,7 +395,7 @@ export interface paths {
     put?: never;
     /**
      * Invite one or more members
-     * @description Invite one or more members in a single call — the request shape aligns to ConfigCat's `InviteMembersRequest` (`emails[]` + `permissionGroupId`). `permissionGroupId` is a v1 placeholder: Confeature has no permission-groups feature yet, so the only accepted value is `0` (the same rule as `InvitationModel.permissionGroupId`) — a non-zero value is a 400. The `201` array response — one `{ email, invite_token, expires_at }` entry per submitted email — is a deliberate, documented Confeature-original divergence from ConfigCat's `204 No Content`: Confeature has no server-side email delivery, so the operator receives each invite token to relay (the back-office builds `<origin>/signup?invite=<token>`). The hashed-at-rest, 7-day, single-use token model and the best-effort per-email duplicate-email guard are unchanged from the single-email path. Inviting needs the `member:write` scope: a user's own credential carries every scope, so only a management token minted without it is refused. Any member of an Organization may invite into it, whatever their role, except in the founder Organization, the one that runs the Confeature service itself, where only a platform operator may (see the `403`).
+     * @description Invite one or more members in a single call — the request shape aligns to ConfigCat's `InviteMembersRequest` (`emails[]` + `permissionGroupId`). `permissionGroupId` is a v1 placeholder: Confeature has no permission-groups feature yet, so the only accepted value is `0` (the same rule as `InvitationModel.permissionGroupId`) — a non-zero value is a 400. The `201` array response — one `{ email, invite_token, expires_at }` entry per submitted email — is a deliberate, documented Confeature-original divergence from ConfigCat's `204 No Content`: Confeature has no server-side email delivery, so the operator receives each invite token to relay (the back-office builds `<origin>/signup#invite=<token>`). The hashed-at-rest, 7-day, single-use token model and the best-effort per-email duplicate-email guard are unchanged from the single-email path. Inviting needs the `member:write` scope: a user's own credential carries every scope, so only a management token minted without it is refused. Any member of an Organization may invite into it, whatever their role, except in the founder Organization, the one that runs the Confeature service itself, where only a platform operator may (see the `403`).
      */
     post: operations["createInvite"];
     delete?: never;
@@ -1783,14 +1783,14 @@ export interface components {
        * @description The invitee address this entry was minted for (lower-cased).
        */
       email: string;
-      /** @description Plaintext invite token, shape `confeature_invite_<48 url-safe chars>` (≈ 288 bits of entropy). Returned ONCE; never persisted server-side (only its SHA-256 digest is stored). The back-office UI constructs the full link (`<origin>/signup?invite=<token>`). */
+      /** @description Plaintext invite token, shape `confeature_invite_<48 url-safe chars>` (≈ 288 bits of entropy). Returned ONCE; never persisted server-side (only its SHA-256 digest is stored). The back-office UI constructs the full link (`<origin>/signup#invite=<token>`). */
       invite_token: string;
       /** @description Unix epoch seconds at which this invitation expires (created_at + 7 days). */
       expires_at: number;
     };
     /** @description Request body for POST /v1/auth/accept-invite. The token is observed on the wire exactly twice in its lifetime (here and in the matching 201 from /v1/users/invite); the password is observed once (here) and is hashed before persistence. */
     AcceptInviteRequest: {
-      /** @description The plaintext token from the invite link's `?invite=` parameter. */
+      /** @description The plaintext token from the invite link's `#invite=` fragment. */
       invite_token: string;
       /** @description New user's password. Same minimum-strength rule as /v1/auth/bootstrap and /v1/auth/login. Hashed with argon2id server-side; never logged in plaintext. */
       password: string;
