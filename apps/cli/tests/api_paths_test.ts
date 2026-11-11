@@ -420,6 +420,8 @@ interface Literal {
   before: string;
   after: string;
   line: number;
+  /** Its offset in the source: where its opening quote is. */
+  at: number;
 }
 
 /**
@@ -449,6 +451,7 @@ function lex(source: string): { literals: Literal[]; code: string } {
       before: source.slice(Math.max(0, at - 40), at),
       after: source.slice(end, end + 40),
       line: lineAt(at),
+      at,
     });
   };
 
@@ -609,31 +612,62 @@ Deno.test("#1188: no command builds an api path by hand", () => {
   assertEquals(findings, []);
 });
 
+/** The code a path literal must follow to be a client call's path, method in group 1. */
+const CALL_HEAD = /client\.(get|put|post|patch|delete)(?:<[^>()]*>)?\(\s*$/;
+const REQUEST_HEAD = /client\.request(?:<[^>()]*>)?\(\s*"(get|put|post|patch|delete)",\s*$/;
+
 /**
- * The `method path` of every client call in a command's source. A call is
- * `client.<method>(` or `client.request("<method>",` followed by a path
- * literal; every path literal in the file must be one of them, so a call
- * spelled another way fails the count instead of escaping the coverage.
+ * The `method path` of every client call in a command's source, and the
+ * contract path literals that are not one. Each literal is paired with its
+ * call by offset, over the lexer's literals, so a comment cannot stand in for
+ * a call (#1188 review): a literal must sit right after `client.<method>(` or
+ * `client.request("<method>",`. A call whose method is a variable, or spelled
+ * any other way, leaves its literal unpaired, and an unpaired literal fails
+ * the coverage test below.
  */
-function commandCalls(source: string, declared: Set<string>): string[] {
-  const call =
-    /client\.(get|put|post|patch|delete|request)(?:<[^>()]*>)?\(\s*(?:"(get|put|post|patch|delete)",\s*)?"(\/[^"]*)"/g;
-  const calls = [...source.matchAll(call)].map((m) =>
-    m[1] === "request" ? `${m[2]} ${m[3]}` : `${m[1]} ${m[3]}`
-  );
-  const literals = lex(source).literals.filter((l) => l.kind === "string" && declared.has(l.text));
-  assertEquals(calls.length, literals.length, "every contract path literal is a client call");
-  return calls;
+function commandCalls(
+  source: string,
+  declared: Set<string>,
+): { calls: string[]; unpaired: string[] } {
+  const calls: string[] = [];
+  const unpaired: string[] = [];
+  for (const lit of lex(source).literals) {
+    if (lit.kind !== "string" || !declared.has(lit.text)) continue;
+    const head = source.slice(Math.max(0, lit.at - 200), lit.at);
+    const method = CALL_HEAD.exec(head)?.[1] ?? REQUEST_HEAD.exec(head)?.[1];
+    if (method === undefined) unpaired.push(`line ${lit.line}: "${lit.text}"`);
+    else calls.push(`${method} ${lit.text}`);
+  }
+  return { calls, unpaired };
 }
 
 Deno.test("#1188: every method and path a command calls has a wire row", async () => {
   const declared = contractPaths(Deno.readTextFileSync(CONTRACT));
   ROW_CALLS.clear();
   for (const [, , call] of CALLS) await urlOf(call);
-  const called = new Set(commandFiles().flatMap(([, text]) => commandCalls(text, declared)));
+  const scans = commandFiles().map(([name, text]) => [name, commandCalls(text, declared)] as const);
+  const unpaired = scans.flatMap(([name, scan]) => scan.unpaired.map((u) => `${name}: ${u}`));
+  assertEquals(unpaired, [], "contract path literals that are not a client call");
+  const called = new Set(scans.flatMap(([, scan]) => scan.calls));
   // Not blind: the commands make well over twenty distinct calls.
   assert(called.size >= 20, `the commands make ${called.size} distinct calls`);
   assertEquals([...called].filter((c) => !ROW_CALLS.has(c)), [], "calls with no wire row");
+});
+
+Deno.test("#1188: a commented call cannot stand in for a call the pairing cannot read", () => {
+  const declared = contractPaths(Deno.readTextFileSync(CONTRACT));
+  const source = [
+    "/**",
+    ' * @example client.delete("/v1/configs/{configId}", { path: { configId } })',
+    " */",
+    'await client.request(method, "/v1/configs/{configId}", { path: { configId } });',
+    'await client.get<T>("/v1/me");',
+    'await client.request<R>("post", "/v1/cli/device/token", { body });',
+  ].join("\n");
+  assertEquals(commandCalls(source, declared), {
+    calls: ["get /v1/me", "post /v1/cli/device/token"],
+    unpaired: ['line 4: "/v1/configs/{configId}"'],
+  });
 });
 
 Deno.test("#1188: the scan refuses each way of building a path by hand", () => {
