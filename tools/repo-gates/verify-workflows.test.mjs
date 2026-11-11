@@ -1363,6 +1363,7 @@ jobs:
     steps:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
+      - run: deno task --cwd apps/cli check
       - run: deno task --cwd apps/cli test
 `;
   const gate = (text) => publicGateFindings({ "verify.yml": parseYaml(text) }).map((f) => f.why);
@@ -1419,7 +1420,17 @@ jobs:
     [
       "the CLI's tests removed",
       VERIFY.replace("      - run: deno task --cwd apps/cli test\n", ""),
-      /no step that runs `deno task/,
+      /no step that runs `deno task --cwd apps\/cli test`/,
+    ],
+    [
+      "the CLI's type check removed (#1188)",
+      VERIFY.replace("      - run: deno task --cwd apps/cli check\n", ""),
+      /no step that runs `deno task --cwd apps\/cli check`/,
+    ],
+    [
+      "the CLI's type check stubbed (#1188)",
+      VERIFY.replace("deno task --cwd apps/cli check", "echo deno task --cwd apps/cli check"),
+      /no step that runs `deno task --cwd apps\/cli check`/,
     ],
     [
       "paths-ignore",

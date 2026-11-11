@@ -85,10 +85,11 @@
  *      (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`,
  *      never ORed away): a dry run publishes nothing.
  *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs PUBLIC_GATE_STEPS
- *      (`pnpm run verify` and the CLI's deno suite) on every push to main and
- *      every pull request, unfiltered (gateTriggerProblems, shared with rule
- *      19 over GATE_WORKFLOWS), under plain bash, with no step env,
- *      working-directory or continue-on-error, in jobs that need nothing.
+ *      (`pnpm run verify`, the CLI's type check, #1188, and its deno suite)
+ *      on every push to main and every pull request, unfiltered
+ *      (gateTriggerProblems, shared with rule 19 over GATE_WORKFLOWS), under
+ *      plain bash, with no step env, working-directory or continue-on-error,
+ *      in jobs that need nothing.
  *      Below the workflow, a pack or credentialed job's or step's env: never
  *      redefines a workflow env name, and its *_VERSION values are exact (or
  *      the resolver's unit version).
@@ -2600,7 +2601,11 @@ export function gateTriggerProblems(file, doc) {
 export const PUBLIC_GATE_ENV = new Set(["NODE_VERSION", "DENO_VERSION"]);
 
 /** The steps the public gate must run, each exactly, in a job and a step nothing can skip. */
-export const PUBLIC_GATE_STEPS = ["pnpm run verify", "deno task --cwd apps/cli test"];
+export const PUBLIC_GATE_STEPS = [
+  "pnpm run verify",
+  "deno task --cwd apps/cli check",
+  "deno task --cwd apps/cli test",
+];
 
 /**
  * Rule 13, over the workflows: verify.yml runs PUBLIC_GATE_STEPS on every push

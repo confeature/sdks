@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+import type { paths } from "@confeature/contract/api";
 import { ExitCode } from "../cli/exit.ts";
 import { CliError } from "../cli/errors.ts";
 
@@ -11,6 +12,22 @@ import { CliError } from "../cli/errors.ts";
  * and surfaces transport / non-OK responses as a {@link CliError} (so the
  * router's dispatch boundary turns them into a clean stderr message + exit code
  * instead of a raw stack trace).
+ *
+ * THE CLI'S API PATHS LIVE HERE (#1188). Every call names a path template from
+ * the generated contract's `paths` (`"/v1/configs/{configId}"`), its parameters
+ * as an object, and a method that path declares; the types refuse any other
+ * path, a missing or extra parameter, and a method the path does not have. So
+ * a path renamed or removed in the contract fails the CLI's type check instead
+ * of 404ing at run time. The commands never build a path by hand: a test
+ * (`tests/api_paths_test.ts`) refuses a template-string or concatenated path in
+ * `src/cli/commands/`.
+ *
+ * Why a small typed layer over `paths` and not `openapi-fetch`: the CLI is a
+ * compiled Deno binary with no npm dependency, and the layer is a few types
+ * plus one encoder. It also keeps each call site's response type (`T`) its
+ * own, which `openapi-fetch` would infer from the contract: some commands read
+ * an answer wider than the contract on purpose, to work on both sides of an
+ * api release (`flag ls`, the per-key setting reads).
  *
  * SECURITY: the client NEVER logs a token, device_code, or user_code — no
  * request/response body or header is ever written to a sink here. Secrets flow
@@ -72,6 +89,91 @@ export interface ApiResponse<T> {
   headers: Headers;
 }
 
+/**
+ * The HTTP methods the client speaks, spelled as the generated `paths` spells
+ * them: a path declares a method by carrying an operation under its key.
+ */
+export type HttpMethod = "get" | "put" | "post" | "patch" | "delete";
+
+/** The operation `P` declares for `M`, or `never` when `P` does not declare `M`. */
+type OperationOf<P extends keyof paths, M extends HttpMethod> = paths[P] extends
+  { [K in M]: infer Op } ? Op : never;
+
+/** An operation's `parameters` block. */
+type ParametersOf<Op> = Op extends { parameters: infer Params } ? Params : never;
+
+/**
+ * Whether the client can call the operation at all: it sends no header or
+ * cookie parameter, so an operation that requires one is not callable here.
+ */
+type Callable<Op> = ParametersOf<Op> extends { header: object } | { cookie: object } ? false
+  : true;
+
+/** Every contract path that declares `M` with an operation this client can send. */
+export type ApiPath<M extends HttpMethod> = {
+  [P in keyof paths]: [OperationOf<P, M>] extends [never] ? never
+    : Callable<OperationOf<P, M>> extends true ? P
+    : never;
+}[keyof paths];
+
+/** The `{name}` placeholders of a path template, as a union of names. */
+type Placeholders<P extends string> = P extends `${string}{${infer Name}}${infer Rest}`
+  ? Name | Placeholders<Rest>
+  : never;
+
+/**
+ * The path parameters: required, and typed by the operation, whenever the
+ * template has a placeholder; forbidden when it has none.
+ */
+type PathOption<P extends string, Op> = [Placeholders<P>] extends [never] ? { path?: never }
+  : {
+    path: ParametersOf<Op> extends { path: infer Declared } ? Declared
+      : Record<Placeholders<P>, string>;
+  };
+
+/** The query parameters the operation declares, or none. */
+type QueryOption<Op> = ParametersOf<Op> extends { query: infer Query } ? { query: Query }
+  : ParametersOf<Op> extends { query?: infer Query }
+    ? [NonNullable<Query>] extends [never] ? { query?: never } : { query?: NonNullable<Query> }
+  : { query?: never };
+
+/**
+ * The JSON body the operation declares: required, optional, or forbidden. An
+ * operation whose body is not JSON is not callable through this client.
+ */
+type BodyOption<Op> = Op extends { requestBody?: never } ? { body?: never }
+  : Op extends { requestBody: { content: { "application/json": infer Body } } } ? { body: Body }
+  : Op extends { requestBody?: { content: { "application/json": infer Body } } } ? { body?: Body }
+  : never;
+
+/** What one call of `M` on `P` takes besides the path itself. */
+export type CallOptions<M extends HttpMethod, P extends ApiPath<M>> =
+  & PathOption<P, OperationOf<P, M>>
+  & QueryOption<OperationOf<P, M>>
+  & BodyOption<OperationOf<P, M>>;
+
+/** One call's arguments: the options may be left out only when nothing in them is required. */
+type CallOf<M extends HttpMethod, P extends ApiPath<M>> = Record<never, never> extends
+  CallOptions<M, P> ? [path: P, options?: CallOptions<M, P>]
+  : [path: P, options: CallOptions<M, P>];
+
+/**
+ * Every valid `(path, options)` argument list for `M`: one tuple per path that
+ * declares `M`, so the path literal picks the tuple and its options are checked
+ * against that path's operation.
+ */
+export type ApiCall<M extends HttpMethod> = { [P in ApiPath<M>]: CallOf<M, P> }[ApiPath<M>];
+
+/** `[method, path, options]` for any method: the argument list of {@link ApiClient.request}. */
+export type AnyApiCall = { [M in HttpMethod]: [method: M, ...ApiCall<M>] }[HttpMethod];
+
+/** The shape every typed call reduces to at run time. */
+interface RuntimeOptions {
+  path?: Record<string, string | number>;
+  query?: Record<string, unknown>;
+  body?: unknown;
+}
+
 export class ApiClient {
   readonly #baseUrl: string;
   readonly #token: string | null;
@@ -85,41 +187,36 @@ export class ApiClient {
   }
 
   /**
-   * Typed `GET` for the contract's list reads (spec 181 / #655). `T` is the
-   * operation's 200 body type, threaded from the generated `operations` types at
-   * the call site so the read shape is build-verified against the contract
-   * (R11). A non-OK status throws {@link ApiError} (401 → `AUTH`), exactly like
-   * {@link json}; this is just the GET-only, intent-revealing alias the read
-   * commands call.
+   * Typed `GET` (spec 181 / #655). The path is a template from the contract's
+   * `paths`, with its parameters (see {@link expandPath}). `T` is the
+   * operation's 200 body type, threaded from the generated `operations` types
+   * at the call site so the read shape is build-verified against the contract
+   * (R11). A non-OK status throws {@link ApiError} (401 → `AUTH`).
    */
-  get<T>(path: string): Promise<T> {
-    return this.json<T>(path, { method: "GET" });
+  get<T>(...call: ApiCall<"get">): Promise<T> {
+    return this.#json<T>("get", call);
   }
 
   /**
    * Typed `PUT` for the contract's value writes (spec 182 / #656 — the
-   * `flag value update` toggle). `TRes` is the operation's 200 body type and
-   * `body` is the operation's request body, both threaded from the generated
-   * `operations` types at the call site so the write shape is build-verified
-   * against the contract (R8). A non-OK status throws {@link ApiError}
-   * (401 → `AUTH`), exactly like {@link json}.
+   * `flag value update` toggle). The body is the operation's request body,
+   * checked against the contract by the path. A non-OK status throws
+   * {@link ApiError} (401 → `AUTH`).
    *
    * SECURITY: the body is serialised straight into the request — it is NEVER
    * written to a log sink (the value/reason flow only through the wire).
    */
-  put<TRes>(path: string, body: unknown): Promise<TRes> {
-    return this.json<TRes>(path, { method: "PUT", body: JSON.stringify(body) });
+  put<TRes>(...call: ApiCall<"put">): Promise<TRes> {
+    return this.#json<TRes>("put", call);
   }
 
   /**
    * Typed `POST` for the contract's writes (the creates, `member invite`,
-   * `sdk-key rotate`). Same typing + redaction contract as {@link put}; a
-   * `body` of `undefined` issues a bodiless POST.
+   * `sdk-key rotate`, the device flow). Same typing + redaction contract as
+   * {@link put}; an operation that declares no body issues a bodiless POST.
    */
-  post<TRes>(path: string, body?: unknown): Promise<TRes> {
-    const init: RequestInit = { method: "POST" };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    return this.json<TRes>(path, init);
+  post<TRes>(...call: ApiCall<"post">): Promise<TRes> {
+    return this.#json<TRes>("post", call);
   }
 
   /**
@@ -127,8 +224,8 @@ export class ApiClient {
    * `flag update` metadata patch). Same typing + redaction contract as
    * {@link put}; a non-OK status throws {@link ApiError} (401 → `AUTH`).
    */
-  patch<TRes>(path: string, body: unknown): Promise<TRes> {
-    return this.json<TRes>(path, { method: "PATCH", body: JSON.stringify(body) });
+  patch<TRes>(...call: ApiCall<"patch">): Promise<TRes> {
+    return this.#json<TRes>("patch", call);
   }
 
   /**
@@ -137,18 +234,28 @@ export class ApiClient {
    * threads the operation's response type (often `unknown`) since there is
    * nothing to read. A non-OK status throws {@link ApiError} (401 → `AUTH`).
    */
-  delete<TRes>(path: string): Promise<TRes> {
-    return this.json<TRes>(path, { method: "DELETE" });
+  delete<TRes>(...call: ApiCall<"delete">): Promise<TRes> {
+    return this.#json<TRes>("delete", call);
   }
 
   /**
-   * Issue a request and return the parsed body, throwing {@link ApiError} on a
-   * non-OK status. Use this for the simple "succeed or fail" calls (`/v1/me`,
-   * logout). For endpoints whose error bodies are meaningful (the device-token
-   * poll), use {@link request} and branch on the status yourself.
+   * Issue a request and return the status + parsed body WITHOUT throwing on a
+   * non-OK status — the caller decides (the device-token poll, whose error
+   * bodies are meaningful). The method comes first and is checked against
+   * what the path declares. A transport failure still throws
+   * {@link NetworkError}.
    */
-  async json<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await this.request<T>(path, init);
+  request<T>(...call: AnyApiCall): Promise<ApiResponse<T>> {
+    const [method, path, options] = call;
+    return this.#send<T>(method, path, options);
+  }
+
+  /** {@link request}, throwing {@link ApiError} on a non-OK status. */
+  async #json<T>(
+    method: HttpMethod,
+    [path, options]: [string, RuntimeOptions?],
+  ): Promise<T> {
+    const res = await this.#send<T>(method, path, options);
     if (!res.ok) {
       const message = errorMessage(res.status, res.body);
       throw new ApiError(res.status, message, res.body, res.headers);
@@ -156,16 +263,19 @@ export class ApiClient {
     return res.body;
   }
 
-  /**
-   * Issue a request and return the status + parsed body WITHOUT throwing on a
-   * non-OK status — the caller decides. A transport failure still throws
-   * {@link NetworkError}.
-   */
-  async request<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
-    const url = `${this.#baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-    const headers = new Headers(init.headers);
+  async #send<T>(
+    method: HttpMethod,
+    template: string,
+    options: RuntimeOptions = {},
+  ): Promise<ApiResponse<T>> {
+    const url = `${this.#baseUrl}${expandPath(template, options.path)}${
+      queryString(options.query)
+    }`;
+    const init: RequestInit = { method: method.toUpperCase() };
+    if (options.body !== undefined) init.body = JSON.stringify(options.body);
+    const headers = new Headers();
     headers.set("Accept", "application/json");
-    if (init.body !== undefined && !headers.has("Content-Type")) {
+    if (init.body !== undefined) {
       headers.set("Content-Type", "application/json");
     }
     if (this.#token) {
@@ -183,6 +293,53 @@ export class ApiClient {
     const body = (await parseJsonBody(res)) as T;
     return { status: res.status, ok: res.ok, body, headers: res.headers };
   }
+}
+
+/**
+ * Fill a contract path template's `{name}` placeholders, each value encoded
+ * with `encodeURIComponent` — exactly what the commands did by hand before the
+ * paths were typed (#1188), so the wire does not change. A placeholder with no
+ * value, or a value with no placeholder, is a programming error and throws:
+ * the types make both impossible, and a call that slipped past them must not
+ * reach the network with a half-built path. One pass, so a value is never
+ * re-read as a template.
+ */
+export function expandPath(
+  template: string,
+  params: Record<string, string | number> = {},
+): string {
+  const used = new Set<string>();
+  const path = template.replace(/\{([^{}]+)\}/g, (_, name: string) => {
+    if (!Object.hasOwn(params, name)) {
+      throw new TypeError(`api path ${template}: no value for {${name}}`);
+    }
+    used.add(name);
+    return encodeURIComponent(String(params[name]));
+  });
+  for (const name of Object.keys(params)) {
+    if (!used.has(name)) throw new TypeError(`api path ${template}: no {${name}} to fill`);
+  }
+  return path;
+}
+
+/**
+ * The query string of a call: `?name=value` pairs in the order given, each side
+ * encoded with `encodeURIComponent` (a space is `%20`, as the commands sent it,
+ * never `URLSearchParams`' `+`). An `undefined` value is left out, so an
+ * optional parameter the caller did not set sends nothing. Only scalars are
+ * sent: the contract's array or object parameters have no single spelling
+ * here, so one throws rather than reaching the wire as `[object Object]`.
+ */
+export function queryString(query: Record<string, unknown> = {}): string {
+  const pairs: string[] = [];
+  for (const [name, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      throw new TypeError(`api query ${name}: only a string, number or boolean is sent`);
+    }
+    pairs.push(`${encodeURIComponent(name)}=${encodeURIComponent(String(value))}`);
+  }
+  return pairs.length === 0 ? "" : `?${pairs.join("&")}`;
 }
 
 /** Parse a response body as JSON, tolerating an empty / non-JSON body (→ null). */

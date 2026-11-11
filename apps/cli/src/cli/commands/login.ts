@@ -83,9 +83,8 @@ export async function runLogin(ctx: RunContext, deps: LoginDeps = {}): Promise<E
   const client = new ApiClient({ baseUrl: config.apiUrl, fetch: fetchImpl });
 
   // 1. Authorize.
-  const authorize = await client.json<AuthorizeResponse>("/v1/cli/device/authorize", {
-    method: "POST",
-    body: JSON.stringify({ label: hostLabel() }),
+  const authorize = await client.post<AuthorizeResponse>("/v1/cli/device/authorize", {
+    body: { label: hostLabel() },
   });
 
   printVerification(ctx.io, authorize);
@@ -105,9 +104,8 @@ export async function runLogin(ctx: RunContext, deps: LoginDeps = {}): Promise<E
     }
     await sleep(waitMs);
 
-    const res = await client.request<TokenSuccess | TokenError>("/v1/cli/device/token", {
-      method: "POST",
-      body: JSON.stringify({ device_code: authorize.device_code }),
+    const res = await client.request<TokenSuccess | TokenError>("post", "/v1/cli/device/token", {
+      body: { device_code: authorize.device_code },
     });
 
     if (res.ok) {

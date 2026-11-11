@@ -108,9 +108,9 @@ export async function runMemberLs(ctx: RunContext, deps: ReadDeps = {}): Promise
   const members = await withSession(
     session,
     (client) =>
-      client.get<OrganizationMembers>(
-        `/v1/organizations/${encodeURIComponent(organizationId)}/members`,
-      ),
+      client.get<OrganizationMembers>("/v1/organizations/{organizationId}/members", {
+        path: { organizationId },
+      }),
   );
 
   if (session.outputJson) {
@@ -182,7 +182,7 @@ export async function runMemberInvite(ctx: RunContext, deps: ReadDeps = {}): Pro
   const body: InviteMembersBody = { emails, permissionGroupId };
   const created = await withSession(
     session,
-    (client) => client.post<InviteResult>("/v1/users/invite", body),
+    (client) => client.post<InviteResult>("/v1/users/invite", { body }),
   );
 
   if (session.outputJson) {
@@ -245,9 +245,9 @@ export async function runInvitationLs(ctx: RunContext, deps: ReadDeps = {}): Pro
   const invitations = await withSession(
     session,
     (client) =>
-      client.get<InvitationList>(
-        `/v1/organizations/${encodeURIComponent(organizationId)}/invitations`,
-      ),
+      client.get<InvitationList>("/v1/organizations/{organizationId}/invitations", {
+        path: { organizationId },
+      }),
   );
 
   if (session.outputJson) {
@@ -306,7 +306,8 @@ export async function runInvitationRm(ctx: RunContext, deps: ReadDeps = {}): Pro
 
   await withSession(
     session,
-    (client) => client.delete<unknown>(`/v1/invitations/${encodeURIComponent(invitationId)}`),
+    (client) =>
+      client.delete<unknown>("/v1/invitations/{invitationId}", { path: { invitationId } }),
   );
 
   if (session.outputJson) {

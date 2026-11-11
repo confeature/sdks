@@ -4,7 +4,7 @@
     "test": "deno test -A",
     "fmt": "deno fmt",
     "lint": "deno lint",
-    "check": "deno check src/main.ts",
+    "check": "deno check src/ tests/ scripts/",
     "compile": "deno run -A scripts/compile.ts"
   },
   "imports": {

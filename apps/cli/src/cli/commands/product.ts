@@ -60,8 +60,9 @@ export async function runProductLs(ctx: RunContext, deps: ReadDeps = {}): Promis
     // the limiter at negligible latency cost. Revisit if membership counts grow
     // large enough that wall-time dominates.
     for (const org of orgs) {
-      const query = `?organizationId=${encodeURIComponent(org.organizationId)}`;
-      const owned = await client.get<ProductList>(`/v1/products${query}`);
+      const owned = await client.get<ProductList>("/v1/products", {
+        query: { organizationId: org.organizationId },
+      });
       aggregated.push(...owned);
     }
     return aggregated;
@@ -101,7 +102,7 @@ export async function runProductCreate(ctx: RunContext, deps: ReadDeps = {}): Pr
   const body: CreateProductBody = { name };
   const created = await withSession(
     session,
-    (client) => client.post<CreatedProduct>("/v1/products", body),
+    (client) => client.post<CreatedProduct>("/v1/products", { body }),
   );
 
   if (session.outputJson) {
@@ -141,7 +142,8 @@ export async function runProductUpdate(ctx: RunContext, deps: ReadDeps = {}): Pr
   const body: UpdateProductBody = { name };
   const updated = await withSession(
     session,
-    (client) => client.patch<UpdatedProduct>(`/v1/products/${encodeURIComponent(productId)}`, body),
+    (client) =>
+      client.patch<UpdatedProduct>("/v1/products/{productId}", { path: { productId }, body }),
   );
 
   if (session.outputJson) {
@@ -193,7 +195,7 @@ export async function runProductDelete(ctx: RunContext, deps: ReadDeps = {}): Pr
 
   await withSession(
     session,
-    (client) => client.delete<unknown>(`/v1/products/${encodeURIComponent(productId)}`),
+    (client) => client.delete<unknown>("/v1/products/{productId}", { path: { productId } }),
   );
 
   if (session.outputJson) {

@@ -45,6 +45,7 @@ Credentials are stored per profile under `~/.config/confeature/credentials/` wit
 ## Test & lint (local-first, Principle VII)
 
 ```bash
+deno task check    # type-check src/, tests/ and scripts/ (api paths are typed by the contract)
 deno task test     # deno test -A
 deno task fmt      # deno fmt
 deno task lint     # deno lint

@@ -13,8 +13,9 @@
 # the corpora run in sdk-gates.yml on every push and pull request (#793).
 #
 # tools/repo-gates/verify-workflows.mjs rule 13 refuses a tree where this
-# workflow no longer runs `pnpm run verify` and the CLI's deno suite on both
-# triggers, or where either can be skipped, filtered or redirected.
+# workflow no longer runs `pnpm run verify`, the CLI's type check and the CLI's
+# deno suite on both triggers, or where any can be skipped, filtered or
+# redirected.
 
 name: verify
 
@@ -73,6 +74,12 @@ jobs:
         uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2
         with:
           deno-version: ${{ env.DENO_VERSION }}
+
+      # Its type check, over src/, tests/ and scripts/: the CLI's api paths are
+      # typed by the contract's `paths`, so a path renamed or removed there
+      # fails here (#1188).
+      - name: The CLI's type check
+        run: deno task --cwd apps/cli check
 
       - name: The CLI's tests
         run: deno task --cwd apps/cli test

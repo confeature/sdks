@@ -192,7 +192,7 @@ export async function runFlagLs(ctx: RunContext, deps: ReadDeps = {}): Promise<E
   const session = await openReadSession(ctx, deps);
   const body = await withSession(
     session,
-    (client) => client.get<unknown>(`/v1/configs/${encodeURIComponent(configId)}/settings`),
+    (client) => client.get<unknown>("/v1/configs/{configId}/settings", { path: { configId } }),
   );
   const { items, rows } = readSettingList(body);
 
@@ -208,15 +208,6 @@ export async function runFlagLs(ctx: RunContext, deps: ReadDeps = {}): Promise<E
 
   ctx.io.out(renderTable(FLAG_COLUMNS, rows));
   return ExitCode.OK;
-}
-
-/** Build the by-key v1 value path the GET/PUT value endpoints share. */
-function valuePath(environmentId: string, configId: string, key: string): string {
-  return (
-    `/v1/environments/${encodeURIComponent(environmentId)}` +
-    `/configs/${encodeURIComponent(configId)}` +
-    `/settings/${encodeURIComponent(key)}/value`
-  );
 }
 
 // The reads the route choice makes, and the v2 value API's read and patch
@@ -241,8 +232,15 @@ const VALUE_FIELD = {
   double: "doubleValue",
 } as const satisfies Record<SettingType, keyof ValueModel>;
 
-/** Where a flag's value lives in one environment, and which API speaks it. */
-type ValueRoute = { kind: "v1"; path: string } | { kind: "v2"; path: string };
+/**
+ * Where a flag's value lives in one environment, and which API speaks it: the
+ * path parameters of the by-key v1 value route, or of the v2 one by
+ * `settingId`. The paths themselves are written where they are called, so the
+ * contract types check them there (#1188).
+ */
+type ValueRoute =
+  | { kind: "v1"; path: { environmentId: string; configId: string; key: string } }
+  | { kind: "v2"; path: { environmentId: string; settingId: number } };
 
 /**
  * THE choice of value route for the `flag value` commands (#817). It is the
@@ -265,13 +263,15 @@ async function valueRouteOf(
   configId: string,
   key: string,
 ): Promise<ValueRoute> {
-  const config = await client.get<ConfigModel>(`/v1/configs/${encodeURIComponent(configId)}`);
+  const config = await client.get<ConfigModel>("/v1/configs/{configId}", {
+    path: { configId },
+  });
   if (config.evaluationVersion !== "v2") {
-    return { kind: "v1", path: valuePath(environmentId, configId, key) };
+    return { kind: "v1", path: { environmentId, configId, key } };
   }
-  const setting = await client.get<SettingRead>(
-    `/v1/configs/${encodeURIComponent(configId)}/settings/${encodeURIComponent(key)}`,
-  );
+  const setting = await client.get<SettingRead>("/v1/configs/{configId}/settings/{key}", {
+    path: { configId, key },
+  });
   // The id becomes a path segment: anything but a positive integer is an api
   // answer this CLI cannot address a value with.
   const settingId = setting.settingId;
@@ -281,17 +281,13 @@ async function valueRouteOf(
       ExitCode.RUNTIME,
     );
   }
-  return {
-    kind: "v2",
-    path: `/v2/environments/${encodeURIComponent(environmentId)}` +
-      `/settings/${settingId}/value`,
-  };
+  return { kind: "v2", path: { environmentId, settingId } };
 }
 
 /** A flag's value in one environment, as the route that holds it answers it. */
 type ValueRead =
-  | { kind: "v1"; path: string; body: SettingValue }
-  | { kind: "v2"; path: string; body: SettingFormula };
+  | (Extract<ValueRoute, { kind: "v1" }> & { body: SettingValue })
+  | (Extract<ValueRoute, { kind: "v2" }> & { body: SettingFormula });
 
 /** Choose the route (see {@link valueRouteOf}), then read the value through it. */
 async function readValue(
@@ -303,8 +299,20 @@ async function readValue(
   return await withSession(session, async (client): Promise<ValueRead> => {
     const route = await valueRouteOf(client, environmentId, configId, key);
     return route.kind === "v2"
-      ? { ...route, body: await client.get<SettingFormula>(route.path) }
-      : { ...route, body: await client.get<SettingValue>(route.path) };
+      ? {
+        ...route,
+        body: await client.get<SettingFormula>(
+          "/v2/environments/{environmentId}/settings/{settingId}/value",
+          { path: route.path },
+        ),
+      }
+      : {
+        ...route,
+        body: await client.get<SettingValue>(
+          "/v1/environments/{environmentId}/configs/{configId}/settings/{key}/value",
+          { path: route.path },
+        ),
+      };
   });
 }
 
@@ -353,9 +361,17 @@ async function writeValue(
     const patch: FormulaPatch = [
       { op: "replace", path: `/defaultValue/${VALUE_FIELD[settingTypeOf(read)]}`, value },
     ];
-    const query = reason === undefined ? "" : `?reason=${encodeURIComponent(reason)}`;
     // A 200 and a 204 ("the patch changed nothing") both answer a live value.
-    await withSession(session, (client) => client.patch<unknown>(`${read.path}${query}`, patch));
+    // An unset reason sends no query at all, as before #1188.
+    await withSession(
+      session,
+      (client) =>
+        client.patch<unknown>("/v2/environments/{environmentId}/settings/{settingId}/value", {
+          path: read.path,
+          query: { reason },
+          body: patch,
+        }),
+    );
     return;
   }
   const putBody: SettingValuePutBody = {
@@ -365,7 +381,11 @@ async function writeValue(
     rolloutPercentageItems: read.body.rolloutPercentageItems,
   };
   if (reason !== undefined) putBody.reason = reason;
-  await withSession(session, (client) => client.put<SettingValue>(read.path, putBody));
+  await withSession(session, (client) =>
+    client.put<SettingValue>(
+      "/v1/environments/{environmentId}/configs/{configId}/settings/{key}/value",
+      { path: read.path, body: putBody },
+    ));
 }
 
 /** Render a (label, value) pair table — the show / update human surface. */
@@ -556,10 +576,10 @@ export async function runFlagCreate(ctx: RunContext, deps: ReadDeps = {}): Promi
   const created = await withSession(
     session,
     (client) =>
-      client.post<unknown>(
-        `/v1/configs/${encodeURIComponent(configId)}/settings`,
+      client.post<unknown>("/v1/configs/{configId}/settings", {
+        path: { configId },
         body,
-      ),
+      }),
   );
 
   if (session.outputJson) {
@@ -634,10 +654,10 @@ export async function runFlagUpdate(ctx: RunContext, deps: ReadDeps = {}): Promi
   const updated = await withSession(
     session,
     (client) =>
-      client.patch<unknown>(
-        `/v1/configs/${encodeURIComponent(configId)}/settings/${encodeURIComponent(key)}`,
+      client.patch<unknown>("/v1/configs/{configId}/settings/{key}", {
+        path: { configId, key },
         body,
-      ),
+      }),
   );
 
   if (session.outputJson) {
@@ -694,9 +714,9 @@ export async function runFlagDelete(ctx: RunContext, deps: ReadDeps = {}): Promi
   await withSession(
     session,
     (client) =>
-      client.delete<unknown>(
-        `/v1/configs/${encodeURIComponent(configId)}/settings/${encodeURIComponent(key)}`,
-      ),
+      client.delete<unknown>("/v1/configs/{configId}/settings/{key}", {
+        path: { configId, key },
+      }),
   );
 
   if (session.outputJson) {

@@ -67,11 +67,9 @@ export async function runSdkKeyLs(ctx: RunContext, deps: ReadDeps = {}): Promise
   const keys = await withSession(
     session,
     (client) =>
-      client.get<SdkKeys>(
-        `/v1/configs/${encodeURIComponent(configId)}/environments/${
-          encodeURIComponent(environmentId)
-        }`,
-      ),
+      client.get<SdkKeys>("/v1/configs/{configId}/environments/{environmentId}", {
+        path: { configId, environmentId },
+      }),
   );
 
   if (session.outputJson) {
@@ -133,9 +131,8 @@ export async function runSdkKeyRotate(ctx: RunContext, deps: ReadDeps = {}): Pro
     session,
     (client) =>
       client.post<RotatedSdkKeys>(
-        `/v1/configs/${encodeURIComponent(configId)}/environments/${
-          encodeURIComponent(environmentId)
-        }/sdk-keys/rotate`,
+        "/v1/configs/{configId}/environments/{environmentId}/sdk-keys/rotate",
+        { path: { configId, environmentId } },
       ),
   ).catch((error: unknown) => {
     if (error instanceof ApiError && error.status === 409) {
@@ -209,9 +206,8 @@ export async function runSdkKeyDelete(ctx: RunContext, deps: ReadDeps = {}): Pro
     session,
     (client) =>
       client.delete<SdkKeys>(
-        `/v1/configs/${encodeURIComponent(configId)}/environments/${
-          encodeURIComponent(environmentId)
-        }/sdk-keys/${slot as Slot}`,
+        "/v1/configs/{configId}/environments/{environmentId}/sdk-keys/{slot}",
+        { path: { configId, environmentId, slot: slot as Slot } },
       ),
   ).catch((error: unknown) => {
     if (error instanceof ApiError && error.status === 409) {

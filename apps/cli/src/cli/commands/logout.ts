@@ -43,7 +43,7 @@ export async function runLogout(ctx: RunContext, deps: LogoutDeps = {}): Promise
   // clearing the local secret — log a warning and proceed.
   const client = new ApiClient({ baseUrl: config.apiUrl, token, fetch: deps.fetch });
   try {
-    await client.json("/v1/cli/logout", { method: "POST" });
+    await client.post("/v1/cli/logout");
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     ctx.io.err(

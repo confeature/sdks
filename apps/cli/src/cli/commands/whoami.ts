@@ -50,7 +50,7 @@ export async function runWhoami(ctx: RunContext, deps: WhoamiDeps = {}): Promise
   const client = new ApiClient({ baseUrl: config.apiUrl, token, fetch: deps.fetch });
   let me: MeModel;
   try {
-    me = await client.json<MeModel>("/v1/me", { method: "GET" });
+    me = await client.get<MeModel>("/v1/me");
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       // The token was revoked or expired server-side — drop the stale local

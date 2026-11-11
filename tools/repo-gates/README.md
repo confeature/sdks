@@ -25,6 +25,12 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
   handed to the job's later steps through `GITHUB_ENV`; locally a missing pin
   is a loud WARN. It runs a sandbox copy against fake Apple tools, so it runs
   on Linux too.
+- `contract-importers.mjs` finds every file that imports the generated
+  contract (`packages/contract/src/generated/api.ts`): through the CLI's
+  import-map alias, by path, by a link or by a copy. Its test fails on one
+  outside `apps/cli` and the contract package (#1188): the CLI is the
+  contract's one public consumer. It fails closed on an empty or unreadable
+  tree.
 - The `*.test.mjs` files run under `pnpm vp run -F @confeature/repo-gates test`.
 
 ## Row snapshots

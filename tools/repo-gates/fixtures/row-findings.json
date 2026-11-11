@@ -871,6 +871,7 @@
     "verify.yml: verify step Build the workspace packages: a credentialed job runs `pnpm run build`: pnpm is not a command a credentialed job runs",
     "verify.yml: verify step Install dependencies: a credentialed job runs `pnpm install --frozen-lockfile`: pnpm is not a command a credentialed job runs",
     "verify.yml: verify step The CLI's tests: a credentialed job runs `deno task --cwd apps/cli test`: deno is not a command a credentialed job runs",
+    "verify.yml: verify step The CLI's type check: a credentialed job runs `deno task --cwd apps/cli check`: deno is not a command a credentialed job runs",
     "verify.yml: verify step The public gate: a credentialed job runs `pnpm run verify`: pnpm is not a command a credentialed job runs",
     "verify.yml: verify: a credentialed job's if: does not require a tag push (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'), top-level conjuncts, no || or !)",
     "verify.yml: verify: grants write on [contents], WRITE_PERMISSIONS records []"

@@ -55,7 +55,9 @@ export async function runEnvironmentLs(ctx: RunContext, deps: ReadDeps = {}): Pr
   const environments = await withSession(
     session,
     (client) =>
-      client.get<EnvironmentList>(`/v1/products/${encodeURIComponent(productId)}/environments`),
+      client.get<EnvironmentList>("/v1/products/{productId}/environments", {
+        path: { productId },
+      }),
   );
 
   if (session.outputJson) {
@@ -96,10 +98,10 @@ export async function runEnvironmentCreate(
   const created = await withSession(
     session,
     (client) =>
-      client.post<CreatedEnvironment>(
-        `/v1/products/${encodeURIComponent(productId)}/environments`,
+      client.post<CreatedEnvironment>("/v1/products/{productId}/environments", {
+        path: { productId },
         body,
-      ),
+      }),
   );
 
   if (session.outputJson) {
@@ -146,10 +148,10 @@ export async function runEnvironmentUpdate(
   const updated = await withSession(
     session,
     (client) =>
-      client.patch<UpdatedEnvironment>(
-        `/v1/environments/${encodeURIComponent(environmentId)}`,
+      client.patch<UpdatedEnvironment>("/v1/environments/{environmentId}", {
+        path: { environmentId },
         body,
-      ),
+      }),
   );
 
   if (session.outputJson) {
@@ -203,7 +205,8 @@ export async function runEnvironmentDelete(
 
   await withSession(
     session,
-    (client) => client.delete<unknown>(`/v1/environments/${encodeURIComponent(environmentId)}`),
+    (client) =>
+      client.delete<unknown>("/v1/environments/{environmentId}", { path: { environmentId } }),
   );
 
   if (session.outputJson) {

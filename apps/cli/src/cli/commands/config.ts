@@ -49,7 +49,7 @@ export async function runConfigLs(ctx: RunContext, deps: ReadDeps = {}): Promise
   const session = await openReadSession(ctx, deps);
   const configs = await withSession(
     session,
-    (client) => client.get<ConfigList>(`/v1/products/${encodeURIComponent(productId)}/configs`),
+    (client) => client.get<ConfigList>("/v1/products/{productId}/configs", { path: { productId } }),
   );
 
   if (session.outputJson) {
@@ -87,10 +87,10 @@ export async function runConfigCreate(ctx: RunContext, deps: ReadDeps = {}): Pro
   const created = await withSession(
     session,
     (client) =>
-      client.post<CreatedConfig>(
-        `/v1/products/${encodeURIComponent(productId)}/configs`,
+      client.post<CreatedConfig>("/v1/products/{productId}/configs", {
+        path: { productId },
         body,
-      ),
+      }),
   );
 
   if (session.outputJson) {
@@ -129,7 +129,7 @@ export async function runConfigUpdate(ctx: RunContext, deps: ReadDeps = {}): Pro
   const body: UpdateConfigBody = { name };
   const updated = await withSession(
     session,
-    (client) => client.patch<UpdatedConfig>(`/v1/configs/${encodeURIComponent(configId)}`, body),
+    (client) => client.patch<UpdatedConfig>("/v1/configs/{configId}", { path: { configId }, body }),
   );
 
   if (session.outputJson) {
@@ -176,7 +176,7 @@ export async function runConfigDelete(ctx: RunContext, deps: ReadDeps = {}): Pro
 
   await withSession(
     session,
-    (client) => client.delete<unknown>(`/v1/configs/${encodeURIComponent(configId)}`),
+    (client) => client.delete<unknown>("/v1/configs/{configId}", { path: { configId } }),
   );
 
   if (session.outputJson) {
