@@ -303,6 +303,12 @@ export class ApiClient {
  * the types make both impossible, and a call that slipped past them must not
  * reach the network with a half-built path. One pass, so a value is never
  * re-read as a template.
+ *
+ * A value of `""`, `.` or `..` throws too, whatever the types say: fetch
+ * resolves dot segments, so `flag delete --key ..` would send DELETE
+ * `/v1/configs/<id>/`, another route. Only the raw value can be one:
+ * `encodeURIComponent` never writes `%2e`, so a value spelled `%2e` is sent as
+ * `%252e`, one literal segment.
  */
 export function expandPath(
   template: string,
@@ -314,7 +320,11 @@ export function expandPath(
       throw new TypeError(`api path ${template}: no value for {${name}}`);
     }
     used.add(name);
-    return encodeURIComponent(String(params[name]));
+    const value = String(params[name]);
+    if (value === "" || value === "." || value === "..") {
+      throw new TypeError(`api path ${template}: {${name}} cannot be ${JSON.stringify(value)}`);
+    }
+    return encodeURIComponent(value);
   });
   for (const name of Object.keys(params)) {
     if (!used.has(name)) throw new TypeError(`api path ${template}: no {${name}} to fill`);

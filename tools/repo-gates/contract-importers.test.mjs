@@ -39,7 +39,6 @@ describe("the real tree", () => {
     for (const a of ALLOWED_IMPORTERS) expect(a.reason.length).toBeGreaterThan(40);
     expect(ALLOWED_IMPORTERS.map((a) => a.path)).toEqual([
       "apps/cli/",
-      "packages/contract/",
       "tools/repo-gates/contract-importers.mjs",
       "tools/repo-gates/contract-importers.test.mjs",
     ]);
@@ -74,16 +73,22 @@ describe("a fixture tree", () => {
     ).toEqual([]);
   });
 
-  it("allows the CLI and the contract package", () => {
+  it("allows the CLI", () => {
     const tree = {
       "apps/cli/deno.json":
         '{ "imports": { "@confeature/contract/api": "../x/generated/api.ts" } }',
       "apps/cli/src/a.ts": 'import type { paths } from "@confeature/contract/api";\n',
-      "packages/contract/src/index.ts": 'export * from "./generated/api.ts";\n',
     };
     const { findings, allowed } = contractImporters(root, plant(tree));
     expect(findings).toEqual([]);
     expect(allowed.map((a) => a.file).sort(byName)).toEqual(Object.keys(tree).sort(byName));
+  });
+
+  it("refuses a re-export inside the contract package (#1188 review)", () => {
+    const findings = findingsOf({
+      "packages/contract/src/index.ts": 'export * from "./generated/api.ts";\n',
+    });
+    expect(findings.map((f) => f.file)).toEqual(["packages/contract/src/index.ts"]);
   });
 
   it.each([
@@ -157,6 +162,20 @@ describe("a fixture tree", () => {
       "apps/sdk-node/src/api.ts",
     ]);
     expect(findings.every((f) => f.why.startsWith("links to packages/contract"))).toBe(true);
+  });
+
+  it("refuses a dangling link that names the contract, and ignores one that does not", () => {
+    const files = plant({ "a.ts": "x\n" });
+    mkdirSync(join(root, "apps/sdk-node"), { recursive: true });
+    symlinkSync("../../nowhere/contract/src/generated/api.ts", join(root, "apps/sdk-node/api.ts"));
+    symlinkSync("../../nowhere/other.ts", join(root, "apps/sdk-node/other.ts"));
+    const { findings } = contractImporters(root, [
+      ...files,
+      "apps/sdk-node/api.ts",
+      "apps/sdk-node/other.ts",
+    ]);
+    expect(findings.map((f) => f.file)).toEqual(["apps/sdk-node/api.ts"]);
+    expect(findings[0].why).toMatch(/^links to \.\.\/\.\.\/nowhere\/.*by path$/);
   });
 
   it("does not let a lookalike name pass as allowed", () => {

@@ -68,14 +68,32 @@ export async function _typeProbes(c: ApiClient): Promise<void> {
 /** A value with every character a path segment or a query value must encode. */
 const NASTY = "a b/c?d#e%f&g=h{i}+ü";
 
-/** The client's URL for one call, through a stub fetch. */
+/** The `method path` pairs the wire rows called, filled by {@link urlOf}. */
+const ROW_CALLS = new Set<string>();
+
+/**
+ * The client's URL for one call, through a stub fetch. It also records the
+ * method and path template the row called, so the coverage check below reads
+ * CALLS itself, not whatever paths this file happens to quote.
+ */
 async function urlOf(call: (c: ApiClient) => Promise<unknown>): Promise<string> {
   const urls: string[] = [];
   const fetch: FetchLike = (input) => {
     urls.push(input);
     return Promise.resolve(new Response("{}", { status: 200 }));
   };
-  await call(new ApiClient({ baseUrl: "https://api.example/", fetch }));
+  const client = new ApiClient({ baseUrl: "https://api.example/", fetch });
+  const recording = new Proxy(client, {
+    get(target, name) {
+      const method = Reflect.get(target, name);
+      if (typeof method !== "function") return method;
+      return (...args: unknown[]) => {
+        ROW_CALLS.add(name === "request" ? `${args[0]} ${args[1]}` : `${String(name)} ${args[0]}`);
+        return method.apply(target, args);
+      };
+    },
+  });
+  await call(recording);
   assertEquals(urls.length, 1);
   return urls[0];
 }
@@ -350,6 +368,11 @@ Deno.test("#1188: a call that slipped past the types never reaches the network",
       ["/v1/configs/{configId}", {}],
       ["/v1/configs/{configId}", { path: { configId: "c", key: "k" } }],
       ["/v1/products", { query: { organizationId: { id: "o" } } }],
+      // A dot segment, or nothing, would resolve to another route (#1188 review).
+      ...["", ".", ".."].map((key) => [
+        "/v1/configs/{configId}/settings/{key}",
+        { path: { configId: "cfg-1", key } },
+      ]),
     ]
   ) {
     let threw = false;
@@ -361,6 +384,18 @@ Deno.test("#1188: a call that slipped past the types never reaches the network",
     assert(threw, `${JSON.stringify(args)} throws a TypeError`);
   }
   assertEquals(fetched, 0);
+});
+
+Deno.test("#1188: a value that only looks like a dot segment is sent as one literal segment", async () => {
+  for (const key of ["...", "%2e", "%2E%2e", ".a", "a."]) {
+    assertEquals(
+      await urlOf((x) =>
+        x.delete("/v1/configs/{configId}/settings/{key}", { path: { configId: "c", key } })
+      ),
+      `${BASE}/v1/configs/c/settings/${encodeURIComponent(key)}`,
+      key,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -389,9 +424,12 @@ interface Literal {
 
 /**
  * The string and template literals of a TypeScript source, and the code
- * outside them (comments dropped), by a small lexer: enough for this repo's
- * commands, which hold no regex literal with a quote or a slash-star in it.
- * A template's holes are lexed as code, so a literal nested in one is found too.
+ * outside them (comments dropped), by a small lexer. A template's holes are
+ * lexed as code, so a literal nested in one is found too. A regex literal is
+ * read whole (escapes and `[...]` classes included) and kept out of both, so
+ * a quote or backtick inside one cannot put the lexer out of step: a `/` is a
+ * regex where an operand may start (after an operator, an opening bracket, a
+ * keyword, or at the start), a division otherwise.
  */
 function lex(source: string): { literals: Literal[]; code: string } {
   const literals: Literal[] = [];
@@ -452,6 +490,20 @@ function lex(source: string): { literals: Literal[]; code: string } {
       const end = source.indexOf("*/", i + 2);
       if (end < 0) throw new Error(`an unterminated comment at line ${lineAt(i)}`);
       i = end + 2;
+    } else if (ch === "/" && regexMayStart(code)) {
+      const at = i;
+      let inClass = false;
+      i++;
+      while (i < source.length && (inClass || source[i] !== "/")) {
+        if (source[i] === "\n") throw new Error(`an unterminated regex at line ${lineAt(at)}`);
+        if (source[i] === "\\") i++;
+        else if (source[i] === "[") inClass = true;
+        else if (source[i] === "]") inClass = false;
+        i++;
+      }
+      i++;
+      while (/[a-z]/i.test(source[i] ?? "")) i++;
+      code += "/regex/";
     } else if (ch === '"' || ch === "'") {
       const at = i;
       let text = "";
@@ -492,6 +544,14 @@ function lex(source: string): { literals: Literal[]; code: string } {
   }
   if (templates.length > 0) throw new Error("an unterminated template");
   return { literals, code };
+}
+
+/** Whether a `/` after `code` starts a regex literal rather than a division. */
+function regexMayStart(code: string): boolean {
+  const before = code.trimEnd();
+  if (before === "") return true;
+  if (/[(,=:[!&|?{};+\-*%<>~^]$/.test(before)) return true;
+  return /\b(?:return|typeof|case|void|in|of|yield|await|delete|throw|new|else|do)$/.test(before);
 }
 
 /** Why a command file builds an api path by hand, one line per finding. */
@@ -547,24 +607,33 @@ Deno.test("#1188: no command builds an api path by hand", () => {
     handBuiltPaths(text, declared).map((f) => `${name}: ${f}`)
   );
   assertEquals(findings, []);
+});
 
-  // And the scan saw the calls (it is not blind), and each path a command
-  // calls has a wire row in CALLS above, so a new call cannot skip the check.
-  const pathsIn = (text: string) =>
-    new Set(
-      lex(text).literals.filter((l) => l.kind === "string" && declared.has(l.text)).map((l) =>
-        l.text
-      ),
-    );
-  const called = new Set(files.flatMap(([, text]) => [...pathsIn(text)]));
-  assert(called.size >= 20, `the commands call ${called.size} contract paths`);
-  // This file holds regex literals, which the lexer does not read: a plain
-  // match of its quoted paths is enough to find the rows.
-  const rows = new Set(
-    [...Deno.readTextFileSync(fromFileUrl(import.meta.url)).matchAll(/"(\/[^"\s]*)"/g)]
-      .map((m) => m[1]),
+/**
+ * The `method path` of every client call in a command's source. A call is
+ * `client.<method>(` or `client.request("<method>",` followed by a path
+ * literal; every path literal in the file must be one of them, so a call
+ * spelled another way fails the count instead of escaping the coverage.
+ */
+function commandCalls(source: string, declared: Set<string>): string[] {
+  const call =
+    /client\.(get|put|post|patch|delete|request)(?:<[^>()]*>)?\(\s*(?:"(get|put|post|patch|delete)",\s*)?"(\/[^"]*)"/g;
+  const calls = [...source.matchAll(call)].map((m) =>
+    m[1] === "request" ? `${m[2]} ${m[3]}` : `${m[1]} ${m[3]}`
   );
-  assertEquals([...called].filter((path) => !rows.has(path)), [], "paths with no wire row");
+  const literals = lex(source).literals.filter((l) => l.kind === "string" && declared.has(l.text));
+  assertEquals(calls.length, literals.length, "every contract path literal is a client call");
+  return calls;
+}
+
+Deno.test("#1188: every method and path a command calls has a wire row", async () => {
+  const declared = contractPaths(Deno.readTextFileSync(CONTRACT));
+  ROW_CALLS.clear();
+  for (const [, , call] of CALLS) await urlOf(call);
+  const called = new Set(commandFiles().flatMap(([, text]) => commandCalls(text, declared)));
+  // Not blind: the commands make well over twenty distinct calls.
+  assert(called.size >= 20, `the commands make ${called.size} distinct calls`);
+  assertEquals([...called].filter((c) => !ROW_CALLS.has(c)), [], "calls with no wire row");
 });
 
 Deno.test("#1188: the scan refuses each way of building a path by hand", () => {
@@ -581,6 +650,16 @@ Deno.test("#1188: the scan refuses each way of building a path by hand", () => {
     ["a join of pieces", '["/v1/configs", id].join("/");', /not a path the contract declares/],
     ["encodeURIComponent", "const s = encodeURIComponent(id);", /encodeURIComponent is used/],
     ["URLSearchParams", "new URLSearchParams({ a });", /URLSearchParams is used/],
+    [
+      "a template path after a regex holding a quote and a backtick",
+      "const r = /[\"`'\\/]/g; client.get(`/v1/configs/${id}`);",
+      /template string holds an api path/,
+    ],
+    [
+      "a template path after a regex returned",
+      "function f() { return /x\\/[/]/i; }\nclient.get(`/v1/configs/${id}`);",
+      /template string holds an api path/,
+    ],
   ];
   for (const [label, source, why] of refused) {
     const findings = handBuiltPaths(source, declared);
@@ -592,6 +671,8 @@ Deno.test("#1188: the scan refuses each way of building a path by hand", () => {
     ["a comment", '// GET `/v1/configs/${id}` + "/v1/x"\n/* `/v1/${y}` */'],
     ["a CLI usage line", "`confeature flag value show --config-id ${id}`"],
     ["a URL in a string", '"https://app.example/v1x"'],
+    ["a division", "const half = total / 2 / count;"],
+    ["a regex holding a path", "const r = /`\\/v1\\/x`/;"],
   ];
   for (const [label, source] of allowed) {
     assertEquals(handBuiltPaths(source, declared), [], label);

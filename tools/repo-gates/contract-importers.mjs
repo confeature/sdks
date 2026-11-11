@@ -30,7 +30,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 /** The generated contract, repository-relative. */
@@ -40,17 +40,17 @@ export const CONTRACT_API = "packages/contract/src/generated/api.ts";
  * The trees (a `path` ending in `/`) and files allowed to import it, each with
  * its reason. Nothing else is allowed: a new importer is added here, with a
  * reason, or it is a finding.
+ *
+ * The contract package itself is not allowed (#1188 review): it holds only the
+ * mirrored files, the contract is the subject of this search and skipped, and
+ * a re-export added there would hand the contract to any SDK under another
+ * name. Such a file is a finding like any other.
  */
 export const ALLOWED_IMPORTERS = [
   {
     path: "apps/cli/",
     reason:
       "the CLI is the contract's one public consumer: its api paths, parameters and bodies are typed by it (#1188), and the contract's gates know of it",
-  },
-  {
-    path: "packages/contract/",
-    reason:
-      "the contract itself, should it ever re-export its generated types; it holds only the mirrored files today, and they import nothing",
   },
   {
     path: "tools/repo-gates/contract-importers.mjs",
@@ -133,11 +133,16 @@ export function contractImporters(root, files = trackedFiles(root)) {
       try {
         target = realpathSync(abs);
       } catch {
-        // A dangling link imports nothing, but it is read as a finding if it
-        // names the contract, below, like any other file.
-        target = null;
+        // A dangling link: what it points at does not exist, so it imports
+        // nothing today. Its target text is judged like a file's, so a link
+        // that names the contract by path is a finding before it resolves.
+        scanned++;
+        const raw = readlinkSync(abs);
+        const named = REFERENCES.find(([pattern]) => pattern.test(raw));
+        if (named !== undefined) report(file, `links to ${raw}, which ${named[1]}`);
+        continue;
       }
-      if (target !== null && (target === contractDir || target.startsWith(contractDir + sep))) {
+      if (target === contractDir || target.startsWith(contractDir + sep)) {
         scanned++;
         report(file, `links to ${relative(realRoot, target).split(sep).join("/")}`);
         continue;
@@ -155,7 +160,6 @@ export function contractImporters(root, files = trackedFiles(root)) {
     try {
       text = readFileSync(abs, "utf8");
     } catch (error) {
-      if (error.code === "ENOENT" && stat.isSymbolicLink()) continue;
       throw new Error(`${file} is tracked but cannot be read: ${error.message}`, { cause: error });
     }
     scanned++;
