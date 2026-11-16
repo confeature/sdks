@@ -1401,6 +1401,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/organizations/{organizationId}/auditlogs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Audit log items for Organization
+     * @description ConfigCat's `get-organization-auditlogs` (its v1 read, which ConfigCat marks deprecated in favour of a paged v2; Confeature serves the v1 shapes and defers the v2 paging). Every audit log item of the Organization, newest first, a deleted Product's included. With neither `fromUtcDateTime` nor `toUtcDateTime`, the last 7 days; with `fromUtcDateTime` alone, up to now; with `toUtcDateTime` alone, the 7 days before it. A window that ends before it starts, or spans more than 30 days, is refused with a 400. At most 1000 items are returned, the newest: that cap is a Confeature limit, ConfigCat states none. An Organization Admin reads it with a dashboard session, a cli-token or a Public API credential; a member who is not an admin gets a 403, and an `organizationId` the caller does not act in is the generic 404, the same as one that does not exist. A management token reads any Organization with the `auditlog:read` scope. Every caller sees the same items: a change Confeature made to the Organization (its plan, a member removed by a management token) shows the `Confeature` actor, with no email and no reason.
+     */
+    get: operations["getOrganizationAuditLogs"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/guardian/webhooks/{token}": {
     parameters: {
       query?: never;
@@ -3351,7 +3371,7 @@ export interface components {
       email: string;
       fullName: string;
     };
-    /** @description A single config-plane change in a product's audit log. Mirrors ConfigCat's audit-log item shape: the structured `before`/ `after` snapshots + `configId`/`environmentId` are Confeature-only additive members carried for the back-office diff view + the Release Guardian rollback. */
+    /** @description A single change in a product's or an organization's audit log. Mirrors ConfigCat's audit-log item shape: the structured `before`/ `after` snapshots + `productId`/`configId`/`environmentId` are Confeature-only additive members carried for the back-office diff view + the Release Guardian rollback. */
     AuditLogItemModel: {
       /** Format: int64 */
       auditLogId: number;
@@ -3369,6 +3389,11 @@ export interface components {
       before?: unknown;
       /** @description Structured post-change snapshot (Confeature extension). */
       after?: unknown;
+      /**
+       * Format: uuid
+       * @description The Product the change was made in, kept after the Product is deleted; null for an Organization-level change (Confeature extension).
+       */
+      productId?: string | null;
       /** Format: uuid */
       configId?: string | null;
       /** Format: uuid */
@@ -8920,7 +8945,7 @@ export interface operations {
         auditLogType?: components["schemas"]["AuditLogType"];
         fromUtcDateTime?: string;
         toUtcDateTime?: string;
-        /** @description Filter by acting principal id (user or management token). Confeature extension. */
+        /** @description Filter by acting principal id (user or management token), as the item shows it: an item showing the `Confeature` actor matches `confeature`, never the id it replaces. Confeature extension. */
         actorId?: string;
         /** @description Filter by feature-flag key (per-flag history). Confeature extension. */
         settingKey?: string;
@@ -8963,6 +8988,84 @@ export interface operations {
         };
       };
       /** @description Product not found (or cross-org — anti-enumeration). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  getOrganizationAuditLogs: {
+    parameters: {
+      query?: {
+        /** @description The identifier of the Product. A Product that is unknown, deleted or another Organization's is no error: the items are the Organization's own, so a deleted Product's history is returned and any other id matches none. */
+        productId?: string;
+        /** @description The identifier of the Config. */
+        configId?: string;
+        /** @description The identifier of the Environment. */
+        environmentId?: string;
+        /** @description Filter Audit logs by Audit log type. */
+        auditLogType?: components["schemas"]["AuditLogType"];
+        /** @description Filter Audit logs by starting UTC date. */
+        fromUtcDateTime?: string;
+        /** @description Filter Audit logs by ending UTC date. */
+        toUtcDateTime?: string;
+        /** @description Filter by acting principal id (user or management token), as the item shows it: an item showing the `Confeature` actor matches `confeature`, never the id it replaces. Confeature extension. */
+        actorId?: string;
+        /** @description Filter by feature-flag key (per-flag history). Confeature extension. */
+        settingKey?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The identifier of the Organization. */
+        organizationId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Organization's audit log items, newest-first (bare array, no pagination — mirrors ConfigCat's v1), at most 1000. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuditLogItemModel"][];
+        };
+      };
+      /** @description A parameter is malformed, or the window ends before it starts or spans more than 30 days. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid authentication. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Token lacks auditlog:read, or the caller is not an Organization Admin. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The Organization does not exist, or the caller does not act in it. Generic envelope: the two cases are indistinguishable. */
       404: {
         headers: {
           [name: string]: unknown;

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.9.0
+  version: 0.10.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -5749,7 +5749,10 @@ paths:
           required: false
           schema:
             type: string
-          description: Filter by acting principal id (user or management token). Confeature extension.
+          description: >
+            Filter by acting principal id (user or management token), as the
+            item shows it: an item showing the `Confeature` actor matches
+            `confeature`, never the id it replaces. Confeature extension.
         - in: query
           name: settingKey
           required: false
@@ -5790,6 +5793,148 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/organizations/{organizationId}/auditlogs:
+    get:
+      operationId: getOrganizationAuditLogs
+      summary: List Audit log items for Organization
+      description: >
+        ConfigCat's `get-organization-auditlogs` (its v1 read, which ConfigCat
+        marks deprecated in favour of a paged v2; Confeature serves the v1
+        shapes and defers the v2 paging). Every audit log item of the
+        Organization, newest first, a deleted Product's included. With neither
+        `fromUtcDateTime` nor `toUtcDateTime`, the last 7 days; with
+        `fromUtcDateTime` alone, up to now; with `toUtcDateTime` alone, the 7
+        days before it. A window that ends before it starts, or spans more than
+        30 days, is refused with a 400. At most 1000 items are returned, the
+        newest: that cap is a Confeature limit, ConfigCat states none. An
+        Organization Admin reads it with a dashboard session, a cli-token or a
+        Public API credential; a member who is not an admin gets a 403, and an
+        `organizationId` the caller does not act in is the generic 404, the
+        same as one that does not exist. A management token reads any
+        Organization with the `auditlog:read` scope. Every caller sees the
+        same items: a change Confeature made to the Organization (its plan, a
+        member removed by a management token) shows the `Confeature` actor,
+        with no email and no reason.
+      tags: [Audit logs]
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: organizationId
+          required: true
+          description: The identifier of the Organization.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: productId
+          required: false
+          description: >
+            The identifier of the Product. A Product that is unknown, deleted
+            or another Organization's is no error: the items are the
+            Organization's own, so a deleted Product's history is returned and
+            any other id matches none.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: configId
+          required: false
+          description: The identifier of the Config.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: environmentId
+          required: false
+          description: The identifier of the Environment.
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: auditLogType
+          required: false
+          description: Filter Audit logs by Audit log type.
+          schema:
+            $ref: "#/components/schemas/AuditLogType"
+        - in: query
+          name: fromUtcDateTime
+          required: false
+          description: Filter Audit logs by starting UTC date.
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: toUtcDateTime
+          required: false
+          description: Filter Audit logs by ending UTC date.
+          schema:
+            type: string
+            format: date-time
+        # --- Confeature additive filters (no ConfigCat equivalent; parity-safe —
+        #     a ConfigCat client simply omits them, absent = no filter). Serve
+        #     "by actor" and per-flag history. ---
+        - in: query
+          name: actorId
+          required: false
+          schema:
+            type: string
+          description: >
+            Filter by acting principal id (user or management token), as the
+            item shows it: an item showing the `Confeature` actor matches
+            `confeature`, never the id it replaces. Confeature extension.
+        - in: query
+          name: settingKey
+          required: false
+          schema:
+            type: string
+          description: Filter by feature-flag key (per-flag history). Confeature extension.
+      responses:
+        "200":
+          description: >
+            The Organization's audit log items, newest-first (bare array, no
+            pagination — mirrors ConfigCat's v1), at most 1000.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogItemModel"
+        "400":
+          description: >
+            A parameter is malformed, or the window ends before it starts or
+            spans more than 30 days.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Token lacks auditlog:read, or the caller is not an Organization Admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: >
+            The Organization does not exist, or the caller does not act in it.
+            Generic envelope: the two cases are indistinguishable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   # ── Release Guardian — management plane ONLY. Does NOT touch
   #    the SDK eval wire (config_v6 / ConfigV6). The inbound webhook is token-auth
   #    (the path token IS the auth); every other route is scope-guarded with a
@@ -10878,9 +11023,9 @@ components:
       additionalProperties: false
       required: [auditLogId, auditLogDateTime, auditLogTypeEnum]
       description: >
-        A single config-plane change in a product's audit log.
+        A single change in a product's or an organization's audit log.
         Mirrors ConfigCat's audit-log item shape: the structured `before`/
-        `after` snapshots + `configId`/`environmentId` are Confeature-only
+        `after` snapshots + `productId`/`configId`/`environmentId` are Confeature-only
         additive members carried for the back-office diff view + the
         Release Guardian rollback.
       properties:
@@ -10920,6 +11065,14 @@ components:
         after:
           nullable: true
           description: Structured post-change snapshot (Confeature extension).
+        productId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            The Product the change was made in, kept after the Product is
+            deleted; null for an Organization-level change (Confeature
+            extension).
         configId:
           type: string
           format: uuid
