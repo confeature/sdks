@@ -5812,9 +5812,10 @@ paths:
         `organizationId` the caller does not act in is the generic 404, the
         same as one that does not exist. A management token reads any
         Organization with the `auditlog:read` scope. Every caller sees the
-        same items: a change Confeature made to the Organization (its plan, a
-        member removed by a management token) shows the `Confeature` actor,
-        with no email and no reason.
+        same items: a change no user of the Organization made (one made with
+        a management token, which only Confeature holds, or by the system),
+        and Confeature's change to the Organization's plan, shows the
+        `Confeature` actor, with no email and no reason.
       tags: [Audit logs]
       security:
         - bearerAuth: []
