@@ -2336,7 +2336,7 @@ export interface components {
       /** @description The content of the reference line. */
       lineText: string | null;
     };
-    /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. The creator fields are always null: Confeature does not return member identities through this model. */
+    /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. `creatorEmail` and `creatorFullName` name the member who created the setting, and are null together otherwise. */
     SettingDataV2Model: {
       /** Format: int32 */
       settingId: number;
@@ -2349,7 +2349,9 @@ export interface components {
       order: number;
       /** Format: date-time */
       createdAt: string | null;
+      /** @description The email address of the member who created the setting. Null for a caller who may not read the organization's member list (a management token without scope `*`, or a member reading an organization other than the one they act in), for a creator who is no longer a member or whose account was deleted, for a setting created with a management token, and for a setting created before authors were recorded. Null together with `creatorFullName`. */
       creatorEmail: string | null;
+      /** @description The creator's name, as the organization's member list shows it. Null exactly when `creatorEmail` is. */
       creatorFullName: string | null;
       /** @description A collection of Variations for a Feature Flag or Setting, in their order. */
       predefinedVariations: components["schemas"]["PredefinedVariationModel"][];
@@ -2849,7 +2851,7 @@ export interface components {
       /** Format: int32 */
       maxConditionPerTargetingRuleCount: number;
     };
-    /** @description One setting's value in one environment, as ConfigCat's `ConfigSettingFormulaModel` (an entry of get-setting-values-v2): the fields of SettingFormulaModel without its config and environment envelope. The person fields are always null, and approvals are not supported, so `changeRequestCount` is 0. */
+    /** @description One setting's value in one environment, as ConfigCat's `ConfigSettingFormulaModel` (an entry of get-setting-values-v2): the fields of SettingFormulaModel without its config and environment envelope. The person fields name who last wrote the value, and approvals are not supported, so `changeRequestCount` is 0. */
     ConfigSettingFormulaModel: {
       /**
        * Format: uuid
@@ -2863,7 +2865,9 @@ export interface components {
       /** Format: date-time */
       updatedAt: string | null;
       percentageEvaluationAttribute: string | null;
+      /** @description The email address of the member who last wrote this value in this environment. Null for a caller who may not read the organization's member list (a management token without scope `*`, or a member reading an organization other than the one they act in), for a writer who is no longer a member or whose account was deleted, for a value last written with a management token, and for a value not written since authors were recorded. Null together with `lastUpdaterUserFullName`. */
       lastUpdaterUserEmail: string | null;
+      /** @description The last writer's name, as the organization's member list shows it. Null exactly when `lastUpdaterUserEmail` is. */
       lastUpdaterUserFullName: string | null;
       integrationLinks: Record<string, never>[];
       /** @description The tags attached to the Feature Flag or Setting, by assignment order. */
@@ -2887,7 +2891,7 @@ export interface components {
       /** @description True when a change note (`reason`) is required for a value change in this environment. */
       reasonRequired: boolean;
     };
-    /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields are always null, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
+    /** @description A setting's value in one environment, as ConfigCat's `SettingFormulaModel` (get-setting-value-v2). The person fields name who last wrote the value, and approvals are not supported, so `approveRequired`, `canBypassApproval` and `changeRequestCount` are false / false / 0. */
     SettingFormulaModel: {
       /**
        * Format: uuid
@@ -2901,7 +2905,9 @@ export interface components {
       /** Format: date-time */
       updatedAt: string | null;
       percentageEvaluationAttribute: string | null;
+      /** @description The email address of the member who last wrote this value in this environment. Null for a caller who may not read the organization's member list (a management token without scope `*`, or a member reading an organization other than the one they act in), for a writer who is no longer a member or whose account was deleted, for a value last written with a management token, and for a value not written since authors were recorded. Null together with `lastUpdaterUserFullName`. */
       lastUpdaterUserEmail: string | null;
+      /** @description The last writer's name, as the organization's member list shows it. Null exactly when `lastUpdaterUserEmail` is. */
       lastUpdaterUserFullName: string | null;
       integrationLinks: Record<string, never>[];
       /** @description The tags attached to the Feature Flag or Setting, by assignment order. */

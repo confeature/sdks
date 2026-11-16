@@ -8144,8 +8144,8 @@ components:
       type: object
       description: >
         The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's
-        `SettingDataV2Model`. The creator fields are always null: Confeature
-        does not return member identities through this model.
+        `SettingDataV2Model`. `creatorEmail` and `creatorFullName` name the
+        member who created the setting, and are null together otherwise.
       required:
         - settingId
         - key
@@ -8184,9 +8184,20 @@ components:
         creatorEmail:
           type: string
           nullable: true
+          description: >
+            The email address of the member who created the setting. Null for
+            a caller who may not read the organization's member list (a
+            management token without scope `*`, or a member reading an
+            organization other than the one they act in), for a creator who is
+            no longer a member or whose account was deleted, for a setting
+            created with a management token, and for a setting created before
+            authors were recorded. Null together with `creatorFullName`.
         creatorFullName:
           type: string
           nullable: true
+          description: >
+            The creator's name, as the organization's member list shows it.
+            Null exactly when `creatorEmail` is.
         predefinedVariations:
           type: array
           description: >
@@ -9335,8 +9346,8 @@ components:
         One setting's value in one environment, as ConfigCat's
         `ConfigSettingFormulaModel` (an entry of get-setting-values-v2): the
         fields of SettingFormulaModel without its config and environment
-        envelope. The person fields are always null, and approvals are not
-        supported, so `changeRequestCount` is 0.
+        envelope. The person fields name who last wrote the value, and
+        approvals are not supported, so `changeRequestCount` is 0.
       required:
         - lastVersionId
         - defaultValue
@@ -9377,9 +9388,21 @@ components:
         lastUpdaterUserEmail:
           type: string
           nullable: true
+          description: >
+            The email address of the member who last wrote this value in this
+            environment. Null for a caller who may not read the organization's
+            member list (a management token without scope `*`, or a member
+            reading an organization other than the one they act in), for a
+            writer who is no longer a member or whose account was deleted, for
+            a value last written with a management token, and for a value not
+            written since authors were recorded. Null together with
+            `lastUpdaterUserFullName`.
         lastUpdaterUserFullName:
           type: string
           nullable: true
+          description: >
+            The last writer's name, as the organization's member list shows it.
+            Null exactly when `lastUpdaterUserEmail` is.
         integrationLinks:
           type: array
           maxItems: 0
@@ -9446,8 +9469,8 @@ components:
       type: object
       description: >
         A setting's value in one environment, as ConfigCat's
-        `SettingFormulaModel` (get-setting-value-v2). The person fields are
-        always null, and approvals are not supported, so `approveRequired`,
+        `SettingFormulaModel` (get-setting-value-v2). The person fields name
+        who last wrote the value, and approvals are not supported, so `approveRequired`,
         `canBypassApproval` and `changeRequestCount` are false / false / 0.
       required:
         - lastVersionId
@@ -9496,9 +9519,21 @@ components:
         lastUpdaterUserEmail:
           type: string
           nullable: true
+          description: >
+            The email address of the member who last wrote this value in this
+            environment. Null for a caller who may not read the organization's
+            member list (a management token without scope `*`, or a member
+            reading an organization other than the one they act in), for a
+            writer who is no longer a member or whose account was deleted, for
+            a value last written with a management token, and for a value not
+            written since authors were recorded. Null together with
+            `lastUpdaterUserFullName`.
         lastUpdaterUserFullName:
           type: string
           nullable: true
+          description: >
+            The last writer's name, as the organization's member list shows it.
+            Null exactly when `lastUpdaterUserEmail` is.
         integrationLinks:
           type: array
           maxItems: 0
