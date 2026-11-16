@@ -54,10 +54,50 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Create an account and sign in
-     * @description Confeature-original endpoint: ConfigCat's public API has no account creation (its sign-up is a dashboard flow), so no parity drift exists to violate. Creates the user in a new private organization and, on success, issues the same session cookie as /v1/auth/login. Rate limited per client IP. Every failure (an email already registered, the rate limit, a storage error) answers the SAME 409 body, and a malformed body answers that body with a 400, so the response never reveals whether an account exists.
+     * Start a sign-up; the account exists once the emailed link is used
+     * @description Confeature-original endpoint: ConfigCat's public API has no account creation (its sign-up is a dashboard flow), so no parity drift exists to violate. Since #1169 it creates no account: it stores a pending registration and mails a single-use link, valid 24 hours, to the address (POST /v1/auth/verify-email uses it). The account (a user in a new private organization, signed in) is created only when the link is used. Every well-formed request is answered the same 202, with the same body and headers apart from the `__Host-cfsignup` binding's random value, whether the address is new, has an account (which is mailed "someone tried to sign up with your address" instead), has a pending sign-up, or has had its mail budget spent (3 mails an hour, 10 a day per address, shared with the resend). The binding is what lets this browser use the link without typing the password again. Rate limited per client IP (5 a day).
      */
     post: operations["authSignup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/verify-email": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Use an emailed verification link
+     * @description Confeature addition (#1169). The dashboard's /verify-email page posts the link's token here from a button, never on load. The token proves the mailbox; the registrant is proven by the `__Host-cfsignup` binding of the browser that signed up, by the account's own session (for an existing account that asked for its link), or by the password. On a pending sign-up it creates the account (email verified) and signs in; on an existing account it marks the address verified, and signs in when proven by the password. Five wrong passwords end the link.
+     */
+    post: operations["authVerifyEmail"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/verify-email/resend": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mail the signed-in account a new verification link
+     * @description Confeature addition (#1169). The way out for an account whose address is not verified (made before #1169, invited, or the bootstrap account), which every other operation refuses with 403 `email_unverified`. Cookie session only. The new link supersedes the older ones once it is sent. Shares the per-address mail budget with sign-up, which fails closed.
+     */
+    post: operations["authVerifyEmailResend"];
     delete?: never;
     options?: never;
     head?: never;
@@ -195,7 +235,7 @@ export interface paths {
     put?: never;
     /**
      * Complete a password reset
-     * @description Confeature-original endpoint. Exchanges a valid, unexpired, unconsumed reset token plus a new password for an updated credential. On success the new argon2id hash is written, the token is consumed (single-use), the address counts as verified, and ALL of the account's sessions, CLI tokens, MCP tokens and Public API credentials are revoked, with a device sign-in approved but not yet collected. Only the account's own sessions and credentials end: nobody is removed from an organization and no invitation is withdrawn, and the notice names the people who joined through invitations this account sent. The user must sign in again with the new password. A rejected (weak) password does NOT consume the token, so the same link can be retried within its lifetime. A malformed body, a weak password, or an invalid/expired/consumed token all return a single uniform 400 (no distinction that reveals which condition failed).
+     * @description Confeature-original endpoint. Exchanges a valid, unexpired, unconsumed reset token plus a new password for an updated credential. On success the new argon2id hash is written, the token is consumed (single-use), the address counts as verified, and ALL of the account's sessions, CLI tokens, MCP tokens and Public API credentials are revoked, with a device sign-in approved but not yet collected. Only the account's own sessions and credentials end: nobody is removed from an organization and no invitation is withdrawn, and the notice names the people who joined through invitations this account sent. One exception (#1169): on an account whose address had never been verified, the invitations it sent that nobody has redeemed are deleted, as they may be a stranger's who registered the address first. The user must sign in again with the new password. A rejected (weak) password does NOT consume the token, so the same link can be retried within its lifetime. A malformed body, a weak password, or an invalid/expired/consumed token all return a single uniform 400 (no distinction that reveals which condition failed).
      */
     post: operations["authPasswordResetConfirm"];
     delete?: never;
@@ -315,7 +355,7 @@ export interface paths {
     put?: never;
     /**
      * Spend an emailed link, attach Google and sign in
-     * @description Confeature-original endpoint. Spends the token of the link /v1/auth/link/google/email mailed, attaches `sso_provider_id='google'` + `sso_subject` from the frozen identity, creates a session and sets the `__Host-cfsession` cookie, but only from the browser that asked for the link (its `__Host-cflink`). From any other browser it attaches nothing and answers 202: that browser is given an approval (a new `__Host-cflink`, 10 minutes) that a Google sign-in in it, as the same address and the same Google `sub`, finishes at the callback. So neither a stranger's browser nor a stranger's Google account can finish what the mailbox approved. The dashboard's link opens a screen that POSTs here on a click, never on the page load, so a mail scanner following the link connects nothing. An account already holding an identity keeps it. The link proves the mailbox: on an account whose address nobody had verified it also removes the password and revokes every session, token and credential, as they may be a stranger's who registered the address first. Only the account's own sessions and credentials end: nobody is removed from an organization and no invitation is withdrawn, and the notice names the people who joined through invitations this account sent. A verified account only gains Google.
+     * @description Confeature-original endpoint. Spends the token of the link /v1/auth/link/google/email mailed, attaches `sso_provider_id='google'` + `sso_subject` from the frozen identity, creates a session and sets the `__Host-cfsession` cookie, but only from the browser that asked for the link (its `__Host-cflink`). From any other browser it attaches nothing and answers 202: that browser is given an approval (a new `__Host-cflink`, 10 minutes) that a Google sign-in in it, as the same address and the same Google `sub`, finishes at the callback. So neither a stranger's browser nor a stranger's Google account can finish what the mailbox approved. The dashboard's link opens a screen that POSTs here on a click, never on the page load, so a mail scanner following the link connects nothing. An account already holding an identity keeps it. The link proves the mailbox: on an account whose address nobody had verified it also removes the password and revokes every session, token and credential, as they may be a stranger's who registered the address first. Only the account's own sessions and credentials end: nobody is removed from an organization and no invitation is withdrawn, and the notice names the people who joined through invitations this account sent. One exception (#1169): on an account whose address had never been verified, the invitations it sent that nobody has redeemed are deleted, as they may be the stranger's. A verified account only gains Google.
      */
     post: operations["authLinkGoogleEmailConfirm"];
     delete?: never;
@@ -1849,6 +1889,8 @@ export interface components {
       created_at: number;
       /** @description Confeature addition (#1123). The URL of the user's own avatar image, `/v1/me/avatar?v=<version>`, relative to the origin the request was made to, or null when they have none (the dashboard shows the letter of their name). Present on `GET /v1/auth/me` and `GET /v1/auth/session` for a cookie session; absent from the sign-in answers, whose client reads the session next. */
       avatarUrl?: string | null;
+      /** @description Confeature addition (#1169). Whether the account's address is verified. When false, every operation but GET /v1/auth/me, POST /v1/auth/verify-email, POST /v1/auth/verify-email/resend, POST /v1/auth/logout and the account deletion answers 403 `email_unverified`. Present on `GET /v1/auth/me`, `GET /v1/auth/session` and the verify-email answer. */
+      emailVerified?: boolean;
     };
     /** @description Result of the public session probe GET /v1/auth/session. Always returned with HTTP 200 so a probe on a public route never surfaces a console-visible 401. */
     SessionProbe: {
@@ -1926,11 +1968,57 @@ export interface components {
       /** @description The new account's password. Same rule as /v1/auth/login. Hashed with argon2id server-side; never logged in plaintext. */
       password: string;
     };
-    /** @description The one body every POST /v1/auth/signup failure answers, whatever its cause, but one: `bad_request` is the same-origin guard's, when the request carried a Confeature cookie and a body that is not JSON (#1166). */
+    /** @description The one answer of POST /v1/auth/signup (#1169), the same for every address. */
+    SignupAccepted: {
+      /** @enum {string} */
+      status: "pending";
+      message: string;
+    };
+    /** @description The one body a malformed POST /v1/auth/signup answers, but one: `bad_request` is the same-origin guard's, when the request carried a Confeature cookie and a body that is not JSON (#1166). */
     SignupError: {
       /** @enum {string} */
       error: "signup_unavailable" | "bad_request";
-      /** @description One constant, user-facing message for every failure. */
+      /** @description One constant, user-facing message. */
+      message: string;
+    };
+    /** @description Request body for POST /v1/auth/verify-email (#1169). */
+    VerifyEmailRequest: {
+      /** @description The token from the emailed link's fragment. */
+      token: string;
+      /** @description The account's password, when this is not the browser that signed up (nor, for an existing account, one signed in to it). */
+      password?: string;
+    };
+    /** @description Every refusal of POST /v1/auth/verify-email (#1169). */
+    VerifyEmailError: {
+      /** @enum {string} */
+      error:
+        | "invalid_verification_link"
+        | "password_required"
+        | "wrong_password"
+        | "too_many_attempts"
+        | "forbidden"
+        | "bad_request";
+      message: string;
+    };
+    VerifyEmailResendAck: {
+      message: string;
+    };
+    /** @description Every refusal of POST /v1/auth/verify-email/resend (#1169). */
+    VerifyEmailResendError: {
+      /** @enum {string} */
+      error:
+        | "unauthorized"
+        | "already_verified"
+        | "too_many_attempts"
+        | "email_unavailable"
+        | "forbidden"
+        | "bad_request";
+      message: string;
+    };
+    /** @description Confeature addition (#1169). The 403 every operation answers for a principal (a session, a CLI token, an MCP token, a Public API credential) whose account's address is not verified, except GET /v1/auth/me, POST /v1/auth/verify-email, POST /v1/auth/verify-email/resend, POST /v1/auth/logout and GET / POST /v1/me/deletion. A management token is never refused this way. */
+    EmailUnverified: {
+      /** @enum {string} */
+      error: "email_unverified";
       message: string;
     };
     /** @description Request body for POST /v1/auth/sso/{provider}/start. All fields are optional. */
@@ -4103,17 +4191,18 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Account created; session cookie set in headers. */
-      201: {
+      /** @description Accepted, identically for every address. No session is created. */
+      202: {
         headers: {
+          /** @description `__Host-cfsignup`, this browser's sign-up binding, 24 hours. */
           "Set-Cookie"?: string;
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["User"];
+          "application/json": components["schemas"]["SignupAccepted"];
         };
       };
-      /** @description Malformed request body. Same body as the 409. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      /** @description Malformed request body: one constant body. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -4123,13 +4212,149 @@ export interface operations {
         };
       };
       403: components["responses"]["CrossOriginWrite"];
-      /** @description Sign-up could not complete: a duplicate email, the rate limit, or a transient failure, indistinguishable on purpose. */
+      /** @description Too many sign-ups from this client IP in the last 24 hours. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  authVerifyEmail: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["VerifyEmailRequest"];
+      };
+    };
+    responses: {
+      /** @description The address is verified and this browser is signed in. A session cookie is set unless the request already carried this account's. */
+      200: {
+        headers: {
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["User"];
+        };
+      };
+      /** @description The body is not JSON, from either of two sources: a body declared `application/json` that does not parse (a plain-text answer from the request parser), or, when the request carries a Confeature cookie, a body of another content type (the JSON `bad_request` envelope). Any other malformed body is the 410. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+          "text/plain": string;
+        };
+      };
+      /** @description `password_required` — another browser than the one that signed up, and no password; `wrong_password` — a wrong one. Or the same-origin guard's `forbidden` (cross-origin request refused), when the request carries a Confeature cookie and comes from neither the dashboard's origin nor an allowlisted one. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailError"];
+        };
+      };
+      /** @description `invalid_verification_link` — unknown, expired, superseded, already used or malformed: one uniform answer. Nothing is written. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailError"];
+        };
+      };
+      /** @description Too many link attempts from this client IP in the last hour. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailError"];
+        };
+      };
+    };
+  };
+  authVerifyEmailResend: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description A new link is on its way. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendAck"];
+        };
+      };
+      /** @description `bad_request`: the request carries a Confeature cookie and its body is not JSON (the same-origin guard). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendError"];
+        };
+      };
+      /** @description No valid cookie session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendError"];
+        };
+      };
+      /** @description `forbidden` (cross-origin request refused): the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted Origin. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendError"];
+        };
+      };
+      /** @description `already_verified` — the address is verified. */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SignupError"];
+          "application/json": components["schemas"]["VerifyEmailResendError"];
+        };
+      };
+      /** @description Too many links for this address, or from this client IP. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendError"];
+        };
+      };
+      /** @description `email_unavailable` — the mail budget cannot be read, so nothing was sent. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VerifyEmailResendError"];
         };
       };
     };
