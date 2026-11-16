@@ -1127,7 +1127,11 @@ export interface paths {
      * @description Returns the email and full name of the currently authenticated user. ConfigCat parity (their `GET /v1/me` returns the same `MeModel` shape). Confeature additionally exposes a richer `/v1/auth/me` (returns the full `User` schema with creation timestamp + session metadata); both endpoints coexist — `/v1/me` is the canonical parity surface for ConfigCat-style clients, `/v1/auth/me` is the Confeature-internal richer view.
      */
     get: operations["meGet"];
-    put?: never;
+    /**
+     * Change the signed-in user's own name (cookie-session authed)
+     * @description Confeature addition: ConfigCat's Public Management API has only `GET /v1/me`, and its dashboard's My Account page is where a name is changed. There is no path parameter, so only the caller's own name can change; nobody can change another person's name. `fullName` is trimmed, then must be 1 to 120 characters and hold no control character (Unicode `Cc`, which includes tabs and line breaks, nor U+2028 or U+2029); every other character is accepted, apostrophes, hyphens and non-Latin scripts included. A blank name is refused: there is no reset to the name derived from the email. Cookie session only, like the credential mints: a management token, a CLI or MCP token and a Public API credential are answered 401. A change records a `name_changed` auth event (`GET /v1/auth/events`) in the same commit. Saving the name already shown answers 200 and writes nothing, no event included. Audit-log rows already written are not rewritten: they keep the label they recorded. Each change spends the organization's write budget.
+     */
+    put: operations["updateMe"];
     post?: never;
     delete?: never;
     options?: never;
@@ -3069,7 +3073,7 @@ export interface components {
        * @description Identifier of the Organization Admin.
        */
       userId: string;
-      /** @description Name of the Organization Admin. */
+      /** @description Name of the Organization Admin: the name they set with PUT /v1/me, else one derived from the email's local part. */
       fullName: string;
       /**
        * Format: email
@@ -3083,6 +3087,7 @@ export interface components {
     OrganizationMemberModel: {
       /** Format: uuid */
       userId: string;
+      /** @description Name of the Member: the name they set with PUT /v1/me, else one derived from the email's local part. */
       fullName: string;
       /** Format: email */
       email: string;
@@ -3107,7 +3112,7 @@ export interface components {
        * @description Identifier of the Member's Permission Group. Always `0` until per-product permission groups ship (epic #820): today every Member of the Product's Organization reaches it, with no group.
        */
       permissionGroupId: number;
-      /** @description Name of the Member. Derived from the email's local part, as in `OrganizationMemberModel`. */
+      /** @description Name of the Member: the name they set with PUT /v1/me, else one derived from the email's local part, as in `OrganizationMemberModel`. */
       fullName: string;
       /**
        * Format: email
@@ -3253,7 +3258,7 @@ export interface components {
       /** Format: int32 */
       maxPredefinedVariations: number;
     };
-    /** @description Response shape for GET /v1/me. ConfigCat parity (me-model.ts). Returns ONLY identity — org membership is discovered via GET /v1/organizations. Confeature v1 derives `fullName` from the user's email local part until a profile-editing feature lands. */
+    /** @description Response shape for GET /v1/me and PUT /v1/me. ConfigCat parity (me-model.ts). Returns ONLY identity — org membership is discovered via GET /v1/organizations. `fullName` is the name the user set with PUT /v1/me, else one derived from the email's local part. */
     MeModel: {
       /** Format: email */
       email: string;
@@ -3325,7 +3330,8 @@ export interface components {
       | "public_api_credential_created"
       | "public_api_credential_revoked"
       | "invite_accepted"
-      | "password_reset";
+      | "password_reset"
+      | "name_changed";
     /**
      * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature values `configPublished` and `settingTargetingRulesChanged` (a change to a value's targeting rules, its sensitive comparison values redacted; ConfigCat records it under `settingValueChanged`). Confeature's emitter only produces the config-plane subset it supports.
      * @enum {string}
@@ -3585,6 +3591,11 @@ export interface components {
     /** @description The session user's own CLI logins. */
     CliTokenList: {
       tokens: components["schemas"]["CliTokenSummary"][];
+    };
+    /** @description Request body for PUT /v1/me (a Confeature addition). */
+    UpdateMeRequest: {
+      /** @description The caller's new name. Leading and trailing whitespace is trimmed first, and the bounds apply to what remains. It may not hold a control character (Unicode `Cc`, tabs and line breaks included) nor U+2028 or U+2029. */
+      fullName: string;
     };
     /** @description Request body for POST /v1/public-api-credentials. */
     CreatePublicApiCredentialRequest: {
@@ -7902,6 +7913,50 @@ export interface operations {
         };
       };
       429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  updateMe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateMeRequest"];
+      };
+    };
+    responses: {
+      /** @description The caller's identity, with the new name. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MeModel"];
+        };
+      };
+      /** @description `bad_request` — `fullName` is missing, blank after trimming, longer than 120 characters or holds a control character. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      403: components["responses"]["CrossOriginWrite"];
+      429: components["responses"]["RateLimited"];
     };
   };
   organizationsList: {

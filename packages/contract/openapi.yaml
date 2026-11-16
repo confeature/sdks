@@ -4569,6 +4569,61 @@ paths:
                 $ref: "#/components/schemas/AuthError"
         "429":
           $ref: "#/components/responses/TooManyAttempts"
+    put:
+      operationId: updateMe
+      summary: Change the signed-in user's own name (cookie-session authed)
+      description: >
+        Confeature addition: ConfigCat's Public Management API has only
+        `GET /v1/me`, and its dashboard's My Account page is where a name is
+        changed. There is no path parameter, so only the caller's own name can
+        change; nobody can change another person's name. `fullName` is trimmed,
+        then must be 1 to 120 characters and hold no control character
+        (Unicode `Cc`, which includes tabs and line breaks, nor U+2028 or
+        U+2029); every other character is accepted, apostrophes, hyphens and
+        non-Latin scripts included. A blank name is refused: there is no reset
+        to the name derived from the email. Cookie session only, like the
+        credential mints: a management token, a CLI or MCP token and a Public
+        API credential are answered 401. A change records a `name_changed` auth
+        event (`GET /v1/auth/events`) in the same commit. Saving the name
+        already shown answers 200 and writes nothing, no event included.
+        Audit-log rows already written are not rewritten: they keep the label
+        they recorded. Each change spends the organization's write budget.
+      tags: [Me]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeRequest"
+      responses:
+        "200":
+          description: The caller's identity, with the new name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeModel"
+        "400":
+          description: >
+            `bad_request` — `fullName` is missing, blank after trimming, longer
+            than 120 characters or holds a control character. Also
+            `bad_request` when the request carries a Confeature cookie and its
+            body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/organizations:
     get:
       operationId: organizationsList
@@ -9857,7 +9912,9 @@ components:
           description: Identifier of the Organization Admin.
         fullName:
           type: string
-          description: Name of the Organization Admin.
+          description: >
+            Name of the Organization Admin: the name they set with PUT /v1/me,
+            else one derived from the email's local part.
         email:
           type: string
           format: email
@@ -9883,6 +9940,9 @@ components:
           format: uuid
         fullName:
           type: string
+          description: >
+            Name of the Member: the name they set with PUT /v1/me, else one
+            derived from the email's local part.
         email:
           type: string
           format: email
@@ -9925,8 +9985,8 @@ components:
         fullName:
           type: string
           description: >
-            Name of the Member. Derived from the email's local part, as in
-            `OrganizationMemberModel`.
+            Name of the Member: the name they set with PUT /v1/me, else one
+            derived from the email's local part, as in `OrganizationMemberModel`.
         email:
           type: string
           format: email
@@ -10263,10 +10323,10 @@ components:
     MeModel:
       type: object
       description: >
-        Response shape for GET /v1/me. ConfigCat parity (me-model.ts).
-        Returns ONLY identity — org membership is discovered via GET
-        /v1/organizations. Confeature v1 derives `fullName` from the
-        user's email local part until a profile-editing feature lands.
+        Response shape for GET /v1/me and PUT /v1/me. ConfigCat parity
+        (me-model.ts). Returns ONLY identity — org membership is discovered
+        via GET /v1/organizations. `fullName` is the name the user set with
+        PUT /v1/me, else one derived from the email's local part.
       required: [email, fullName]
       properties:
         email:
@@ -10391,6 +10451,7 @@ components:
         - public_api_credential_revoked
         - invite_accepted
         - password_reset
+        - name_changed
     AuditLogType:
       type: string
       description: >
@@ -10841,6 +10902,21 @@ components:
           items:
             $ref: "#/components/schemas/CliTokenSummary"
       description: The session user's own CLI logins.
+    UpdateMeRequest:
+      type: object
+      additionalProperties: false
+      required: [fullName]
+      description: Request body for PUT /v1/me (a Confeature addition).
+      properties:
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: >
+            The caller's new name. Leading and trailing whitespace is trimmed
+            first, and the bounds apply to what remains. It may not hold a
+            control character (Unicode `Cc`, tabs and line breaks included) nor
+            U+2028 or U+2029.
     CreatePublicApiCredentialRequest:
       type: object
       additionalProperties: false
