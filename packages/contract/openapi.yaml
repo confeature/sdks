@@ -4838,9 +4838,10 @@ paths:
         GIF, AVIF, HEIC, BMP, ICO, an animated PNG and an animated WebP are
         refused. Metadata is removed before the image is stored, with no
         pixel re-encoded: PNG keeps IHDR, PLTE, tRNS, IDAT and IEND; JPEG keeps
-        SOI, the JFIF APP0 (without its thumbnail), DQT, DHT, SOF0 or SOF2,
-        DRI, the scans and EOI, so EXIF (GPS included), XMP, ICC and comments
-        go; WebP keeps VP8 or VP8L, and for VP8X its ALPH, with the ICC, EXIF
+        SOI, the JFIF APP0 (without its thumbnail), the Adobe APP14 cut to
+        its fixed 12 bytes (its colour transform), DQT, DHT, SOF0 or SOF2 of
+        1 or 3 components (a CMYK or YCCK JPEG is refused), DRI, the scans
+        and EOI, so EXIF (GPS included), XMP, ICC and comments go; WebP keeps VP8 or VP8L, and for VP8X its ALPH, with the ICC, EXIF
         and XMP chunks and flags removed. Anything after the image's end is
         dropped. One upload replaces the previous image and gets a new
         `avatarUrl`. Cookie session only (401 for any other credential). A
@@ -4876,7 +4877,8 @@ paths:
           description: >
             The image is refused, one fixed `error` each:
             `unsupported_image_type` (not a PNG, JPEG or WebP by its bytes, or a
-            JPEG that is neither baseline nor progressive), `animated_image`,
+            JPEG that is neither baseline nor progressive, or not of 1 or 3
+            components), `animated_image`,
             `malformed_image` (a length past the end, a bad CRC, a truncated
             file, a structure the format does not allow) or
             `image_dimensions_out_of_range`.
