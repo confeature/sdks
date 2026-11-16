@@ -9899,10 +9899,12 @@ components:
     MemberModel:
       type: object
       description: >
-        A Member of a Product. ConfigCat parity (`MemberModel`). One
-        divergence: ConfigCat marks `userId`, `fullName` and `email` as
+        A Member of a Product. ConfigCat parity (`MemberModel`). Two
+        divergences: ConfigCat marks `userId`, `fullName` and `email` as
         nullable; Confeature always sets them (same as
-        `OrganizationMemberModel`), so they are not.
+        `OrganizationMemberModel`), so they are not. And `userId` is a
+        UUID here, where ConfigCat declares a plain string, because every
+        Confeature user id is one (see `OrganizationMemberModel.userId`).
       required: [userId, productId, permissionGroupId, fullName, email]
       properties:
         userId:

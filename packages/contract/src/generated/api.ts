@@ -3090,7 +3090,7 @@ export interface components {
       /** @description The permissions of the Member. v1 of Confeature does not implement per-product permissions; this field always returns an empty array. */
       permissions: components["schemas"]["OrganizationPermissionModel"][];
     };
-    /** @description A Member of a Product. ConfigCat parity (`MemberModel`). One divergence: ConfigCat marks `userId`, `fullName` and `email` as nullable; Confeature always sets them (same as `OrganizationMemberModel`), so they are not. */
+    /** @description A Member of a Product. ConfigCat parity (`MemberModel`). Two divergences: ConfigCat marks `userId`, `fullName` and `email` as nullable; Confeature always sets them (same as `OrganizationMemberModel`), so they are not. And `userId` is a UUID here, where ConfigCat declares a plain string, because every Confeature user id is one (see `OrganizationMemberModel.userId`). */
     MemberModel: {
       /**
        * Format: uuid
