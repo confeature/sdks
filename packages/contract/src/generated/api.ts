@@ -1163,6 +1163,34 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/me/avatar": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the signed-in user's own avatar image (cookie-session authed)
+     * @description Confeature addition: ConfigCat's My Account shows an avatar and has no route for it. Answers the image the caller uploaded with `PUT /v1/me/avatar`; there is no path parameter, so nobody can read another person's avatar. Cookie session only: a management token, a CLI or MCP token and a Public API credential are answered 401. The image is never served as active content and never publicly cacheable: its type is the one detected from its bytes, with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Content-Disposition: attachment`, and `Cross-Origin-Resource-Policy: same-origin`. When `v` equals the stored version (the `avatarUrl` the api handed out), `Cache-Control` is `private, max-age=31536000, immutable`; otherwise `private, no-cache`, revalidated by the ETag.
+     */
+    get: operations["getMyAvatar"];
+    /**
+     * Upload the signed-in user's own avatar image (cookie-session authed)
+     * @description Confeature addition (see `getMyAvatar`). The body is the raw image: a PNG, a JPEG (baseline or progressive) or a WebP, detected from its own bytes; the declared `Content-Type` must be one of the three (else 415) but does not decide the stored type, and no filename is read. At most 256 KiB, counted while the body is read, whatever `Content-Length` says (413). Each side 32 to 1024 pixels, read from the header. SVG, GIF, AVIF, HEIC, BMP, ICO, an animated PNG and an animated WebP are refused. Metadata is removed before the image is stored, with no pixel re-encoded: PNG keeps IHDR, PLTE, tRNS, IDAT and IEND; JPEG keeps SOI, the JFIF APP0 (without its thumbnail), DQT, DHT, SOF0 or SOF2, DRI, the scans and EOI, so EXIF (GPS included), XMP, ICC and comments go; WebP keeps VP8 or VP8L, and for VP8X its ALPH, with the ICC, EXIF and XMP chunks and flags removed. Anything after the image's end is dropped. One upload replaces the previous image and gets a new `avatarUrl`. Cookie session only (401 for any other credential). A success records an `avatar_changed` auth event (`GET /v1/auth/events`) in the same commit. Each request spends the organization's write budget, a refused one included.
+     */
+    put: operations["updateMyAvatar"];
+    post?: never;
+    /**
+     * Remove the signed-in user's own avatar image (cookie-session authed)
+     * @description Confeature addition (see `getMyAvatar`). Removes the caller's avatar; the dashboard shows the letter again. Idempotent: with no avatar it answers 204 and records nothing. A removal records an `avatar_removed` auth event in the same commit. Cookie session only. The avatar also leaves with the account: deleting the user deletes it.
+     */
+    delete: operations["deleteMyAvatar"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/organizations": {
     parameters: {
       query?: never;
@@ -1775,6 +1803,8 @@ export interface components {
       email: string;
       /** @description Unix ms timestamp at user creation. */
       created_at: number;
+      /** @description Confeature addition (#1123). The URL of the user's own avatar image, `/v1/me/avatar?v=<version>`, relative to the origin the request was made to, or null when they have none (the dashboard shows the letter of their name). Present on `GET /v1/auth/me` and `GET /v1/auth/session` for a cookie session; absent from the sign-in answers, whose client reads the session next. */
+      avatarUrl?: string | null;
     };
     /** @description Result of the public session probe GET /v1/auth/session. Always returned with HTTP 200 so a probe on a public route never surfaces a console-visible 401. */
     SessionProbe: {
@@ -3362,7 +3392,9 @@ export interface components {
       | "public_api_credential_revoked"
       | "invite_accepted"
       | "password_reset"
-      | "name_changed";
+      | "name_changed"
+      | "avatar_changed"
+      | "avatar_removed";
     /**
      * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature values `configPublished` and `settingTargetingRulesChanged` (a change to a value's targeting rules, its sensitive comparison values redacted; ConfigCat records it under `settingValueChanged`). Confeature's emitter only produces the config-plane subset it supports.
      * @enum {string}
@@ -3622,6 +3654,11 @@ export interface components {
     /** @description The session user's own CLI logins. */
     CliTokenList: {
       tokens: components["schemas"]["CliTokenSummary"][];
+    };
+    /** @description 200 response of PUT /v1/me/avatar (a Confeature addition). */
+    MyAvatar: {
+      /** @description `/v1/me/avatar?v=<version>`: where the uploaded image is read, a new version on every upload. */
+      avatarUrl: string;
     };
     /** @description Request body for PUT /v1/me (a Confeature addition). */
     UpdateMeRequest: {
@@ -8077,6 +8114,162 @@ export interface operations {
           "application/json": components["schemas"]["Error"];
         };
       };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      403: components["responses"]["CrossOriginWrite"];
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  getMyAvatar: {
+    parameters: {
+      query?: {
+        /** @description The version token of `avatarUrl`. A new upload has a new token, so a URL carrying one may be cached for a year. */
+        v?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The caller's avatar image, stripped of its metadata. */
+      200: {
+        headers: {
+          /** @description `attachment; filename="avatar.<png|jpg|webp>"`. */
+          "Content-Disposition"?: string;
+          /** @description `default-src 'none'; sandbox`. */
+          "Content-Security-Policy"?: string;
+          /** @description `nosniff`. */
+          "X-Content-Type-Options"?: string;
+          /** @description `same-origin`. */
+          "Cross-Origin-Resource-Policy"?: string;
+          /** @description `private, max-age=31536000, immutable` when `v` is the stored version, else `private, no-cache`. Never `public`. */
+          "Cache-Control"?: string;
+          /** @description The quoted SHA-256 (hex) of the stored image. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "image/png": string;
+          "image/jpeg": string;
+          "image/webp": string;
+        };
+      };
+      /** @description `If-None-Match` names the stored image's ETag. Carries the same headers as the 200, but no body and no `Content-Type`. */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description `not_found`: the caller has no avatar. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  updateMyAvatar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "image/png": string;
+        "image/jpeg": string;
+        "image/webp": string;
+      };
+    };
+    responses: {
+      /** @description Stored. `avatarUrl` is where the new image is read. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MyAvatar"];
+        };
+      };
+      /** @description The image is refused, one fixed `error` each: `unsupported_image_type` (not a PNG, JPEG or WebP by its bytes, or a JPEG that is neither baseline nor progressive), `animated_image`, `malformed_image` (a length past the end, a bad CRC, a truncated file, a structure the format does not allow) or `image_dimensions_out_of_range`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      403: components["responses"]["CrossOriginWrite"];
+      /** @description `payload_too_large`: the body is over 256 KiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description `unsupported_media_type`: the declared `Content-Type` is not `image/png`, `image/jpeg` or `image/webp`. */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  deleteMyAvatar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The caller has no avatar any more. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["NotJsonWrite"];
       /** @description No valid web session. */
       401: {
         headers: {
