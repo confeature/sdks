@@ -5095,7 +5095,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
+                anyOf:
+                  - $ref: "#/components/schemas/RateLimited"
+                  - $ref: "#/components/schemas/Error"
         "503":
           $ref: "#/components/responses/PasswordCheckUnavailable"
   /v1/organizations:

@@ -8470,7 +8470,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["Error"];
+          "application/json": components["schemas"]["RateLimited"] | components["schemas"]["Error"];
         };
       };
       503: components["responses"]["PasswordCheckUnavailable"];
