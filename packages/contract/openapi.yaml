@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.7.1
+  version: 0.8.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -4654,6 +4654,74 @@ paths:
           description: >
             Organization not found OR the authenticated user is not a
             member. Generic envelope — no enumeration of which case
+            triggered the 404.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/products/{productId}/members:
+    get:
+      operationId: getProductMembers
+      summary: List Product Members
+      description: >
+        This endpoint returns the list of Members that belongs to the given
+        Product, identified by the `productId` parameter. ConfigCat's
+        `get-product-members`, in this contract's camelCase operationId
+        convention. The response is a bare array of `MemberModel`.
+
+        Under Confeature's access model today the list is the Product's
+        Organization roster: there is no per-product ACL, so every Member of
+        the Organization that owns the Product (admins and non-admins alike)
+        reaches the Product and is listed, in the order they joined the
+        Organization. A Member's `productId` is the requested one.
+        `permissionGroupId` is always `0` until per-product permission groups
+        ship (epic #820).
+
+        The caller needs the same access as to
+        `GET /v1/organizations/{organizationId}/members` for the Product's
+        Organization: any authenticated credential acting in it (the
+        membership reads take no scope), or a management token. A credential
+        acting in another Organization, and a Product that does not exist,
+        both get the generic 404 envelope, byte-identical. NO 403 (existence
+        enumeration mitigation), and no address is returned to a caller who
+        could not read that roster.
+      tags: [Products]
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+        - basicAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The identifier of the Product.
+      responses:
+        "200":
+          description: List of Product Members.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MemberModel"
+        "401":
+          headers:
+            WWW-Authenticate:
+              $ref: "#/components/headers/BasicChallenge"
+          description: No valid credential presented.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthError"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        "404":
+          description: >
+            Product not found OR it belongs to an Organization the caller does
+            not act in. Generic envelope, no enumeration of which case
             triggered the 404.
           content:
             application/json:
@@ -9828,6 +9896,39 @@ components:
             The permissions of the Member. v1 of Confeature does not
             implement per-product permissions; this field always returns
             an empty array.
+    MemberModel:
+      type: object
+      description: >
+        A Member of a Product. ConfigCat parity (`MemberModel`). One
+        divergence: ConfigCat marks `userId`, `fullName` and `email` as
+        nullable; Confeature always sets them (same as
+        `OrganizationMemberModel`), so they are not.
+      required: [userId, productId, permissionGroupId, fullName, email]
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: Identifier of the Member.
+        productId:
+          type: string
+          format: uuid
+          description: Identifier of the Product where the Member has access.
+        permissionGroupId:
+          type: integer
+          format: int64
+          description: >
+            Identifier of the Member's Permission Group. Always `0` until
+            per-product permission groups ship (epic #820): today every Member
+            of the Product's Organization reaches it, with no group.
+        fullName:
+          type: string
+          description: >
+            Name of the Member. Derived from the email's local part, as in
+            `OrganizationMemberModel`.
+        email:
+          type: string
+          format: email
+          description: Email of the Member.
     OrganizationPermissionModel:
       type: object
       description: >

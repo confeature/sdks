@@ -1175,6 +1175,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/products/{productId}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Product Members
+     * @description This endpoint returns the list of Members that belongs to the given Product, identified by the `productId` parameter. ConfigCat's `get-product-members`, in this contract's camelCase operationId convention. The response is a bare array of `MemberModel`.
+     *     Under Confeature's access model today the list is the Product's Organization roster: there is no per-product ACL, so every Member of the Organization that owns the Product (admins and non-admins alike) reaches the Product and is listed, in the order they joined the Organization. A Member's `productId` is the requested one. `permissionGroupId` is always `0` until per-product permission groups ship (epic #820).
+     *     The caller needs the same access as to `GET /v1/organizations/{organizationId}/members` for the Product's Organization: any authenticated credential acting in it (the membership reads take no scope), or a management token. A credential acting in another Organization, and a Product that does not exist, both get the generic 404 envelope, byte-identical. NO 403 (existence enumeration mitigation), and no address is returned to a caller who could not read that roster.
+     */
+    get: operations["getProductMembers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/organizations/{organizationId}/members/{userId}": {
     parameters: {
       query?: never;
@@ -3067,6 +3089,31 @@ export interface components {
       twoFactorEnabled: boolean;
       /** @description The permissions of the Member. v1 of Confeature does not implement per-product permissions; this field always returns an empty array. */
       permissions: components["schemas"]["OrganizationPermissionModel"][];
+    };
+    /** @description A Member of a Product. ConfigCat parity (`MemberModel`). One divergence: ConfigCat marks `userId`, `fullName` and `email` as nullable; Confeature always sets them (same as `OrganizationMemberModel`), so they are not. */
+    MemberModel: {
+      /**
+       * Format: uuid
+       * @description Identifier of the Member.
+       */
+      userId: string;
+      /**
+       * Format: uuid
+       * @description Identifier of the Product where the Member has access.
+       */
+      productId: string;
+      /**
+       * Format: int64
+       * @description Identifier of the Member's Permission Group. Always `0` until per-product permission groups ship (epic #820): today every Member of the Product's Organization reaches it, with no group.
+       */
+      permissionGroupId: number;
+      /** @description Name of the Member. Derived from the email's local part, as in `OrganizationMemberModel`. */
+      fullName: string;
+      /**
+       * Format: email
+       * @description Email of the Member.
+       */
+      email: string;
     };
     /** @description Per-product permission entry (ConfigCat parity placeholder). Confeature v1 returns EMPTY arrays in `OrganizationMemberModel.permissions`. The shape is published so client codegen does not break; field-level fidelity will land when per-product ACL ships. */
     OrganizationPermissionModel: Record<string, never>;
@@ -7919,6 +7966,49 @@ export interface operations {
         };
       };
       /** @description Organization not found OR the authenticated user is not a member. Generic envelope — no enumeration of which case triggered the 404. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  getProductMembers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Product. */
+        productId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List of Product Members. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MemberModel"][];
+        };
+      };
+      /** @description No valid credential presented. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthError"];
+        };
+      };
+      /** @description Product not found OR it belongs to an Organization the caller does not act in. Generic envelope, no enumeration of which case triggered the 404. */
       404: {
         headers: {
           [name: string]: unknown;
