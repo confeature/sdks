@@ -1129,7 +1129,7 @@ export interface paths {
     get: operations["meGet"];
     /**
      * Change the signed-in user's own name (cookie-session authed)
-     * @description Confeature addition: ConfigCat's Public Management API has only `GET /v1/me`, and its dashboard's My Account page is where a name is changed. There is no path parameter, so only the caller's own name can change; nobody can change another person's name. `fullName` is trimmed, then must be 1 to 120 characters and hold no control character (Unicode `Cc`, which includes tabs and line breaks, nor U+2028 or U+2029); every other character is accepted, apostrophes, hyphens and non-Latin scripts included. A blank name is refused: there is no reset to the name derived from the email. Cookie session only, like the credential mints: a management token, a CLI or MCP token and a Public API credential are answered 401. A change records a `name_changed` auth event (`GET /v1/auth/events`) in the same commit. Saving the name already shown answers 200 and writes nothing, no event included. Audit-log rows already written are not rewritten: they keep the label they recorded. Each change spends the organization's write budget.
+     * @description Confeature addition: ConfigCat's Public Management API has only `GET /v1/me`, and its dashboard's My Account page is where a name is changed. There is no path parameter, so only the caller's own name can change; nobody can change another person's name. `fullName` is trimmed, then must be 1 to 120 characters and hold no control character (Unicode `Cc`, which includes tabs and line breaks, nor U+2028 or U+2029); every other character is accepted, apostrophes, hyphens and non-Latin scripts included. A blank name is refused: there is no reset to the name derived from the email. Cookie session only, like the credential mints: a management token, a CLI or MCP token and a Public API credential are answered 401. A change records a `name_changed` auth event (`GET /v1/auth/events`) in the same commit. Saving the name already shown answers 200 and writes nothing, no event included. Audit-log rows already written are not rewritten: they keep the label they recorded. Each request spends the organization's write budget, an unchanged name or a refused body included.
      */
     put: operations["updateMe"];
     post?: never;
@@ -3594,7 +3594,7 @@ export interface components {
     };
     /** @description Request body for PUT /v1/me (a Confeature addition). */
     UpdateMeRequest: {
-      /** @description The caller's new name. Leading and trailing whitespace is trimmed first, and the bounds apply to what remains. It may not hold a control character (Unicode `Cc`, tabs and line breaks included) nor U+2028 or U+2029. */
+      /** @description The caller's new name. Leading and trailing whitespace is trimmed first; what remains must be 1 to 120 characters, counted as Unicode code points (an emoji is one). The bounds are not declared as `minLength` / `maxLength` because those would apply to the untrimmed string. It may not hold a control character (Unicode `Cc`, tabs and line breaks included) nor U+2028 or U+2029. */
       fullName: string;
     };
     /** @description Request body for POST /v1/public-api-credentials. */

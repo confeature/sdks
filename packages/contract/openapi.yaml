@@ -4587,7 +4587,8 @@ paths:
         event (`GET /v1/auth/events`) in the same commit. Saving the name
         already shown answers 200 and writes nothing, no event included.
         Audit-log rows already written are not rewritten: they keep the label
-        they recorded. Each change spends the organization's write budget.
+        they recorded. Each request spends the organization's write budget,
+        an unchanged name or a refused body included.
       tags: [Me]
       security:
         - cookieAuth: []
@@ -10910,13 +10911,13 @@ components:
       properties:
         fullName:
           type: string
-          minLength: 1
-          maxLength: 120
           description: >
             The caller's new name. Leading and trailing whitespace is trimmed
-            first, and the bounds apply to what remains. It may not hold a
-            control character (Unicode `Cc`, tabs and line breaks included) nor
-            U+2028 or U+2029.
+            first; what remains must be 1 to 120 characters, counted as Unicode
+            code points (an emoji is one). The bounds are not declared as
+            `minLength` / `maxLength` because those would apply to the
+            untrimmed string. It may not hold a control character (Unicode
+            `Cc`, tabs and line breaks included) nor U+2028 or U+2029.
     CreatePublicApiCredentialRequest:
       type: object
       additionalProperties: false
