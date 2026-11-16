@@ -1035,6 +1035,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/settings/{settingId}/watch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Watch a Feature Flag or Setting
+     * @description Confeature addition: ConfigCat's Public Management API has no watch route, and its dashboard is where a flag is watched. The signed-in person starts watching the setting, which then reads `isWatching: true` for that person only, on every v2 setting read. A watch is per person: another member's reads are unchanged. Any member who can read the setting may watch it. A watch ends when the setting is deleted or the person leaves the organization. Watching a setting already watched answers 204 and writes nothing. Cookie session only: a management token, a CLI or MCP token and a Public API credential are answered 401. Nothing is audited and nothing reaches the SDKs. Each request spends the organization's write budget. This never answers 402.
+     */
+    put: operations["watchSetting"];
+    post?: never;
+    /**
+     * Stop watching a Feature Flag or Setting
+     * @description Confeature addition, the reverse of `PUT /v1/settings/{settingId}/watch`: the signed-in person stops watching the setting, which then reads `isWatching: false` for that person. Stopping a watch that does not exist answers 204 and writes nothing. Cookie session only: a management token, a CLI or MCP token and a Public API credential are answered 401. Each request spends the organization's write budget. This never answers 402.
+     */
+    delete: operations["unwatchSetting"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/configs/{configId}/environments/{environmentId}": {
     parameters: {
       query?: never;
@@ -2336,7 +2360,7 @@ export interface components {
       /** @description The content of the reference line. */
       lineText: string | null;
     };
-    /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. `creatorEmail` and `creatorFullName` name the member who created the setting, and are null together otherwise. */
+    /** @description The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's `SettingDataV2Model`. `creatorEmail` and `creatorFullName` name the member who created the setting, and are null together otherwise. `isWatching` is per caller: two people reading the same setting can read different values. */
     SettingDataV2Model: {
       /** Format: int32 */
       settingId: number;
@@ -2355,6 +2379,7 @@ export interface components {
       creatorFullName: string | null;
       /** @description A collection of Variations for a Feature Flag or Setting, in their order. */
       predefinedVariations: components["schemas"]["PredefinedVariationModel"][];
+      /** @description Whether the person the credential acts for watches this Feature Flag or Setting (`PUT`/`DELETE /v1/settings/{settingId}/watch`). Always false for a management token, which acts for no person. A watch ends when the setting is deleted or the person leaves the organization. */
       isWatching: boolean;
     };
     /** @description A Predefined Variation, as ConfigCat's `PredefinedVariationModel`. */
@@ -7623,6 +7648,106 @@ export interface operations {
       };
       /** @description The request body is larger than 1 MiB. */
       413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  watchSetting: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Setting. */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. Repeating the request answers 204 again and writes nothing. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The `settingId` is not an int32. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      403: components["responses"]["CrossOriginWrite"];
+      /** @description Setting not found. A deleted setting, and a setting of an organization the session does not act in, answer the same body. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      429: components["responses"]["RateLimited"];
+    };
+  };
+  unwatchSetting: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the Setting. */
+        settingId: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. Repeating the request answers 204 again and writes nothing. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The `settingId` is not an int32. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      403: components["responses"]["CrossOriginWrite"];
+      /** @description Setting not found. A deleted setting, and a setting of an organization the session does not act in, answer the same body. */
+      404: {
         headers: {
           [name: string]: unknown;
         };

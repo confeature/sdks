@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.8.0
+  version: 0.9.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -4227,6 +4227,118 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /v1/settings/{settingId}/watch:
+    # Confeature addition (#1118): ConfigCat's public API has no route with
+    # "watch" in its path; its dashboard sets `isWatching`. Per-person state,
+    # cookie session only, like `PUT /v1/me`.
+    put:
+      operationId: watchSetting
+      summary: Watch a Feature Flag or Setting
+      description: >
+        Confeature addition: ConfigCat's Public Management API has no watch
+        route, and its dashboard is where a flag is watched. The signed-in
+        person starts watching the setting, which then reads `isWatching: true`
+        for that person only, on every v2 setting read. A watch is per person:
+        another member's reads are unchanged. Any member who can read the
+        setting may watch it. A watch ends when the setting is deleted or the
+        person leaves the organization. Watching a setting already watched
+        answers 204 and writes nothing. Cookie session only: a management
+        token, a CLI or MCP token and a Public API credential are answered
+        401. Nothing is audited and nothing reaches the SDKs. Each request
+        spends the organization's write budget. This never answers 402.
+      tags: [Settings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: settingId
+          required: true
+          schema:
+            type: integer
+            format: int32
+          description: The identifier of the Setting.
+      responses:
+        "204":
+          description: >
+            Done. Repeating the request answers 204 again and writes nothing.
+        "400":
+          description: >
+            The `settingId` is not an int32. Also `bad_request` when the request
+            carries a Confeature cookie and its body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
+        "404":
+          description: >
+            Setting not found. A deleted setting, and a setting of an
+            organization the session does not act in, answer the same body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      operationId: unwatchSetting
+      summary: Stop watching a Feature Flag or Setting
+      description: >
+        Confeature addition, the reverse of `PUT /v1/settings/{settingId}/watch`:
+        the signed-in person stops watching the setting, which then reads
+        `isWatching: false` for that person. Stopping a watch that does not
+        exist answers 204 and writes nothing. Cookie session only: a
+        management token, a CLI or MCP token and a Public API credential are
+        answered 401. Each request spends the organization's write budget.
+        This never answers 402.
+      tags: [Settings]
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: settingId
+          required: true
+          schema:
+            type: integer
+            format: int32
+          description: The identifier of the Setting.
+      responses:
+        "204":
+          description: >
+            Done. Repeating the request answers 204 again and writes nothing.
+        "400":
+          description: >
+            The `settingId` is not an int32. Also `bad_request` when the request
+            carries a Confeature cookie and its body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/CrossOriginWrite"
+        "404":
+          description: >
+            Setting not found. A deleted setting, and a setting of an
+            organization the session does not act in, answer the same body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/configs/{configId}/environments/{environmentId}:
     get:
       operationId: getSdkKeys
@@ -8146,6 +8258,8 @@ components:
         The setting a v2 value belongs to. Aligned 1:1 with ConfigCat's
         `SettingDataV2Model`. `creatorEmail` and `creatorFullName` name the
         member who created the setting, and are null together otherwise.
+        `isWatching` is per caller: two people reading the same setting can
+        read different values.
       required:
         - settingId
         - key
@@ -8207,6 +8321,12 @@ components:
             $ref: "#/components/schemas/PredefinedVariationModel"
         isWatching:
           type: boolean
+          description: >
+            Whether the person the credential acts for watches this Feature
+            Flag or Setting (`PUT`/`DELETE /v1/settings/{settingId}/watch`).
+            Always false for a management token, which acts for no person. A
+            watch ends when the setting is deleted or the person leaves the
+            organization.
     PredefinedVariationModel:
       type: object
       description: >
