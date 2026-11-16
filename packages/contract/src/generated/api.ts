@@ -1191,6 +1191,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/me/deletion": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What deleting the signed-in user's own account would do (cookie-session authed)
+     * @description Confeature addition: ConfigCat's Public Management API has no route to delete one's own account; its dashboard's My Account page does it. Lists every organization the caller belongs to with what the deletion does to it: `removed` (the caller leaves it, as a removed member does: another admin remains, or the caller is not an admin), `deleted` (the caller is its sole member, and it holds no product, no live paid plan and no billing customer at all), or `blocked`, with the `reason`: `last_admin` (the caller is its only admin and other members remain; make another member an admin, or remove the other members), `has_products` (delete its products first), `paid_plan` (a subscription is active, trialing or past due; cancel it in the billing portal and wait for the period end), `billing_customer` (it has a billing customer; contact support), `operator_org` (the operators' organization, never deleted this way). Nothing is ever cancelled or refunded by a deletion. `deletable` is true when no organization is blocked. `reauth` says how the caller proves it is them: `password` for an account with a password, whatever else it is linked to; `sso` otherwise, with the `provider` the account signs in with and `sessionFreshUntil`, the unix ms until which the presented session proves a fresh sign-in (created at most 300 s before). Cookie session only: any other credential is answered 401.
+     */
+    get: operations["meDeletionPreview"];
+    put?: never;
+    /**
+     * Delete the signed-in user's own account (cookie-session authed)
+     * @description Confeature addition (see `meDeletionPreview`). Deletes the caller's account, in one all-or-nothing commit: the organizations previewed `deleted` go with it; the caller leaves each one previewed `removed` as a removed member does (their sessions there, the invitations they issued there or that are addressed to them there, a `teamMemberRemoved` audit row whose actor is the caller by id with no address, and a billing address repair when the organization has a billing customer); then the account and everything that belongs to it: sessions, CLI and MCP tokens, Public API credentials, security events, avatar and watches. Invitations addressed to the caller in organizations they do not belong to are kept. Feature flags they created or last updated keep no author. Past audit-log rows whose actor is the caller keep the actor id, with no address and the label `Deleted user`; past security events they performed on someone else lose their label, IP and browser. `confirmEmail` must be the account's address (trimmed, case-insensitive), else 422. An account with a password must send it: wrong is `reauth_failed` and spends the same failed-password budget as signing in (429 when spent, 503 when it cannot answer); missing is `reauth_required`. An account with no password must present a session created at most 300 s before (`reauth_required`, `method: sso` otherwise; start a sign-in with `reauth: true` on `POST /v1/auth/sso/{provider}/start`). When an organization blocks the deletion, or the preview changed before the commit, nothing is written and the 409 body is the preview read again. The 204 clears the session cookie (`Max-Age=0`) and sends `Clear-Site-Data: "cookies"`. Cookie session only; the request spends the organization's write budget before its body is read.
+     */
+    post: operations["meDelete"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/organizations": {
     parameters: {
       query?: never;
@@ -1889,10 +1913,12 @@ export interface components {
       /** @description One constant, user-facing message for every failure. */
       message: string;
     };
-    /** @description Request body for POST /v1/auth/sso/{provider}/start. All fields are optional in v0.1. */
+    /** @description Request body for POST /v1/auth/sso/{provider}/start. All fields are optional. */
     SsoStartRequest: {
       /** @description Optional path the back-office should land the operator on after a successful callback (e.g. `/products`). Bounded by the issuing back-office's own routing; the api treats it as opaque and round-trips it through KV state. */
       return_to?: string;
+      /** @description Confeature addition (#1125): re-authenticate the signed-in user (cookie session required, else 401). The provider is asked for its account chooser (`prompt=select_account` where it documents it), the callback refuses any account other than the signed-in one (403, no session), and on success sets a fresh session cookie and answers the signed-in `User`, as a sign-in does. A fresh session is how an account with no password confirms deleting itself. */
+      reauth?: boolean;
     };
     /** @description 200 response of POST /v1/auth/sso/{provider}/start. The client navigates to `redirect_url`; the matching callback POSTs to `/v1/auth/sso/{provider}/callback` once the provider redirects back with `code` + `state` on the query string. */
     SsoStartResponse: {
@@ -3660,6 +3686,55 @@ export interface components {
       /** @description `/v1/me/avatar?v=<version>`: where the uploaded image is read, a new version on every upload. */
       avatarUrl: string;
     };
+    /** @description 200 response of GET /v1/me/deletion and 409 response of POST /v1/me/deletion (a Confeature addition). */
+    AccountDeletionPreview: {
+      /** @description True when no organization blocks the deletion. */
+      deletable: boolean;
+      reauth: {
+        /**
+         * @description `password` for an account with a password (linked to Google or not); `sso` for an account with none.
+         * @enum {string}
+         */
+        method: "password" | "sso";
+        /** @description `sso` only: the sign-in provider the account is linked to, to start a re-authentication with. */
+        provider?: string;
+        /**
+         * Format: int64
+         * @description `sso` only: unix ms until which the presented session proves a fresh sign-in (its creation plus 300 s).
+         */
+        sessionFreshUntil?: number;
+      };
+      organizations: components["schemas"]["AccountDeletionOrganization"][];
+    };
+    AccountDeletionOrganization: {
+      organizationId: string;
+      name: string;
+      /** @enum {string} */
+      outcome: "removed" | "deleted" | "blocked";
+      /**
+       * @description Present when `outcome` is `blocked`.
+       * @enum {string}
+       */
+      reason?: "last_admin" | "has_products" | "paid_plan" | "billing_customer" | "operator_org";
+    };
+    /** @description Request body for POST /v1/me/deletion (a Confeature addition). */
+    DeleteMeRequest: {
+      /** @description The account's own address, typed to confirm. Compared trimmed and case-insensitive. */
+      confirmEmail: string;
+      /** @description Required for an account with a password: its current password. Ignored for an account with none. */
+      password?: string;
+    };
+    /** @description 403 response of POST /v1/me/deletion. */
+    AccountDeletionReauthRefusal: {
+      /** @enum {string} */
+      error: "reauth_failed" | "reauth_required" | "forbidden";
+      message: string;
+      /**
+       * @description How to re-authenticate (absent on `forbidden`).
+       * @enum {string}
+       */
+      method?: "password" | "sso";
+    };
     /** @description Request body for PUT /v1/me (a Confeature addition). */
     UpdateMeRequest: {
       /** @description The caller's new name. Leading and trailing whitespace is trimmed first; what remains must be 1 to 120 characters, counted as Unicode code points (an emoji is one). The bounds are not declared as `minLength` / `maxLength` because those would apply to the untrimmed string. It may not hold a control character (Unicode `Cc`, tabs and line breaks included) nor U+2028 or U+2029. */
@@ -4280,6 +4355,15 @@ export interface operations {
         };
       };
       400: components["responses"]["NotJsonWrite"];
+      /** @description `unauthorized` — `reauth: true` with no valid web session (#1125). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
       403: components["responses"]["CrossOriginWrite"];
       /** @description Provider id is not registered. Body is the generic SSO error envelope; no enumeration of empty-registry vs unknown-id. */
       404: {
@@ -4327,7 +4411,7 @@ export interface operations {
           "application/json": components["schemas"]["SsoError"];
         };
       };
-      /** @description Link-mode CSRF guard. The KV state carried a `link_user_id` but the request presented no valid session, or a session whose user id does NOT equal `link_user_id`. The link is bound to the session that initiated it; a mismatched/absent session is rejected and NOTHING is changed. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one. */
+      /** @description Link-mode CSRF guard. The KV state carried a `link_user_id` but the request presented no valid session, or a session whose user id does NOT equal `link_user_id`. The link is bound to the session that initiated it; a mismatched/absent session is rejected and NOTHING is changed. Also `invalid_sso_state` with a fixed message when the start carried `reauth: true` and the account chosen is not the signed-in one (#1125): no account is created or linked and no session is issued. Also `forbidden` (cross-origin request refused) when the request carries a Confeature cookie and comes from neither the dashboard's own origin nor an allowlisted one. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -8281,6 +8365,115 @@ export interface operations {
       };
       403: components["responses"]["CrossOriginWrite"];
       429: components["responses"]["RateLimited"];
+    };
+  };
+  meDeletionPreview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The deletion preview. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountDeletionPreview"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  meDelete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeleteMeRequest"];
+      };
+    };
+    responses: {
+      /** @description The account is deleted; the session cookie is cleared. */
+      204: {
+        headers: {
+          "Set-Cookie"?: string;
+          "Clear-Site-Data"?: '"cookies"';
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description `bad_request` — the body is malformed or holds an unknown field. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description No valid web session. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description `reauth_failed` (wrong password, `method: password`), `reauth_required` (`method: password`, no password sent; or `method: sso`, the session is older than 300 s), or `forbidden` (cross-origin request refused, see `CrossOriginWrite`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountDeletionReauthRefusal"];
+        };
+      };
+      /** @description An organization blocks the deletion. Nothing was written. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountDeletionPreview"];
+        };
+      };
+      /** @description `confirmation_mismatch` — `confirmEmail` is not the account's address. Nothing was written and no password attempt was spent. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description `rate_limited` — the organization's write budget is spent (see `RateLimited`); or `too_many_attempts` — the failed-password budget is spent (see `TooManyPasswordAttempts`). Wait `Retry-After` seconds. */
+      429: {
+        headers: {
+          "Retry-After": number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      503: components["responses"]["PasswordCheckUnavailable"];
     };
   };
   organizationsList: {
