@@ -78,7 +78,7 @@ class ConfigFetcher:
     cross-paradigm gymnastics. `close()` shuts both down.
     """
 
-    DEFAULT_BASE_URL = "https://cdn-global.confeature.io"
+    DEFAULT_BASE_URL = "https://cdn.confeature.io"
 
     def __init__(
         self,

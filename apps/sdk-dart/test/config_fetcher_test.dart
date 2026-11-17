@@ -23,6 +23,12 @@ void main() {
     const sdkKey =
         'confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 
+    // Pinned as the exact string: a default naming a host that does not
+    // resolve turns every read into the caller's defaults, silently.
+    test('defaultBaseUrl is exactly https://cdn.confeature.io', () {
+      expect(ConfigFetcher.defaultBaseUrl, equals('https://cdn.confeature.io'));
+    });
+
     test('emits User-Agent + parses 200 → FetchStatus.fetched', () async {
       late http.BaseRequest captured;
       final mock = MockClient((req) async {
@@ -72,7 +78,7 @@ void main() {
 
       test('a legacy key travels raw, as one segment', () async {
         final url = await capturePath(sdkKey);
-        expect(url.host, equals('cdn-global.confeature.io'));
+        expect(url.host, equals('cdn.confeature.io'));
         expect(
           url.path,
           equals('/configuration-files/$sdkKey/config_v6.json'),

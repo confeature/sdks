@@ -25,7 +25,7 @@ repositories {
 
 ```kotlin
 dependencies {
-    implementation("io.confeature:confeature-android-client:0.1.0")
+    implementation("io.confeature:confeature-android-client:0.1.1")
 }
 ```
 
@@ -40,7 +40,7 @@ repositories {
 
 ```groovy
 dependencies {
-    implementation 'io.confeature:confeature-android-client:0.1.0'
+    implementation 'io.confeature:confeature-android-client:0.1.1'
 }
 ```
 

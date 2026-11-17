@@ -14,7 +14,7 @@ common evaluation paths.
 ```yaml
 # pubspec.yaml
 dependencies:
-  confeature: ^0.1.0
+  confeature: ^0.1.1
 ```
 
 > pub.dev publish is deferred; for now, point at the monorepo via a

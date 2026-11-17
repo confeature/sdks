@@ -28,6 +28,18 @@ public class ConfigFetcherTests
     private const string TestSdkKey = "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
     private const string TestBaseUrl = "https://cdn.test.confeature.io";
 
+    /// <summary>
+    /// Pinned as the exact string, in both places the default is written: a
+    /// default naming a host that does not resolve turns every read into the
+    /// caller's defaults, silently.
+    /// </summary>
+    [Fact]
+    public void DefaultBaseUrl_is_exactly_cdn_confeature_io()
+    {
+        ConfigFetcher.DefaultBaseUrl.Should().Be("https://cdn.confeature.io");
+        ConfeatureClientOptions.DefaultBaseUrl.Should().Be("https://cdn.confeature.io");
+    }
+
     [Fact]
     public async Task FetchAsync_returns_Fetched_on_200_with_valid_JSON()
     {

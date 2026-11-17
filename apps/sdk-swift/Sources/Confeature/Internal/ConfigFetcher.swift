@@ -23,7 +23,7 @@ import FoundationNetworking
 /// key-free reason code by ``classify(error:)``.
 struct ConfigFetcher: Sendable {
     /// Production CDN base URL.
-    static let defaultBaseURL = "https://cdn-global.confeature.io"
+    static let defaultBaseURL = "https://cdn.confeature.io"
 
     /// Default per-request timeout.
     static let defaultTimeout: TimeInterval = 30

@@ -68,7 +68,7 @@ describe("the real publish table", () => {
   it("a release tag carries the declared version, never a substring of the tag", async () => {
     const out = await resolvePublish({
       root: ROOT,
-      tag: "sdk-python-v0.1.0",
+      tag: "sdk-python-v0.1.1",
       exists: published,
       ...MAIN,
     });
@@ -81,8 +81,8 @@ describe("the real publish table", () => {
   });
 
   it("Go's release tag and the mirrors' tags are filled from the unit", async () => {
-    expect((await resolvePublish({ root: ROOT, tag: "sdk-go-v0.1.0", ...MAIN })).releaseTag).toBe(
-      "apps/sdk-go/v0.1.0",
+    expect((await resolvePublish({ root: ROOT, tag: "sdk-go-v0.1.1", ...MAIN })).releaseTag).toBe(
+      "apps/sdk-go/v0.1.1",
     );
     const php = await resolvePublish({ root: ROOT, tag: "sdk-php-v0.1.0", ...MAIN });
     expect(php).toMatchObject({
@@ -344,17 +344,17 @@ describe("the CLI", () => {
     expect(() => parseArgs(["--tag", "a", "--tag", "b"])).toThrow(InputError);
   });
   it("--main-ref reaches the git ancestry check (an unknown ref is refused, exit 1)", () => {
-    const r = cli("--tag", "sdk-python-v0.1.0", "--main-ref", "refs/does/not/exist");
+    const r = cli("--tag", "sdk-python-v0.1.1", "--main-ref", "refs/does/not/exist");
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/could not compare/);
   });
   it("a tag on main is accepted (HEAD is its own ancestor)", () => {
-    const r = cli("--tag", "sdk-python-v0.1.0", "--commit", "HEAD", "--main-ref", "HEAD");
+    const r = cli("--tag", "sdk-python-v0.1.1", "--commit", "HEAD", "--main-ref", "HEAD");
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ name: "python", registry: "pypi" });
   });
   it("a tag without --main-ref is refused, exit 1", () =>
-    expect(cli("--tag", "sdk-python-v0.1.0").status).toBe(1));
+    expect(cli("--tag", "sdk-python-v0.1.1").status).toBe(1));
   it("a usage error is exit 2", () => expect(cli("--nope", "x").status).toBe(2));
 });
 

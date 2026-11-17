@@ -7,6 +7,7 @@ import keyShapes from "@confeature/test-fixtures-sdk-parity/fixtures/sdk-key-sha
 
 import { ConfigCatClient, disposeAllClients } from "../../src/client.ts";
 import { HttpConfigFetcher } from "../../src/config-fetcher.ts";
+import { DEFAULT_BASE_URL, resolveOptions } from "../../src/options.ts";
 import { SdkErrorCode } from "../../src/types.ts";
 import { CONFEATURE_SDK_VERSION } from "../../src/version.ts";
 
@@ -187,5 +188,14 @@ describe("URL + headers contract", () => {
     expect(url.startsWith(`${BASE_URL}/configuration-files/`)).toBe(true);
     expect(url.includes("//configuration-files/")).toBe(false);
     client.dispose();
+  });
+});
+
+describe("default base URL", () => {
+  // Pinned as an exact string: a host that does not resolve here turns every
+  // read into the caller's defaults, silently, so the literal is the contract.
+  test("a client given no baseUrl reads https://cdn.confeature.io", () => {
+    expect(DEFAULT_BASE_URL).toBe("https://cdn.confeature.io");
+    expect(resolveOptions(undefined).baseUrl).toBe("https://cdn.confeature.io");
   });
 });

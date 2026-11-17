@@ -69,7 +69,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Sets the CDN base URL. Default: `https://cdn-global.confeature.io`.
+    /// Sets the CDN base URL. Default: `https://cdn.confeature.io`.
     pub fn base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
         self

@@ -7,6 +7,13 @@ This repository's own gates (`pnpm run verify` runs them all) and their tests.
   jobs, pinned env, the frozen action surface, expression references, …).
 - `verify-declarations.mjs` checks that every gate is wired where
   `CONTRIBUTING.md`'s table says.
+- `verify-default-hosts.mjs` holds every SDK's default base URL to
+  `EXPECTED_DEFAULT` (one `DEFAULT_SITES` row per place a default is written,
+  and no default constant outside them), and every `confeature.io` host under
+  `apps/sdk-*/` to `KNOWN_HOSTS`, the four test trees excepted. `--resolve`,
+  run by `verify.yml` only, checks that those hosts resolve, that a random
+  name and every `RETIRED_HOSTS` entry are NXDOMAIN, and that the default's
+  `/healthz` answers 200; its tests judge that mode through stubs, offline.
 - `lockfile-versions.test.mjs` fails if `pnpm-lock.yaml` resolves more than
   one `@types/node` (or none): two versions make Node's global types depend
   on which one pnpm hoists. It also fails if `undici-types` resolves more

@@ -85,8 +85,9 @@
  *      (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`,
  *      never ORed away): a dry run publishes nothing.
  *  13. THE PUBLIC GATE RUNS (#794 review). verify.yml runs PUBLIC_GATE_STEPS
- *      (`pnpm run verify`, the CLI's type check, #1188, and its deno suite)
- *      on every push to main and every pull request, unfiltered
+ *      (`pnpm run verify`, the default hosts' resolve mode
+ *      `pnpm run verify:default-hosts:resolve`, the CLI's type check, #1188,
+ *      and its deno suite) on every push to main and every pull request, unfiltered
  *      (gateTriggerProblems, shared with rule 19 over GATE_WORKFLOWS), under
  *      plain bash, with no step env, working-directory or continue-on-error,
  *      in jobs that need nothing.
@@ -2603,6 +2604,7 @@ export const PUBLIC_GATE_ENV = new Set(["NODE_VERSION", "DENO_VERSION"]);
 /** The steps the public gate must run, each exactly, in a job and a step nothing can skip. */
 export const PUBLIC_GATE_STEPS = [
   "pnpm run verify",
+  "pnpm run verify:default-hosts:resolve",
   "deno task --cwd apps/cli check",
   "deno task --cwd apps/cli test",
 ];

@@ -7,7 +7,7 @@ feature-flag service. It is a drop-in replacement for the upstream
 [`configcat`](https://crates.io/crates/configcat) crate — migration is
 one line in `Cargo.toml` plus a rename of the `use` paths.
 
-> **Status**: pre-release (`0.1.0`). Boolean evaluation only in this
+> **Status**: pre-release (`0.1.1`). Boolean evaluation only in this
 > wave; string / int / double evaluators land before crates.io publish
 > (epic #29).
 

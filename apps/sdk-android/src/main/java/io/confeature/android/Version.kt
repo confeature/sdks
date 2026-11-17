@@ -11,5 +11,5 @@ package io.confeature.android
  */
 public object Version {
     /** Current SDK version (matches `build.gradle.kts:version`). */
-    public const val SDK_VERSION: String = "0.1.0"
+    public const val SDK_VERSION: String = "0.1.1"
 }

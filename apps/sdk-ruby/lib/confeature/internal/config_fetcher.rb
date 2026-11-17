@@ -32,7 +32,7 @@ module Confeature
     # So no exception text is ever passed on (it may quote the URL): only
     # the exception's class picks a fixed reason code.
     class ConfigFetcher
-      DEFAULT_BASE_URL = "https://cdn-global.confeature.io"
+      DEFAULT_BASE_URL = "https://cdn.confeature.io"
 
       # Reason code when the key cannot be placed in a path segment
       # ("", "." or "..") — the fetcher refuses to fetch (#803 FR-001).

@@ -38,7 +38,7 @@ use Psr\Log\NullLogger;
  */
 final class ConfigFetcher
 {
-    public const DEFAULT_BASE_URL = 'https://cdn-global.confeature.io';
+    public const DEFAULT_BASE_URL = 'https://cdn.confeature.io';
 
     /** Fixed, key-free failure reasons (#803 FR-002). */
     public const REASON_TIMEOUT = 'timeout';

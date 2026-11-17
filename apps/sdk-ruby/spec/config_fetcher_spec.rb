@@ -398,6 +398,12 @@ RSpec.describe Confeature::Internal::ConfigFetcher do
     end
   end
 
+  # Pinned as the exact string: a default naming a host that does not
+  # resolve turns every read into the caller's defaults, silently.
+  it "defaults the base URL to exactly https://cdn.confeature.io" do
+    expect(described_class::DEFAULT_BASE_URL).to eq("https://cdn.confeature.io")
+  end
+
   it "rejects a zero or negative timeout at construction time" do
     expect do
       described_class.new(

@@ -14,6 +14,16 @@ defmodule Confeature.ClientTest do
     def get(_url, _headers, _opts), do: {:error, %{reason: :nxdomain}}
   end
 
+  # Reports the URL it is asked for to the process registered as
+  # `:client_test_url_probe`: the fetch runs in the client's process.
+  defmodule UrlProbeHttp do
+    @moduledoc false
+    def get(url, _headers, _opts) do
+      send(:client_test_url_probe, {:requested_url, url})
+      {:error, %{reason: :nxdomain}}
+    end
+  end
+
   defp start_local_only_client(map) do
     Client.start_link(
       sdk_key: TestHelpers.sample_sdk_key(),
@@ -423,6 +433,34 @@ defmodule Confeature.ClientTest do
       assert snapshot.flag_overrides.behaviour == :local_only
       assert Snapshot.get_value(snapshot, "feature.x", false) == true
       Client.stop(pid)
+    end
+  end
+
+  # Pinned as the exact string: `Client` holds its own default, apart from
+  # `ConfigFetcher`'s, and a default naming a host that does not resolve
+  # turns every read into the caller's defaults, silently.
+  describe "the default base URL" do
+    test "a client given no base_url fetches from exactly https://cdn.confeature.io" do
+      Process.register(self(), :client_test_url_probe)
+      key = TestHelpers.sample_sdk_key()
+
+      {:ok, pid} =
+        Client.start_link(
+          sdk_key: key,
+          polling_mode: PollingMode.manual_poll(),
+          cache_directory: :memory,
+          logger: Logger.silent(),
+          http_client: UrlProbeHttp
+        )
+
+      try do
+        Client.force_refresh(pid)
+        assert_receive {:requested_url, url}
+        assert String.starts_with?(url, "https://cdn.confeature.io/configuration-files/")
+      after
+        Client.stop(pid)
+        Process.unregister(:client_test_url_probe)
+      end
     end
   end
 

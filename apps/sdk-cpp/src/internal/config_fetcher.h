@@ -31,7 +31,7 @@
 
 namespace confeature::internal {
 
-inline constexpr auto kDefaultBaseUrl = "https://cdn-global.confeature.io";
+inline constexpr auto kDefaultBaseUrl = "https://cdn.confeature.io";
 inline constexpr std::chrono::seconds kDefaultTimeout{30};
 // Redirects followed before a fetch fails with `too_many_redirects`
 // (net/http's default, as in sdk-go).

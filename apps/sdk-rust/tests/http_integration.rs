@@ -32,7 +32,7 @@ fn legacy_path() -> String {
 
 fn config_body() -> serde_json::Value {
     json!({
-        "p": { "u": "https://cdn-global.confeature.io", "r": 0, "s": "" },
+        "p": { "u": "https://cdn.confeature.io", "r": 0, "s": "" },
         "f": {
             "feature.on": { "t": 0, "v": { "b": true }, "i": "abc12345" },
             "feature.off": { "t": 0, "v": { "b": false }, "i": "def67890" }
@@ -45,7 +45,7 @@ async fn force_refresh_200_populates_cache_and_get_value_resolves() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path(legacy_path()))
-        .and(header("User-Agent", "confeature-rust-sdk/0.1.0"))
+        .and(header("User-Agent", "confeature-rust-sdk/0.1.1"))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("ETag", "v1")

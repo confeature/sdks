@@ -93,7 +93,7 @@ public class ConfigFetcher(
 
     public companion object {
         /** Production CDN base URL. */
-        public const val DEFAULT_BASE_URL: String = "https://cdn-global.confeature.io"
+        public const val DEFAULT_BASE_URL: String = "https://cdn.confeature.io"
         public const val DEFAULT_TIMEOUT_MS: Long = 30_000L
 
         /** Fixed reason: the key cannot be a URL path segment ("", ".", ".."); nothing was sent. */

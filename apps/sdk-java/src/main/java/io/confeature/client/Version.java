@@ -12,7 +12,7 @@ package io.confeature.client;
 public final class Version {
 
   /** Current SDK version (matches {@code build.gradle.kts:version}). */
-  public static final String SDK_VERSION = "0.1.0";
+  public static final String SDK_VERSION = "0.1.1";
 
   private Version() {
     // Utility class — not instantiable.

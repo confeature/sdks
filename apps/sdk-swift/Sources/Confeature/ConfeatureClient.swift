@@ -10,7 +10,7 @@ public struct ConfeatureClientOptions: @unchecked Sendable {
     /// with 60 s / 5 s defaults).
     public var pollingMode: PollingMode
 
-    /// CDN base URL. Default: `https://cdn-global.confeature.io`.
+    /// CDN base URL. Default: `https://cdn.confeature.io`.
     public var baseURL: String?
 
     /// Per-request HTTP timeout in seconds. Default: 30 s.

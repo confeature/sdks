@@ -21,4 +21,4 @@ package confeature
 // Version is the semver-aligned package version. It is also stamped
 // into the User-Agent header (`confeature-go-sdk/<Version>`) sent by
 // the config fetcher.
-const Version = "0.1.0"
+const Version = "0.1.1"

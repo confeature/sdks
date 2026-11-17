@@ -35,7 +35,7 @@ class FEvent;
 
 namespace Confeature::Internal
 {
-	inline constexpr const TCHAR* DefaultBaseUrl = TEXT("https://cdn-global.confeature.io");
+	inline constexpr const TCHAR* DefaultBaseUrl = TEXT("https://cdn.confeature.io");
 	inline constexpr int32 DefaultTimeoutSeconds = 30;
 	// Largest response body a fetch accepts before it fails with
 	// `FetchError::BodyTooLarge` (#837) — sdk-cpp's `kMaxBodyBytes`

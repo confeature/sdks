@@ -11,5 +11,5 @@ import Foundation
 /// `Confeature-vX.Y.Z` release commit.
 public enum Version {
     /// Current SDK version. Format: semver `MAJOR.MINOR.PATCH`.
-    public static let sdk: String = "0.1.0"
+    public static let sdk: String = "0.1.1"
 }

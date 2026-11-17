@@ -304,6 +304,13 @@ void requireKeyFree(const std::string& sdkKey, const CapturingLogger& logger,
 
 }  // namespace
 
+// Pinned as the exact string: a default naming a host that does not resolve
+// turns every read into the caller's defaults, silently.
+TEST_CASE("ConfigFetcher's default base URL is exactly https://cdn.confeature.io",
+          "[config_fetcher]") {
+  REQUIRE(std::string_view(confeature::internal::kDefaultBaseUrl) == "https://cdn.confeature.io");
+}
+
 TEST_CASE("ConfigFetcher resolves a 200 fetch + captures the ETag", "[config_fetcher]") {
   MockServer server;
   server.enqueue(
@@ -504,7 +511,7 @@ TEST_CASE("ConfigFetcher keeps the key out of logs and errors on transport failu
 
 TEST_CASE("ConfigFetcher never follows an https redirect to clear-text http", "[config_fetcher]") {
   REQUIRE(std::string(redirectProtocolsFor(
-              "https://cdn-global.confeature.io/configuration-files/k/config_v6.json")) == "https");
+              "https://cdn.confeature.io/configuration-files/k/config_v6.json")) == "https");
   REQUIRE(std::string(redirectProtocolsFor("HTTPS://cdn.example/x")) == "https");
   REQUIRE(std::string(redirectProtocolsFor("http://127.0.0.1:8080/x")) == "http,https");
   REQUIRE(std::string(redirectProtocolsFor("https:/cdn.example")) == "http,https");

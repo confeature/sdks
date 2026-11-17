@@ -232,6 +232,13 @@ class TestFetchFailure:
         _assert_sdk_key_never_logged(logger, result.error or "")
 
 
+class TestDefaultBaseUrl:
+    def test_default_base_url_is_cdn_confeature_io(self) -> None:
+        """Pinned as the exact string: a default naming a host that does not
+        resolve turns every read into the caller's defaults, silently."""
+        assert ConfigFetcher.DEFAULT_BASE_URL == "https://cdn.confeature.io"
+
+
 class TestConstructionValidation:
     def test_negative_timeout_raises(self) -> None:
         with pytest.raises(ValueError, match="request_timeout_seconds"):

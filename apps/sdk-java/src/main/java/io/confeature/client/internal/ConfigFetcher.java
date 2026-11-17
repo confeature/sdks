@@ -46,7 +46,7 @@ import okhttp3.ResponseBody;
 public final class ConfigFetcher implements AutoCloseable {
 
   /** Production CDN base URL. */
-  public static final String DEFAULT_BASE_URL = "https://cdn-global.confeature.io";
+  public static final String DEFAULT_BASE_URL = "https://cdn.confeature.io";
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 

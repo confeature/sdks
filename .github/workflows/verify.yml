@@ -13,9 +13,9 @@
 # the corpora run in sdk-gates.yml on every push and pull request (#793).
 #
 # tools/repo-gates/verify-workflows.mjs rule 13 refuses a tree where this
-# workflow no longer runs `pnpm run verify`, the CLI's type check and the CLI's
-# deno suite on both triggers, or where any can be skipped, filtered or
-# redirected.
+# workflow no longer runs `pnpm run verify`, the default hosts' resolve mode,
+# the CLI's type check and the CLI's deno suite on both triggers, or where any
+# can be skipped, filtered or redirected.
 
 name: verify
 
@@ -67,6 +67,15 @@ jobs:
 
       - name: The public gate
         run: pnpm run verify
+
+      # The default hosts' resolve mode (tools/repo-gates/verify-default-hosts.mjs):
+      # every host an SDK may name resolves, a random name and every retired
+      # host are NXDOMAIN, and the default's /healthz answers 200 over a
+      # verified certificate. It asks the network, so it runs here rather than
+      # in `pnpm run verify`; a DNS failure blocks the merge, and a re-run is
+      # the answer to a flake.
+      - name: The default hosts resolve
+        run: pnpm run verify:default-hosts:resolve
 
       # The CLI's own suite, publish-r2.sh's tests included: a Deno project,
       # outside the pnpm workspace's runners (#794 review).

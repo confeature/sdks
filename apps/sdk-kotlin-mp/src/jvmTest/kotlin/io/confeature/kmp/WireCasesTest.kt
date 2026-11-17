@@ -132,7 +132,7 @@ class WireCasesTest {
         ifNoneMatch: CopyOnWriteArrayList<String?>,
         urls: CopyOnWriteArrayList<Url>,
     ): ConfigFetcher = ConfigFetcher(
-        baseUrl = WireCaseAssertions.field(given, "baseUrl") ?: DEFAULT_BASE_URL,
+        baseUrl = WireCaseAssertions.field(given, "baseUrl") ?: MOCK_BASE_URL,
         sdkKey = WireCaseAssertions.field(given, "sdkKey") ?: WireCaseAssertions.DEFAULT_SDK_KEY,
         timeoutMillis = 5_000L,
         logger = CapturingLogger(),
@@ -255,7 +255,7 @@ class WireCasesTest {
 
     private companion object {
         /** Base URL when a case does not pin `given.baseUrl`. */
-        const val DEFAULT_BASE_URL = "https://mock.confeature.test"
+        const val MOCK_BASE_URL = "https://mock.confeature.test"
 
         /** `server.behavior` discriminator values (#490) — see [respondFromCase]. */
         const val BEHAVIOR_RESPOND = "respond"

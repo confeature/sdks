@@ -129,12 +129,18 @@ final class ConfigFetcherTests: XCTestCase {
         XCTAssertEqual(onTheWire, "/configuration-files/.../config_v6.json")
     }
 
+    /// Pinned as the exact string: a default naming a host that does not
+    /// resolve turns every read into the caller's defaults, silently.
+    func testDefaultBaseURLIsExactlyCdnConfeatureIo() {
+        XCTAssertEqual(ConfigFetcher.defaultBaseURL, "https://cdn.confeature.io")
+    }
+
     func testDefaultBaseURLUsedWhenNil() {
         let fetcher = ConfigFetcher(
             sdkKey: Self.testSdkKey, version: "0.1.0", logger: NoOpLogger())
         XCTAssertTrue(
             fetcher.url?.absoluteString.hasPrefix(
-                "https://cdn-global.confeature.io/configuration-files/") ?? false)
+                "https://cdn.confeature.io/configuration-files/") ?? false)
     }
 
     /// #803 FR-002: only an error's identity picks the reason code;

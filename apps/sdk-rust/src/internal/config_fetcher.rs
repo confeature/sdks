@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Production CDN base URL.
-pub const DEFAULT_BASE_URL: &str = "https://cdn-global.confeature.io";
+pub const DEFAULT_BASE_URL: &str = "https://cdn.confeature.io";
 
 /// Default per-request timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -403,13 +403,20 @@ mod tests {
         }
     }
 
+    /// Pinned as the exact string: a default naming a host that does not
+    /// resolve turns every read into the caller's defaults, silently.
+    #[test]
+    fn default_base_url_is_exactly_cdn_confeature_io() {
+        assert_eq!(DEFAULT_BASE_URL, "https://cdn.confeature.io");
+    }
+
     #[test]
     fn default_base_url_used_when_empty() {
         let f = fetcher(None, "k");
         assert!(f
             .url()
             .unwrap()
-            .starts_with("https://cdn-global.confeature.io/configuration-files/"));
+            .starts_with("https://cdn.confeature.io/configuration-files/"));
     }
 
     #[test]

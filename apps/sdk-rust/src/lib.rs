@@ -12,7 +12,7 @@
 //! See the constitution's Principle II (NON-NEGOTIABLE) for the
 //! ConfigCat parity guarantee.
 
-#![doc(html_root_url = "https://docs.rs/confeature/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/confeature/0.1.1")]
 
 pub mod client;
 pub mod errors;

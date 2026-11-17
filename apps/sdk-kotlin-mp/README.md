@@ -24,7 +24,7 @@ repositories {
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation("io.confeature:confeature-kotlin-client:0.1.0")
+            implementation("io.confeature:confeature-kotlin-client:0.1.1")
         }
     }
 }

@@ -299,6 +299,15 @@ func parsedPath(t *testing.T, raw string) string {
 	return u.EscapedPath()
 }
 
+// TestDefaultBaseURL_IsCdnConfeatureIo pins the default as the exact
+// string: a default naming a host that does not resolve turns every read
+// into the caller's defaults, silently.
+func TestDefaultBaseURL_IsCdnConfeatureIo(t *testing.T) {
+	if got, want := configfetcher.DefaultBaseURL, "https://cdn.confeature.io"; got != want {
+		t.Fatalf("DefaultBaseURL = %q; want %q", got, want)
+	}
+}
+
 // TestURL_WellShapedKeyTravelsRaw pins FR-001 (#803) for every well-shaped
 // key in the shared list: the key's own bytes, its `/` kept as path
 // separators — exactly what configcat-go-sdk sends

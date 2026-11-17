@@ -54,7 +54,7 @@ defmodule Confeature.Client do
   alias Confeature.Logger, as: ConfLogger
   alias Confeature.PollingMode.{AutoPoll, LazyLoad}
 
-  @default_base_url "https://cdn-global.confeature.io"
+  @default_base_url "https://cdn.confeature.io"
 
   @type opts :: [
           sdk_key: String.t(),

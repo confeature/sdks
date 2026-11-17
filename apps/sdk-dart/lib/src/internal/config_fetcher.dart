@@ -102,7 +102,7 @@ class ConfigFetcher {
         _httpClient = httpClient ?? http.Client();
 
   /// Production CDN base URL. Customers override via the client option.
-  static const String defaultBaseUrl = 'https://cdn-global.confeature.io';
+  static const String defaultBaseUrl = 'https://cdn.confeature.io';
 
   /// Per-request HTTP timeout.
   final Duration requestTimeout;

@@ -28,7 +28,7 @@ use Psr\SimpleCache\CacheInterface;
  *   - `cache`        : PSR-16 CacheInterface | null (default: FilesystemCache)
  *   - `logger`       : PSR-3 LoggerInterface       (default: stderr WARNING)
  *   - `flagOverrides`: Confeature\FlagOverrides    (default: null)
- *   - `baseUrl`      : string                      (default: cdn-global)
+ *   - `baseUrl`      : string                      (default: https://cdn.confeature.io)
  *   - `requestTimeoutSeconds`: float               (default: 30.0)
  *   - `defaultUser`  : Confeature\User             (default: null)
  *   - `httpClient`   : GuzzleHttp\ClientInterface  (test hook only)

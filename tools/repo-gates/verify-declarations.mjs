@@ -260,6 +260,20 @@ export const DECLARED_GATES = {
     script: "tools/repo-gates/verify-codeowners.mjs",
     homes: [{ file: "package.json", script: "verify" }],
   },
+  "verify:default-hosts": {
+    // Every SDK's default base URL is the CDN's host, byte for byte, and every
+    // *.confeature.io host an SDK ships is a known one (offline, in `verify`).
+    // Its resolve mode asks DNS and the CDN's /healthz, so it runs only on a
+    // runner: verify.yml runs `pnpm run verify:default-hosts:resolve`, which
+    // verify-workflows.mjs rule 13 holds there (PUBLIC_GATE_STEPS). The second
+    // home is that script, DIRECT, so dropping its `--resolve` is caught by
+    // verify-default-hosts.test.mjs's pin and the script itself by this one.
+    script: "tools/repo-gates/verify-default-hosts.mjs",
+    homes: [
+      { file: "package.json", script: "verify" },
+      { file: "package.json", script: "verify:default-hosts:resolve", direct: true },
+    ],
+  },
   "verify:manifest-author": {
     // Every manifest names MakerLabs as its author, with no address. Two
     // homes, the second being the one that matters: a publish cannot be
@@ -1290,9 +1304,20 @@ export function verifyGateDeclarations(
     );
   }
 
+  // A root script that is itself a declared home of a declared gate is wired
+  // by that declaration (`verify:default-hosts:resolve` is one): its body is
+  // checked above to run the gate, so it is not an undeclared gate.
+  const rootHomes = new Set(
+    Object.values(gates).flatMap((g) =>
+      (Array.isArray(g.homes) ? g.homes : [])
+        .filter((h) => h.file === "package.json" && typeof h.script === "string")
+        .map((h) => h.script),
+    ),
+  );
   for (const name of Object.keys(pkg.scripts ?? {})) {
     if (!name.startsWith("verify:")) continue;
     if (gates[name] !== undefined) continue;
+    if (rootHomes.has(name)) continue;
     fail(
       `scripts.${name} is a verify:* gate with no entry in DECLARED_GATES`,
       "declare its homes in tools/repo-gates/verify-declarations.mjs",

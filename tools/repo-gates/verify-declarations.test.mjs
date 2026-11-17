@@ -358,6 +358,41 @@ describe("the orphan sweep", () => {
         .join(),
     ).toMatch(/verify:undeclared is a verify:\* gate/);
   });
+
+  it("a verify:* script that is a declared home of a gate is wired by that declaration", () => {
+    // `verify:default-hosts:resolve` is this shape: a second mode of a declared
+    // gate, run by a workflow, whose body the direct home check reads.
+    const scripts = {
+      ...scriptsWith(""),
+      "verify:thing:deep": "node tools/verify-thing.mjs --deep",
+    };
+    const gates = {
+      ...GATES,
+      "verify:thing": {
+        ...GATES["verify:thing"],
+        homes: [
+          ...GATES["verify:thing"].homes,
+          { file: "package.json", script: "verify:thing:deep", direct: true },
+        ],
+      },
+    };
+    seed({ scripts });
+    expect(check(gates)).toEqual([]);
+    // MUTATION: stub the home's body and the declaration no longer covers it.
+    seed({ scripts: { ...scripts, "verify:thing:deep": "echo node tools/verify-thing.mjs" } });
+    expect(
+      check(gates)
+        .map((v) => v.what)
+        .join(),
+    ).toMatch(/scripts\.verify:thing:deep does not run it/);
+    // And without the declared home it is an undeclared gate again.
+    seed({ scripts });
+    expect(
+      check()
+        .map((v) => v.what)
+        .join(),
+    ).toMatch(/verify:thing:deep is a verify:\* gate/);
+  });
 });
 
 describe("the three bypasses round 2 found", () => {

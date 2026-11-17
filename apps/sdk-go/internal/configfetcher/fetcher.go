@@ -31,7 +31,7 @@ import (
 )
 
 // DefaultBaseURL is the production CDN base URL.
-const DefaultBaseURL = "https://cdn-global.confeature.io"
+const DefaultBaseURL = "https://cdn.confeature.io"
 
 // FetchStatus enumerates the three possible outcomes of a fetch call.
 type FetchStatus string

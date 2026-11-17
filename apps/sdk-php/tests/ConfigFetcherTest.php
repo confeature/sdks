@@ -407,6 +407,15 @@ final class ConfigFetcherTest extends TestCase
         }
     }
 
+    /**
+     * Pinned as the exact string: a default naming a host that does not
+     * resolve turns every read into the caller's defaults, silently.
+     */
+    public function testDefaultBaseUrlIsCdnConfeatureIo(): void
+    {
+        self::assertSame('https://cdn.confeature.io', ConfigFetcher::DEFAULT_BASE_URL);
+    }
+
     public function testCloseIsIdempotent(): void
     {
         $logger = self::capturingLogger();

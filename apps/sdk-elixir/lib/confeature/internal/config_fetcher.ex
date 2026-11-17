@@ -35,7 +35,7 @@ defmodule Confeature.Internal.ConfigFetcher do
   alias Confeature.Internal.{Options, SdkKey, Sealed}
   alias Confeature.Logger, as: ConfLogger
 
-  @default_base_url "https://cdn-global.confeature.io"
+  @default_base_url "https://cdn.confeature.io"
 
   defmodule Result do
     @moduledoc false

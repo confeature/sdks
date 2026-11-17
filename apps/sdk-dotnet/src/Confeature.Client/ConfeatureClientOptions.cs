@@ -16,7 +16,7 @@ namespace Confeature.Client;
 /// Defaults match the ConfigCat SDK verbatim (constitution Principle II):
 /// </para>
 /// <list type="bullet">
-///   <item><description><see cref="BaseUrl"/> = <see cref="DefaultBaseUrl"/> (<c>https://cdn-global.confeature.io</c>).</description></item>
+///   <item><description><see cref="BaseUrl"/> = <see cref="DefaultBaseUrl"/> (<c>https://cdn.confeature.io</c>).</description></item>
 ///   <item><description><see cref="HttpTimeout"/> = 30 seconds.</description></item>
 ///   <item><description><see cref="LogLevel"/> = <see cref="LogLevel.Warning"/>.</description></item>
 ///   <item><description><see cref="PollingMode"/> = AutoPoll (60s poll, 5s init wait) when left <c>null</c>.</description></item>
@@ -25,7 +25,7 @@ namespace Confeature.Client;
 public sealed class ConfeatureClientOptions
 {
     /// <summary>Default CDN base URL. Customers override for self-hosted Confeature.</summary>
-    public const string DefaultBaseUrl = "https://cdn-global.confeature.io";
+    public const string DefaultBaseUrl = "https://cdn.confeature.io";
 
     /// <summary>Default per-request HTTP timeout.</summary>
     public static readonly TimeSpan DefaultHttpTimeout = TimeSpan.FromSeconds(30);

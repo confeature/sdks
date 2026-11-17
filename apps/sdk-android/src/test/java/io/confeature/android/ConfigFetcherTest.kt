@@ -45,6 +45,15 @@ class ConfigFetcherTest {
         server.shutdown()
     }
 
+    /**
+     * Pinned as the exact string: a default naming a host that does not resolve turns every read
+     * into the caller's defaults, silently.
+     */
+    @Test
+    fun defaultBaseUrl_isExactlyCdnConfeatureIo() {
+        assertThat(ConfigFetcher.DEFAULT_BASE_URL).isEqualTo("https://cdn.confeature.io")
+    }
+
     @Test
     fun fetch_200_parsesBodyAndCapturesEtag() {
         server.enqueue(

@@ -4,7 +4,7 @@ description: >-
   Confeature SDK for Dart / Flutter — drop-in compatible with ConfigCat's
   `configcat_client` package. Edge-cached feature flag evaluations from
   Cloudflare Workers; pure-Dart with optional Flutter integration.
-version: 0.1.0
+version: 0.1.1
 homepage: https://confeature.io
 repository: https://github.com/confeature/sdks
 issue_tracker: https://github.com/confeature/sdks/issues

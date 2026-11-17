@@ -1363,6 +1363,7 @@ jobs:
     steps:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
+      - run: pnpm run verify:default-hosts:resolve
       - run: deno task --cwd apps/cli check
       - run: deno task --cwd apps/cli test
 `;
@@ -1416,6 +1417,27 @@ jobs:
       "continue-on-error",
       VERIFY.replace("  verify:\n", "  verify:\n    continue-on-error: true\n"),
       /no step that runs/,
+    ],
+    [
+      "the default hosts' resolve mode removed",
+      VERIFY.replace("      - run: pnpm run verify:default-hosts:resolve\n", ""),
+      /no step that runs `pnpm run verify:default-hosts:resolve`/,
+    ],
+    [
+      "the default hosts' resolve mode stubbed",
+      VERIFY.replace(
+        "pnpm run verify:default-hosts:resolve",
+        "echo pnpm run verify:default-hosts:resolve",
+      ),
+      /no step that runs `pnpm run verify:default-hosts:resolve`/,
+    ],
+    [
+      "the default hosts' resolve mode made error-tolerant",
+      VERIFY.replace(
+        "      - run: pnpm run verify:default-hosts:resolve\n",
+        "      - run: pnpm run verify:default-hosts:resolve\n        continue-on-error: true\n",
+      ),
+      /a step sets continue-on-error/,
     ],
     [
       "the CLI's tests removed",

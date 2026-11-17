@@ -22,7 +22,7 @@ Add the package to your `Package.swift`, and depend on its `Confeature` library:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/confeature/confeature-swift", from: "0.1.0"),
+    .package(url: "https://github.com/confeature/confeature-swift", from: "0.1.1"),
 ],
 targets: [
     .target(

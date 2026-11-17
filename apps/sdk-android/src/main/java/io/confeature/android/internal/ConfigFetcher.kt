@@ -49,7 +49,7 @@ public class ConfigFetcher internal constructor(
 
     public companion object {
         /** Production CDN base URL. */
-        public const val DEFAULT_BASE_URL: String = "https://cdn-global.confeature.io"
+        public const val DEFAULT_BASE_URL: String = "https://cdn.confeature.io"
 
         private fun trimRightSlash(s: String): String {
             var end = s.length

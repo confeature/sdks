@@ -14,7 +14,7 @@
  *   - pollIntervalSeconds     : 60
  *   - cacheRefreshIntervalSeconds : 60
  *   - logLevel                : LogLevel.Warn
- *   - baseUrl                 : "https://cdn-global.confeature.io" (sdk-browser-js default)
+ *   - baseUrl                 : "https://cdn.confeature.io" (sdk-browser-js default)
  */
 
 import type { FlagOverrides, IConfigCatLogger, LogLevel } from "@confeature/sdk-browser-js";

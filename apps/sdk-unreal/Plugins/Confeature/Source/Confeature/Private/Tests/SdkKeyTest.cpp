@@ -342,5 +342,13 @@ bool FConfeatureSdkKeyFetchUrlTest::RunTest(const FString& /*Parameters*/)
 		Url.Contains(CacheKeyTail(DeriveCacheKey(ConfigCatKey))));
 	TestFalse(TEXT("URL is never double-encoded"), Url.Contains(TEXT("%25")));
 
+	// The default is pinned as the exact string: a default naming a host
+	// that does not resolve turns every read into the caller's defaults,
+	// silently.
+	TestEqual(
+		TEXT("DefaultBaseUrl is exactly https://cdn.confeature.io"),
+		FString(DefaultBaseUrl),
+		FString(TEXT("https://cdn.confeature.io")));
+
 	return true;
 }

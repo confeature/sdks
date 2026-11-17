@@ -27,7 +27,7 @@ if (enableAndroidPlugin) {
 }
 
 group = "io.confeature"
-version = "0.1.0"
+version = "0.1.1"
 
 // Pinned dependency versions — keep in lockstep with the Java/Android SDKs
 // where the matrix overlaps (e.g. coroutines + kotlinx-serialization).

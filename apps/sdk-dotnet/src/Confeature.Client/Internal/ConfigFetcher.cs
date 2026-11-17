@@ -39,7 +39,7 @@ namespace Confeature.Client.Internal;
 internal sealed class ConfigFetcher : IDisposable
 {
     /// <summary>Production CDN base URL.</summary>
-    public const string DefaultBaseUrl = "https://cdn-global.confeature.io";
+    public const string DefaultBaseUrl = "https://cdn.confeature.io";
 
     /// <summary>Default per-request timeout (30 seconds).</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);

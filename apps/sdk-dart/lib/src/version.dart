@@ -12,4 +12,4 @@ library;
 /// Public SDK version string. Bumped per the SDK's own semver track,
 /// independently from the wire-contract major version (constitution
 /// §Versioning).
-const String sdkVersion = '0.1.0';
+const String sdkVersion = '0.1.1';

@@ -158,6 +158,15 @@ defmodule Confeature.Internal.ConfigFetcherTest do
   end
 
   describe "ConfigFetcher.new/1" do
+    # Pinned as the exact string: a default naming a host that does not
+    # resolve turns every read into the caller's defaults, silently.
+    test "with no base URL the request goes to exactly https://cdn.confeature.io" do
+      fetcher = build_fetcher(sdk_key: @legacy_key, base_url: nil)
+
+      assert ConfigFetcher.request_url(fetcher) ==
+               "https://cdn.confeature.io/configuration-files/#{@legacy_key}/config_v6.json"
+    end
+
     test "inspect/1 renders neither the key nor the URL that carries it" do
       fetcher = build_fetcher(sdk_key: @configcat_key)
       [_prefix | secret_parts] = String.split(@configcat_key, "/")
