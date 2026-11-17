@@ -4,7 +4,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import type { components, operations } from "@confeature/contract/api";
 import { ExitCode } from "../exit.ts";
 import { CliError } from "../errors.ts";
-import { type ApiClient, ApiError } from "../../api/client.ts";
+import { type ApiClient, ApiError, retryAfterSeconds } from "../../api/client.ts";
 import type { Group, Leaf, RunContext } from "./registry.ts";
 import {
   openReadSession,
@@ -165,18 +165,6 @@ type ValueNotLive = components["schemas"]["ValueNotLive"];
 function isValueNotLive(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 503 &&
     (error.body as Partial<ValueNotLive> | null)?.error === "not_live";
-}
-
-/**
- * The wait a `Retry-After` header gives, in whole seconds, or `null` when it is
- * absent or not a non-negative integer. An HTTP-date is valid HTTP but not
- * what the api sends, so the CLI reports no number rather than guess one.
- */
-function retryAfterSeconds(header: string | null): number | null {
-  const trimmed = header?.trim() ?? "";
-  if (!/^\d+$/.test(trimmed)) return null;
-  const seconds = Number(trimmed);
-  return Number.isSafeInteger(seconds) ? seconds : null;
 }
 
 const FLAG_COLUMNS: Column<FlagRow>[] = [

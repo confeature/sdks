@@ -13,6 +13,12 @@ tree, deterministic configuration, and a secure credential store. Browser device
 `flag value` uses ConfigCat's v2 value API by `settingId`, and an update replaces only the default
 value, so every targeting rule and percentage option is kept (#817).
 
+`member invite --email <addr> [--email <addr> …]` asks the api to email each address a single-use
+invitation link, valid for 7 days, as ConfigCat does. The api answers `204` and never returns the
+link, so the command prints one line, `Invitations sent to 2 addresses.` (`{}` under `--json`).
+Someone who already has an account signs in and accepts from the email. A `429` means nothing was
+sent: the command names the limit and how long its `Retry-After` says to wait, and exits non-zero.
+
 It is a **native Deno project** (the first in the monorepo), intentionally outside the pnpm
 workspace. The Deno toolchain is confined to `apps/cli`; it never touches the edge/data plane.
 
@@ -26,6 +32,7 @@ deno task run -- login         # browser device-flow login (opens the approval p
 deno task run -- whoami        # logged-in identity (via GET /v1/me), or "not logged in"
 deno task run -- logout        # revoke the token server-side + clear it locally
 deno task run -- flag ls --config-id <id>   # the config's feature flags
+deno task run -- member invite --email <addr>   # email an invitation (repeat --email)
 ```
 
 ## Configure

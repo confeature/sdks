@@ -21,7 +21,10 @@
  *     - success: POST path / { emails, permissionGroupId } body / bearer.
  *     - multiple --email: collected into the emails array.
  *     - --permission-group: threaded; a non-zero value is a USAGE error, NO net.
- *     - --json: emits the 201 InviteCreateResultEntry[] (incl. tokens).
+ *     - 204 no body: one count line of distinct addresses, no token, no table.
+ *     - --json: emits `{}` (the 204 carries nothing to print).
+ *     - 429 invite_mail_limit / rate_limited: RUNTIME error naming the limit and
+ *       the Retry-After wait; nothing printed on stdout.
  *     - logged-out: NotLoggedInError, NO network call.
  *     - missing --email: USAGE error naming it, NO network call.
  *     - never prints the bearer token.
@@ -106,13 +109,22 @@ function invitation(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-/** A minimal InviteCreateResultEntry as the invite endpoint returns it. */
-function inviteResult(email: string) {
-  return {
-    email,
-    invite_token: `confeature_invite_${"x".repeat(48)}`,
-    expires_at: 1_900_000_000,
-  };
+/** createInvite's success: `204 No Content`, no body (#1170). */
+function inviteSent(): Response {
+  return new Response(null, { status: 204 });
+}
+
+/** createInvite's 429: the contract's `InviteRateLimited` body with its Retry-After. */
+function inviteRateLimited(
+  error: "rate_limited" | "invite_mail_limit",
+  retryAfter: string | null,
+): Response {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (retryAfter !== null) headers.set("Retry-After", retryAfter);
+  return new Response(JSON.stringify({ error, message: "too many requests" }), {
+    status: 429,
+    headers,
+  });
 }
 
 /** Record every request a command issues: method + URL + body + auth header. */
@@ -267,7 +279,7 @@ Deno.test("member invite: POSTs createInvite with { emails, permissionGroupId } 
   const { io, out } = captureIo();
   const { fetch, calls } = recordingFetch((call) => {
     if (call.method === "POST" && call.url.endsWith(INVITE_PATH)) {
-      return jsonResponse(201, [inviteResult("solo@acme.test")]);
+      return inviteSent();
     }
     return jsonResponse(404, { error: "not_found" });
   });
@@ -286,14 +298,12 @@ Deno.test("member invite: POSTs createInvite with { emails, permissionGroupId } 
   assertEquals(body.emails, ["solo@acme.test"]);
   assertEquals(body.permissionGroupId, 0);
 
-  assertStringIncludes(out.join("\n"), "solo@acme.test");
+  assertEquals(out, ["Invitation sent to 1 address."]);
 });
 
 Deno.test("member invite: multiple --email are collected into the emails array", async () => {
   const { io } = captureIo();
-  const { fetch, calls } = recordingFetch(() =>
-    jsonResponse(201, [inviteResult("a@acme.test"), inviteResult("b@acme.test")])
-  );
+  const { fetch, calls } = recordingFetch(() => inviteSent());
 
   const code = await runMemberInvite(
     ctx(io, ["--email", "a@acme.test", "--email", "b@acme.test"]),
@@ -305,9 +315,26 @@ Deno.test("member invite: multiple --email are collected into the emails array",
   assertEquals(body.emails, ["a@acme.test", "b@acme.test"]);
 });
 
+Deno.test("member invite: 204 prints one count line of distinct addresses, no token table", async () => {
+  const { io, out } = captureIo();
+  const { fetch } = recordingFetch(() => inviteSent());
+
+  const code = await runMemberInvite(
+    ctx(io, ["--email", "a@acme.test", "--email", "B@acme.test", "--email", "b@ACME.test"]),
+    { readToken: () => Promise.resolve("tok"), fetch },
+  );
+
+  assertEquals(code, ExitCode.OK);
+  // The server lower-cases and deduplicates, so the count does too.
+  assertEquals(out, ["Invitations sent to 2 addresses."]);
+  const text = out.join("\n");
+  assertEquals(text.includes("TOKEN"), false);
+  assertEquals(text.includes("confeature_invite_"), false);
+});
+
 Deno.test("member invite: --permission-group 0 is accepted + threaded", async () => {
   const { io } = captureIo();
-  const { fetch, calls } = recordingFetch(() => jsonResponse(201, [inviteResult("a@acme.test")]));
+  const { fetch, calls } = recordingFetch(() => inviteSent());
 
   const code = await runMemberInvite(
     ctx(io, ["--email", "a@acme.test", "--permission-group", "0"]),
@@ -354,10 +381,9 @@ Deno.test("member invite: a non-integer --permission-group (1.5) → USAGE error
   assertEquals(trip.called(), false, "a non-integer permission group must not reach the network");
 });
 
-Deno.test("member invite: --json emits the 201 InviteCreateResultEntry[] (incl. tokens)", async () => {
+Deno.test("member invite: --json emits {} (the 204 carries no body)", async () => {
   const { io, out } = captureIo();
-  const created = [inviteResult("a@acme.test"), inviteResult("b@acme.test")];
-  const { fetch } = recordingFetch(() => jsonResponse(201, created));
+  const { fetch } = recordingFetch(() => inviteSent());
 
   const code = await runMemberInvite(
     ctx(io, ["--email", "a@acme.test", "--email", "b@acme.test"], { outputJson: true }),
@@ -365,7 +391,58 @@ Deno.test("member invite: --json emits the 201 InviteCreateResultEntry[] (incl. 
   );
 
   assertEquals(code, ExitCode.OK);
-  assertEquals(JSON.parse(out.join("\n")), created);
+  assertEquals(out, ["{}"]);
+});
+
+async function inviteRefusal(response: Response): Promise<{ thrown: unknown; out: string[] }> {
+  const { io, out } = captureIo();
+  const { fetch } = recordingFetch(() => response);
+  let thrown: unknown;
+  try {
+    await runMemberInvite(ctx(io, ["--email", "a@acme.test"]), {
+      readToken: () => Promise.resolve("tok"),
+      fetch,
+    });
+  } catch (error) {
+    thrown = error;
+  }
+  return { thrown, out };
+}
+
+Deno.test("member invite: 429 invite_mail_limit → RUNTIME error naming the limit + Retry-After", async () => {
+  const { thrown, out } = await inviteRefusal(inviteRateLimited("invite_mail_limit", "120"));
+  assertEquals(thrown instanceof CliError, true);
+  assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+  const message = (thrown as CliError).message;
+  assertStringIncludes(message, "invitation limit");
+  assertStringIncludes(message, "Nothing was sent");
+  assertStringIncludes(message, "after 120 seconds");
+  assertEquals(out, [], "a refused batch prints no count line");
+});
+
+Deno.test("member invite: 429 rate_limited → RUNTIME error naming the write budget + Retry-After", async () => {
+  const { thrown, out } = await inviteRefusal(inviteRateLimited("rate_limited", "1"));
+  assertEquals(thrown instanceof CliError, true);
+  assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+  const message = (thrown as CliError).message;
+  assertStringIncludes(message, "write budget");
+  assertStringIncludes(message, "after 1 second.");
+  assertEquals(out, []);
+});
+
+Deno.test("member invite: 429 without a usable Retry-After names no number", async () => {
+  const { thrown } = await inviteRefusal(inviteRateLimited("invite_mail_limit", null));
+  assertEquals(thrown instanceof CliError, true);
+  const message = (thrown as CliError).message;
+  assertStringIncludes(message, "Retry later.");
+  assertEquals(/\d+ seconds?/.test(message), false);
+});
+
+Deno.test("member invite: a non-429 failure still propagates as the api's error", async () => {
+  const { thrown } = await inviteRefusal(jsonResponse(403, { error: "insufficient_scope" }));
+  assertEquals(thrown instanceof CliError, true);
+  assertEquals((thrown as CliError).exitCode, ExitCode.RUNTIME);
+  assertStringIncludes((thrown as CliError).message, "insufficient_scope");
 });
 
 Deno.test("member invite: logged out → NotLoggedInError, NO network call", async () => {
@@ -422,7 +499,7 @@ Deno.test("member invite: a blank --email is dropped → USAGE error, no network
 
 Deno.test("member invite: never prints the bearer token", async () => {
   const { io, out, err } = captureIo();
-  const { fetch } = recordingFetch(() => jsonResponse(201, [inviteResult("a@acme.test")]));
+  const { fetch } = recordingFetch(() => inviteSent());
   await runMemberInvite(
     ctx(io, ["--email", "a@acme.test"]),
     { readToken: () => Promise.resolve("SECRET-BEARER"), fetch },

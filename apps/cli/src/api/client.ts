@@ -81,6 +81,18 @@ export class NetworkError extends CliError {
   }
 }
 
+/**
+ * The wait a `Retry-After` header gives, in whole seconds, or `null` when it is
+ * absent or not a non-negative integer. An HTTP-date is valid HTTP but not
+ * what the api sends, so the CLI reports no number rather than guess one.
+ */
+export function retryAfterSeconds(header: string | null): number | null {
+  const trimmed = header?.trim() ?? "";
+  if (!/^\d+$/.test(trimmed)) return null;
+  const seconds = Number(trimmed);
+  return Number.isSafeInteger(seconds) ? seconds : null;
+}
+
 /** The result of a raw request: status, headers, and the parsed JSON body (or `null`). */
 export interface ApiResponse<T> {
   status: number;

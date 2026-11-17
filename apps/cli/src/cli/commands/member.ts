@@ -2,12 +2,12 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import type { operations } from "@confeature/contract/api";
+import { ApiError, retryAfterSeconds } from "../../api/client.ts";
 import { ExitCode } from "../exit.ts";
 import { CliError } from "../errors.ts";
 import type { Group, Leaf, RunContext } from "./registry.ts";
 import { openReadSession, type ReadDeps, requireOption, withSession } from "../read.ts";
 import { type Column, renderTable } from "../table.ts";
-import { renderPairs } from "../pairs.ts";
 
 /**
  * `member` group (#684, epic #676) — list organization members + manage member
@@ -41,10 +41,12 @@ type InvitationList =
   operations["listInvitations"]["responses"][200]["content"]["application/json"];
 type Invitation = InvitationList[number];
 
-// The invite request body + 201 entries, threaded from the generated
+// The invite request body and its 429 body, threaded from the generated
 // `operations` types so the write shape is build-verified against the contract.
+// The success is a `204 No Content` (#1170): there is no body type to thread.
 type InviteMembersBody = operations["createInvite"]["requestBody"]["content"]["application/json"];
-type InviteResult = operations["createInvite"]["responses"][201]["content"]["application/json"];
+type InviteRateLimited =
+  operations["createInvite"]["responses"][429]["content"]["application/json"];
 
 /**
  * A flattened (role, id, name, email) member row for the human table. The three
@@ -141,13 +143,19 @@ export async function runMemberLs(ctx: RunContext, deps: ReadDeps = {}): Promise
  * PARITY: this endpoint takes NO org-id (the invitation is scoped to the
  * session's organization server-side), so — unlike `member ls` — there is no
  * `--org-id` flag here. At least one `--email` is required (else a USAGE error
- * with NO network call). `--json` prints the 201 array of `{ email, invite_token,
- * expires_at }` entries; logged-out short-circuits with NO network call (R8).
+ * with NO network call); logged-out short-circuits with NO network call (R8).
  *
- * SECURITY: the per-email `invite_token` is sensitive — but it is the WHOLE point
- * of the command's output (Confeature has no server-side email delivery, so the
- * operator relays each token), so it IS printed by design, exactly like the back
- * office shows it once. The bearer token is NEVER printed.
+ * The api answers ConfigCat's `204 No Content` (#1170): it emails each invitee
+ * a single-use link itself and never returns the token, so there is nothing to
+ * relay. The command prints one count line, or `{}` under `--json`. The count
+ * is of distinct addresses, compared case-insensitively, because the api
+ * lower-cases and deduplicates them; an address that is already a member is
+ * left out server-side, and the 204 does not say which.
+ *
+ * A `429` (`rate_limited`: the Organization's write budget; `invite_mail_limit`:
+ * how many people one Organization or one inviter may invite) means nothing was
+ * created or sent: it becomes a RUNTIME error naming the limit and the wait its
+ * `Retry-After` gives. The bearer token is NEVER printed.
  */
 export async function runMemberInvite(ctx: RunContext, deps: ReadDeps = {}): Promise<ExitCode> {
   const flags = parseArgs(ctx.args, {
@@ -180,29 +188,47 @@ export async function runMemberInvite(ctx: RunContext, deps: ReadDeps = {}): Pro
   const session = await openReadSession(ctx, deps);
 
   const body: InviteMembersBody = { emails, permissionGroupId };
-  const created = await withSession(
-    session,
-    (client) => client.post<InviteResult>("/v1/users/invite", { body }),
-  );
+  try {
+    await withSession(
+      session,
+      (client) => client.post<null>("/v1/users/invite", { body }),
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 429) throw inviteRefused(error);
+    throw error;
+  }
 
   if (session.outputJson) {
-    ctx.io.out(JSON.stringify(created));
+    ctx.io.out(JSON.stringify({}));
     return ExitCode.OK;
   }
 
-  ctx.io.out(`Invited ${created.length} member${created.length === 1 ? "" : "s"}.`);
-  // One (email, token, expires) trio per invitee — the token is shown once here
-  // for the operator to relay (no server-side email delivery in Confeature).
-  for (const entry of created) {
-    ctx.io.out(
-      renderPairs([
-        ["EMAIL", entry.email],
-        ["INVITE TOKEN", entry.invite_token],
-        ["EXPIRES AT", String(entry.expires_at)],
-      ]),
-    );
-  }
+  const count = new Set(emails.map((email) => email.toLowerCase())).size;
+  ctx.io.out(
+    count === 1 ? "Invitation sent to 1 address." : `Invitations sent to ${count} addresses.`,
+  );
   return ExitCode.OK;
+}
+
+/**
+ * The RUNTIME error a createInvite `429` becomes: which limit refused the
+ * batch, that nothing was created or sent, and when to retry. The limits'
+ * numbers stay the api's (stated in the contract); the CLI does not repeat them.
+ */
+function inviteRefused(error: ApiError): CliError {
+  const code = (error.body as Partial<InviteRateLimited> | null)?.error;
+  const limit = code === "invite_mail_limit"
+    ? "the invitation limit is reached (how many people one Organization, or one inviter, " +
+      "may invite in an hour or a day)"
+    : "the Organization's write budget is spent";
+  const seconds = retryAfterSeconds(error.headers.get("Retry-After"));
+  const retry = seconds === null
+    ? "Retry later."
+    : `Retry after ${seconds} second${seconds === 1 ? "" : "s"}.`;
+  return new CliError(
+    `member invite: ${limit}. Nothing was sent. ${retry}`,
+    ExitCode.RUNTIME,
+  );
 }
 
 /** Narrow `--permission-group` to the v1-accepted `0`, or USAGE-reject it. */
@@ -355,7 +381,8 @@ const lsLeaf: Leaf = {
 
 const inviteLeaf: Leaf = {
   name: "invite",
-  summary: "Invite one or more members (repeatable --email, optional --permission-group).",
+  summary:
+    "Email an invitation to one or more addresses (repeatable --email, optional --permission-group).",
   run: (ctx) => runMemberInvite(ctx),
 };
 
