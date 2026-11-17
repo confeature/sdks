@@ -90,7 +90,8 @@
  *      and its deno suite) on every push to main and every pull request, unfiltered
  *      (gateTriggerProblems, shared with rule 19 over GATE_WORKFLOWS), under
  *      plain bash, with no step env, working-directory or continue-on-error,
- *      in jobs that need nothing.
+ *      in jobs that need nothing, and every one of them in the same job as
+ *      `pnpm run verify`, the required check.
  *      Below the workflow, a pack or credentialed job's or step's env: never
  *      redefines a workflow env name, and its *_VERSION values are exact (or
  *      the resolver's unit version).
@@ -2612,7 +2613,8 @@ export const PUBLIC_GATE_STEPS = [
 /**
  * Rule 13, over the workflows: verify.yml runs PUBLIC_GATE_STEPS on every push
  * to main and every pull request, unfiltered, under plain bash, in jobs that
- * wait on nothing and steps nothing can skip or redirect. Separate from
+ * wait on nothing and steps nothing can skip or redirect, all in the job that
+ * runs `pnpm run verify`. Separate from
  * `findings` so the rule fixtures need not each carry a verify.yml.
  */
 export function publicGateFindings(workflows) {
@@ -2644,16 +2646,24 @@ export function publicGateFindings(workflows) {
       if (s?.["continue-on-error"] !== undefined) add("a step sets continue-on-error:");
     }
   }
-  for (const gate of PUBLIC_GATE_STEPS) {
-    const runs = jobs.some(
-      (job) =>
-        job?.if === undefined &&
-        job?.["continue-on-error"] === undefined &&
-        (Array.isArray(job?.steps) ? job.steps : []).some(
-          (s) => typeof s?.run === "string" && s.run.trim() === gate && s.if === undefined,
-        ),
+  const runsUnskipped = (job, gate) =>
+    job?.if === undefined &&
+    job?.["continue-on-error"] === undefined &&
+    (Array.isArray(job?.steps) ? job.steps : []).some(
+      (s) => typeof s?.run === "string" && s.run.trim() === gate && s.if === undefined,
     );
-    if (!runs) add(`has no step that runs \`${gate}\` and cannot be skipped`);
+  // The required check is the job that runs `pnpm run verify`: a gate step in
+  // a second job is a second check nobody is made to wait on, so every gate
+  // runs in that one job, not merely somewhere in the workflow.
+  const [required] = PUBLIC_GATE_STEPS;
+  const checkJobs = jobs.filter((job) => runsUnskipped(job, required));
+  for (const gate of PUBLIC_GATE_STEPS) {
+    if (!jobs.some((job) => runsUnskipped(job, gate)))
+      add(`has no step that runs \`${gate}\` and cannot be skipped`);
+    else if (checkJobs.length > 0 && !checkJobs.some((job) => runsUnskipped(job, gate)))
+      add(
+        `runs \`${gate}\` in another job than the one that runs \`${required}\`, the required check`,
+      );
   }
   return out;
 }

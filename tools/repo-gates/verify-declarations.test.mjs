@@ -393,6 +393,28 @@ describe("the orphan sweep", () => {
         .join(),
     ).toMatch(/verify:thing:deep is a verify:\* gate/);
   });
+
+  it.each([
+    ["a non-direct home", "verify:thing:deep", false],
+    ["a direct home under another gate's name", "verify:other", true],
+  ])("%s is not wired by the declaration: it stays an undeclared gate", (_name, script, direct) => {
+    // MUTATION: exempt every package.json home and both launder an unrelated
+    // verify:* script through a declaration that only names it.
+    const scripts = { ...scriptsWith(""), [script]: "node tools/verify-thing.mjs --deep" };
+    const gates = {
+      ...GATES,
+      "verify:thing": {
+        ...GATES["verify:thing"],
+        homes: [...GATES["verify:thing"].homes, { file: "package.json", script, direct }],
+      },
+    };
+    seed({ scripts });
+    expect(
+      check(gates)
+        .map((v) => v.what)
+        .join(),
+    ).toMatch(new RegExp(`scripts\\.${script} is a verify:\\* gate`));
+  });
 });
 
 describe("the three bypasses round 2 found", () => {

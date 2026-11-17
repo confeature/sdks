@@ -1440,6 +1440,13 @@ jobs:
       /a step sets continue-on-error/,
     ],
     [
+      "the default hosts' resolve mode moved into a second job",
+      VERIFY.replace("      - run: pnpm run verify:default-hosts:resolve\n", "").concat(
+        "  resolve:\n    steps:\n      - run: pnpm run verify:default-hosts:resolve\n",
+      ),
+      /runs `pnpm run verify:default-hosts:resolve` in another job than the one that runs `pnpm run verify`/,
+    ],
+    [
       "the CLI's tests removed",
       VERIFY.replace("      - run: deno task --cwd apps/cli test\n", ""),
       /no step that runs `deno task --cwd apps\/cli test`/,

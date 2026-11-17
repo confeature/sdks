@@ -17,6 +17,7 @@ import {
   RETIRED_HOSTS,
   ZONE,
   expectedDefaultProblems,
+  makeCnameLookup,
   makeHttpsGet,
   makeLookup,
   randomNxName,
@@ -164,6 +165,51 @@ describe("the offline mode — a synthetic tree", () => {
       expect(rules()).toEqual(["retired-host"]);
     });
 
+    it("accepts ConfigCat's own host of the retired label, and still refuses the bare label beside it", () => {
+      // MUTATION: drop the `.configcat.com` exemption and the upstream host an
+      // SDK may name as the one it mirrors is refused as a retired name.
+      write(
+        "apps/sdk-demo/README.md",
+        "Upstream: https://cdn-global.configcat.com/configuration\n",
+      );
+      expect(run().findings).toEqual([]);
+      write("apps/sdk-demo/README.md", "Upstream: cdn-global.configcat.com, ours: cdn-global\n");
+      expect(rules()).toEqual(["retired-host"]);
+    });
+
+    it("refuses a zone host used as a URL's userinfo", () => {
+      // MUTATION: drop the `@` rule and the request goes to evil.example while
+      // the sweep reads a known host.
+      write("apps/sdk-demo/README.md", "Point it at https://cdn.confeature.io@evil.example/.\n");
+      expect(rules()).toEqual(["userinfo-host"]);
+    });
+
+    it("refuses a JSON-escaped plain-http URL, on its own line", () => {
+      // MUTATION: test HTTP_URL on the raw text and `http:\/\/` passes.
+      write("apps/sdk-demo/package.json", '{\n  "homepage": "http:\\/\\/confeature.io"\n}\n');
+      expect(run().findings).toEqual([
+        expect.objectContaining({
+          path: "apps/sdk-demo/package.json",
+          line: 2,
+          rule: "http-scheme",
+        }),
+      ]);
+    });
+
+    it("reports a tracked file it cannot read", () => {
+      // MUTATION: skip an unreadable file silently and a vanished file hides
+      // whatever host it held.
+      const files = [
+        SITE.path,
+        "apps/sdk-demo/README.md",
+        "apps/sdk-demo/test/fetcher.test.ts",
+        "apps/sdk-demo/src/gone.ts",
+      ];
+      expect(run({ files }).findings).toEqual([
+        expect.objectContaining({ path: "apps/sdk-demo/src/gone.ts", rule: "unreadable" }),
+      ]);
+    });
+
     it("refuses the retired host, once, under its own rule", () => {
       write("apps/sdk-demo/README.md", "Old default: https://cdn-global.confeature.io\n");
       expect(rules()).toEqual(["retired-host"]);
@@ -241,6 +287,15 @@ describe("the offline mode — a synthetic tree", () => {
       fires("site-missing", {
         sites: [{ ...SITE, path: "apps/sdk-demo/test/fetcher.test.ts" }],
       });
+    });
+
+    it("refuses two rows that pin the same line", () => {
+      // MUTATION: drop the duplicate check and two rows can count one
+      // declaration twice, so a second, unlisted site goes unpinned.
+      const twin = { ...SITE, pattern: /^export const DEFAULT_BASE_URL = "([^"\n]*)";/m };
+      expect(run({ sites: [SITE, twin] }).findings).toEqual([
+        expect.objectContaining({ path: SITE.path, line: 2, rule: "site-duplicate" }),
+      ]);
     });
 
     it("refuses a row filed under another SDK", () => {
@@ -329,13 +384,18 @@ describe("the resolve mode (stubs, offline)", () => {
       if (over.dns?.[host] !== undefined) return over.dns[host];
       return KNOWN_HOSTS.includes(host) ? "resolves" : "NXDOMAIN";
     };
+    const cnamed = [];
+    const cname = async (host) => {
+      cnamed.push(host);
+      return over.cname?.[host] ?? "none";
+    };
     const gets = [];
     const get = async (url, opts) => {
       gets.push({ url, opts });
       if (over.get !== undefined) return over.get();
       return { status: 200 };
     };
-    return { lookup, get, nxName: NX, asked, gets };
+    return { lookup, cname, get, nxName: NX, asked, cnamed, gets };
   };
   const findings = (w) => resolveFindings(w);
 
@@ -343,6 +403,7 @@ describe("the resolve mode (stubs, offline)", () => {
     const w = world();
     expect(await findings(w)).toEqual([]);
     expect(w.asked).toEqual([...KNOWN_HOSTS, NX, ...RETIRED_HOSTS]);
+    expect(w.cnamed).toEqual([NX, ...RETIRED_HOSTS]);
     expect(w.gets).toEqual([{ url: HEALTHZ_URL, opts: { timeoutMs: HEALTHZ_TIMEOUT_MS } }]);
   });
 
@@ -400,6 +461,31 @@ describe("the resolve mode (stubs, offline)", () => {
     expect(out[0].detail).toMatch(/^CERT_HAS_EXPIRED/);
   });
 
+  it.each([
+    ["a retired host", RETIRED_HOSTS[0], "retired-host"],
+    ["the random name", NX, "wildcard"],
+  ])("refuses %s that is NXDOMAIN on A yet carries a CNAME", async (_name, host, rule) => {
+    // MUTATION: ask A and AAAA only and a dangling CNAME, NXDOMAIN on both,
+    // passes as no record at all.
+    const fail = (code) => Object.assign(new Error(code), { code });
+    const resolver = {
+      resolve4: async (h) => {
+        if (KNOWN_HOSTS.includes(h)) return ["192.0.2.1"];
+        throw fail("ENOTFOUND");
+      },
+      resolve6: async () => {
+        throw fail("ENOTFOUND");
+      },
+      resolveCname: async (h) => {
+        if (h === host) return ["dangling.example.net"];
+        throw fail(h === NX ? "ENOTFOUND" : "ENODATA");
+      },
+    };
+    const out = await resolveFindings({ resolver, get: async () => ({ status: 200 }), nxName: NX });
+    expect(out).toEqual([expect.objectContaining({ host, rule })]);
+    expect(out[0].detail).toMatch(/^a CNAME exists: dangling\.example\.net/);
+  });
+
   it("a random name is a fresh nx-<16 hex> label in the zone", () => {
     const a = randomNxName();
     expect(a).toMatch(/^nx-[0-9a-f]{16}\.confeature\.io$/);
@@ -425,6 +511,21 @@ describe("makeLookup — the DNS answers, told apart", () => {
   });
 });
 
+describe("makeCnameLookup — a CNAME, told apart from none", () => {
+  const fail = (code) => async () => {
+    throw Object.assign(new Error(code), { code });
+  };
+  it.each([
+    ["NXDOMAIN", fail("ENOTFOUND"), "none"],
+    ["NODATA", fail("ENODATA"), "none"],
+    ["a CNAME", async () => ["a.example.net"], "a CNAME exists: a.example.net"],
+    ["SERVFAIL", fail("ESERVFAIL"), "SERVFAIL"],
+    ["another error", fail("EREFUSED"), "error EREFUSED"],
+  ])("%s", async (_name, resolveCname, want) => {
+    expect(await makeCnameLookup({ resolveCname })("x.confeature.io")).toBe(want);
+  });
+});
+
 describe("makeHttpsGet — verified, unfollowed, bounded", () => {
   const fakeRequest = (respond) => {
     const calls = [];
@@ -439,11 +540,21 @@ describe("makeHttpsGet — verified, unfollowed, bounded", () => {
   };
 
   it("asks with the certificate verified and no pooled socket, and returns a 3xx as it is", async () => {
+    let destroyed = false;
     const { request, calls } = fakeRequest(({ onResponse }) =>
-      onResponse({ statusCode: 302, headers: { location: "https://x.example/" }, resume() {} }),
+      onResponse({
+        statusCode: 302,
+        headers: { location: "https://x.example/" },
+        destroy() {
+          destroyed = true;
+        },
+      }),
     );
     const got = await makeHttpsGet(request)(HEALTHZ_URL, { timeoutMs: 1000 });
     expect(got).toEqual({ status: 302, location: "https://x.example/" });
+    // MUTATION: resume() instead, and a body that never ends holds the socket
+    // past the budget, unbounded.
+    expect(destroyed).toBe(true);
     expect(calls[0].url).toBe(HEALTHZ_URL);
     expect(calls[0].options).toMatchObject({
       method: "GET",

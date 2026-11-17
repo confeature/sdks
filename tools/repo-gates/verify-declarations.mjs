@@ -1304,13 +1304,22 @@ export function verifyGateDeclarations(
     );
   }
 
-  // A root script that is itself a declared home of a declared gate is wired
-  // by that declaration (`verify:default-hosts:resolve` is one): its body is
-  // checked above to run the gate, so it is not an undeclared gate.
+  // A root script that is a DIRECT home of a declared gate, named after it
+  // (`verify:default-hosts:resolve` for `verify:default-hosts`), is a second
+  // mode of that gate: its body is checked above to run the gate's own
+  // executable, so it is not an undeclared gate. Only that shape: a non-direct
+  // home merely reaches the gate through another script, and a home under
+  // another name would let any declaration launder an unrelated verify:* gate.
   const rootHomes = new Set(
-    Object.values(gates).flatMap((g) =>
+    Object.entries(gates).flatMap(([gateName, g]) =>
       (Array.isArray(g.homes) ? g.homes : [])
-        .filter((h) => h.file === "package.json" && typeof h.script === "string")
+        .filter(
+          (h) =>
+            h.file === "package.json" &&
+            h.direct === true &&
+            typeof h.script === "string" &&
+            h.script.startsWith(`${gateName}:`),
+        )
         .map((h) => h.script),
     ),
   );

@@ -29,9 +29,12 @@
  *   default constant cannot be written beside the list.
  * - The host sweep: every token ending in `confeature.io` must be exactly a
  *   `KNOWN_HOSTS` entry. A fragment (`.confeature.io`, what a concatenation or
- *   an interpolation leaves in source) is not one, so it fails closed. An
- *   `http://` URL naming a Confeature host fails, and so does the label of a
- *   `RETIRED_HOSTS` entry anywhere (`cdn-global`, bare, as in a docblock).
+ *   an interpolation leaves in source) is not one, so it fails closed. A host
+ *   followed directly by `@` fails too: it is the userinfo of a URL whose real
+ *   host comes after it. An `http://` URL naming a Confeature host fails (a
+ *   JSON-escaped `http:\/\/` read as `http://`), and so does the label of a
+ *   `RETIRED_HOSTS` entry anywhere (`cdn-global`, bare, as in a docblock),
+ *   except as ConfigCat's own `cdn-global.configcat.com`.
  *
  * It prints `scanned N files`, and refuses N = 0: a sweep over nothing reports
  * nothing while checking nothing.
@@ -41,7 +44,9 @@
  * Every `KNOWN_HOSTS` entry resolves; a random `nx-<hex>` name in the zone is
  * NXDOMAIN, which is what catches a wildcard record (a wildcard would make any
  * typo resolve, and the sweep's guarantee with it); every `RETIRED_HOSTS` entry
- * is NXDOMAIN; and `GET <EXPECTED_DEFAULT>/healthz` answers 200 over a verified
+ * is NXDOMAIN; neither the random name nor a retired one carries a CNAME (a
+ * CNAME to a target that does not resolve is NXDOMAIN on A, yet it is a record
+ * whoever claims the target answers for); and `GET <EXPECTED_DEFAULT>/healthz` answers 200 over a verified
  * certificate, with no redirect followed, within 10 s. A DNS record proves a
  * record, not that the CDN answers behind it: the probe is what does. NXDOMAIN,
  * NODATA, SERVFAIL and a timeout are reported apart, because they are fixed by
@@ -50,7 +55,15 @@
  * Its bound, stated: the reverse check reads an assignment on one statement,
  * possibly across a line break after `=`; a default built at run time from
  * pieces is caught by the host sweep's fragment rule instead, as long as one
- * piece ends in `confeature.io`.
+ * piece ends in `confeature.io`. The reverse check does not read a literal
+ * wrapped in a constructor (`URI("…")`, `new URL("…")`), a C# property
+ * initializer (`{ get; } = "…"`), a key/value form (`default_base_url: "…"`,
+ * a map or YAML key), or a file in UTF-16 (its bytes interleave NULs, so no
+ * identifier or host matches). The host sweep still reads every one of those
+ * that names a host of the zone in ASCII; a UTF-16 file escapes both. The
+ * sweep reads a zone host as a URL's userinfo (`…confeature.io@other`) and a
+ * JSON-escaped `http:\/\/` by the two rules above, and nothing else of URL
+ * syntax: a percent-encoded or punycode spelling of the zone is not a token.
  *
  * Exit codes: 0 clean, 1 at least one finding, 2 a usage error.
  */
@@ -242,10 +255,17 @@ const HOST_TOKEN = new RegExp(`[\\w.-]*${escapeRe(ZONE)}[\\w.-]*`, "gi");
 /** A plain-http URL naming a host of the zone: scheme, then host and path characters only. */
 const HTTP_URL = new RegExp(`http://[^\\s"'\`<>()\\[\\]{}]*?${escapeRe(ZONE)}`, "gi");
 
-/** The first label of each retired host (`cdn-global`), refused as a token anywhere. */
+/**
+ * The first label of each retired host (`cdn-global`), refused as a token
+ * anywhere but in ConfigCat's own host of the same label,
+ * `cdn-global.configcat.com`, which an SDK may name as the upstream it mirrors.
+ */
 const RETIRED_TOKENS = RETIRED_HOSTS.map((h) => ({
   label: h.split(".")[0],
-  re: new RegExp(`(?<![\\w-])${escapeRe(h.split(".")[0])}(?![\\w])`, "gi"),
+  re: new RegExp(
+    `(?<![\\w-])${escapeRe(h.split(".")[0])}(?![\\w])(?!\\.configcat\\.com(?![\\w-]))`,
+    "gi",
+  ),
 }));
 
 /** An identifier shaped `default.?base.?url`, with an optional Elixir `@`. */
@@ -438,13 +458,25 @@ export function verifyDefaultHosts(
     }
 
     for (const m of text.matchAll(HOST_TOKEN)) {
+      // `https://cdn.confeature.io@evil.example`: the zone is the userinfo,
+      // and the request goes to the host after the `@`.
+      if (text[m.index + m[0].length] === "@")
+        add(
+          rel,
+          lineOf(text, m.index),
+          "userinfo-host",
+          `${m[0]}@ is a URL's userinfo, not its host`,
+        );
       const host = m[0].replace(/\.+$/, "").toLowerCase();
       // A retired host is the retired-host rule's to report, once.
       if (known.has(host) || retired.has(host)) continue;
       add(rel, lineOf(text, m.index), "unknown-host", `${m[0]} is not a KNOWN_HOSTS entry`);
     }
-    for (const m of text.matchAll(HTTP_URL))
-      add(rel, lineOf(text, m.index), "http-scheme", `${m[0]} is plain http`);
+    // JSON may escape the slashes (`http:\/\/`); read them as written. The
+    // replacement keeps every line break, so line numbers hold.
+    const unescaped = text.replaceAll("\\/", "/");
+    for (const m of unescaped.matchAll(HTTP_URL))
+      add(rel, lineOf(unescaped, m.index), "http-scheme", `${m[0]} is plain http`);
     for (const { label, re } of RETIRED_TOKENS)
       for (const m of text.matchAll(re))
         add(rel, lineOf(text, m.index), "retired-host", `${label} is a retired name`);
@@ -484,11 +516,31 @@ export function makeLookup(resolver) {
 }
 
 /**
+ * Whether a name carries a CNAME: `"none"` (NXDOMAIN or NODATA), `"a CNAME
+ * exists: <target>"`, or the other DNS answer by its word. A dangling CNAME is
+ * NXDOMAIN on A and AAAA, so the address lookup alone cannot see it.
+ */
+export function makeCnameLookup(resolver) {
+  return async (host) => {
+    try {
+      const targets = await resolver.resolveCname(host);
+      return `a CNAME exists: ${[targets].flat().join(", ")}`;
+    } catch (e) {
+      const code = String(e?.code ?? e);
+      if (code === "ENOTFOUND" || code === "ENODATA") return "none";
+      return DNS_ERRORS[code] ?? `error ${code}`;
+    }
+  };
+}
+
+/**
  * One HTTPS GET over `request` (node:https's by default): the certificate is
  * verified (`rejectUnauthorized: true` set explicitly, so the environment's
  * NODE_TLS_REJECT_UNAUTHORIZED cannot turn it off), no redirect is followed
  * (node:https follows none), no pooled socket, and the whole exchange is bound
- * by `timeoutMs`. Resolves `{ status, location }`.
+ * by `timeoutMs`: the timer runs until the status line arrives, and the
+ * response is then destroyed unread, so no body can hold the socket open past
+ * it. Resolves `{ status, location }`.
  */
 export function makeHttpsGet(request = httpsRequest) {
   return (url, { timeoutMs }) =>
@@ -504,8 +556,9 @@ export function makeHttpsGet(request = httpsRequest) {
         },
         (res) => {
           clearTimeout(timer);
-          res.resume();
-          resolvePromise({ status: res.statusCode, location: res.headers?.location });
+          const got = { status: res.statusCode, location: res.headers?.location };
+          res.destroy();
+          resolvePromise(got);
         },
       );
       timer = setTimeout(() => {
@@ -531,12 +584,14 @@ export const HEALTHZ_URL = new URL("/healthz", EXPECTED_DEFAULT).href;
 export const HEALTHZ_TIMEOUT_MS = 10_000;
 
 /**
- * The resolve check. `lookup` and `get` are injected so the tests run offline;
- * the defaults are the system resolver and node:https. Returns the findings,
- * each `{ host, rule, detail }`.
+ * The resolve check. `resolver` (or `lookup` and `cname` over it) and `get`
+ * are injected so the tests run offline; the defaults are the system resolver
+ * and node:https. Returns the findings, each `{ host, rule, detail }`.
  */
 export async function resolveFindings({
-  lookup = makeLookup(new dns.Resolver({ timeout: 5000, tries: 2 })),
+  resolver = new dns.Resolver({ timeout: 5000, tries: 2 }),
+  lookup = makeLookup(resolver),
+  cname = makeCnameLookup(resolver),
   get = makeHttpsGet(),
   nxName = randomNxName(),
 } = {}) {
@@ -556,6 +611,15 @@ export async function resolveFindings({
           ? "a random name resolves: a wildcard record answers for any typo of a host"
           : `${nx}, not NXDOMAIN: the zone's answer for an unknown name could not be confirmed`,
     });
+  else {
+    const c = await cname(nxName);
+    if (c !== "none")
+      out.push({
+        host: nxName,
+        rule: "wildcard",
+        detail: `${c}: a random name must carry no record at all`,
+      });
+  }
   for (const host of RETIRED_HOSTS) {
     const got = await lookup(host);
     if (got !== "NXDOMAIN")
@@ -564,6 +628,15 @@ export async function resolveFindings({
         rule: "retired-host",
         detail: `${got}, not NXDOMAIN: a retired name must stay unanswered`,
       });
+    else {
+      const c = await cname(host);
+      if (c !== "none")
+        out.push({
+          host,
+          rule: "retired-host",
+          detail: `${c}: a retired name must carry no record at all`,
+        });
+    }
   }
   try {
     const { status, location } = await get(HEALTHZ_URL, { timeoutMs: HEALTHZ_TIMEOUT_MS });
@@ -594,7 +667,7 @@ export async function main(argv = process.argv.slice(2), root = process.cwd()) {
     const findings = await resolveFindings();
     if (findings.length === 0) {
       process.stdout.write(
-        `verify-default-hosts --resolve: ${String(KNOWN_HOSTS.length)} known hosts resolve, a random name and ${String(RETIRED_HOSTS.length)} retired host(s) are NXDOMAIN, ${HEALTHZ_URL} answered 200\n`,
+        `verify-default-hosts --resolve: ${String(KNOWN_HOSTS.length)} known hosts resolve, a random name and ${String(RETIRED_HOSTS.length)} retired host(s) are NXDOMAIN with no CNAME, ${HEALTHZ_URL} answered 200\n`,
       );
       return 0;
     }
