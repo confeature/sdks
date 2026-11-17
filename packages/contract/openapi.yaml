@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.12.0
+  version: 0.13.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -672,7 +672,19 @@ paths:
               $ref: "#/components/schemas/SsoStartRequest"
       responses:
         "400":
-          $ref: "#/components/responses/NotJsonWrite"
+          description: >
+            `invalid_sso_state`, with the fixed SSO message, for every
+            malformed start body (a malformed `return_to`, `reauth` or
+            `invite` included: one validation hook answers them all, #1289),
+            and for `invite` sent together with `reauth: true`. No state
+            record is minted. The start never looks the invitation up, so a
+            live, dead or unknown token in the right shape gets the same 200.
+            Also `bad_request` when the request carries a Confeature cookie
+            and its body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SsoError"
         "403":
           $ref: "#/components/responses/CrossOriginWrite"
         "200":
@@ -5277,8 +5289,11 @@ paths:
         and can still be accepted: pending, unexpired, sent by email, and its
         inviter still a verified member of the Organization or a live
         management token. Names the Organization and who invited before the
-        user accepts. Every other case, a malformed id or an invitation for
-        another address included, is the same 404. Cookie session only: any
+        user accepts. From #1289 it is also answered, with `acceptedAt` set,
+        for an invitation to that address already accepted while the user
+        is still a member of its Organization. Every other case, a malformed
+        id or an invitation for another address included, is the same 404.
+        Accepting stays possible only while pending. Cookie session only: any
         other credential is answered 401. An account whose address is not
         verified is refused 403 `email_unverified`.
       tags: [Me]
@@ -7736,7 +7751,7 @@ components:
         whoever the addresses are. Both send `Retry-After`.
     OwnInvitation:
       type: object
-      required: [invitationId, organizationId, organizationName, invitedBy, expiresAt]
+      required: [invitationId, organizationId, organizationName, invitedBy, expiresAt, acceptedAt]
       properties:
         invitationId:
           type: string
@@ -7756,10 +7771,19 @@ components:
         expiresAt:
           type: string
           format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the invitation was accepted, or null while it is pending
+            (#1289). A string means the signed-in user already joined the
+            Organization through it.
       description: >
         Confeature addition (#1170). 200 response of GET
         /v1/me/invitations/{invitationId}: an invitation addressed to the
-        signed-in user that can still be accepted.
+        signed-in user that can still be accepted, or, from #1289, one they
+        already accepted while they are still a member of its Organization.
     InvitationAccepted:
       type: object
       required: [organizationId, organizationName]
@@ -7931,6 +7955,17 @@ components:
             (403, no session), and on success sets a fresh session cookie and
             answers the signed-in `User`, as a sign-in does. A fresh session is how an account with no
             password confirms deleting itself.
+        invite:
+          type: string
+          pattern: "^confeature_invite_[A-Za-z0-9_-]{48}$"
+          description: >
+            Confeature addition (#1289): the plaintext invitation token of
+            the link the person followed. An account the callback creates
+            then joins only the inviting Organization, as a `member`, and
+            gets no Organization of its own; an existing account is signed
+            in unchanged. The start never resolves the token and keeps only
+            its hash, in the single-use state record. Refused (400
+            `invalid_sso_state`) with `reauth: true`, and in any other shape.
       description: >
         Request body for POST /v1/auth/sso/{provider}/start. All fields
         are optional.

@@ -1264,7 +1264,7 @@ export interface paths {
     };
     /**
      * Read an invitation addressed to the signed-in user (cookie-session authed)
-     * @description Confeature addition (#1170). The invitation, when it is addressed to the session's verified email address (compared case-insensitively) and can still be accepted: pending, unexpired, sent by email, and its inviter still a verified member of the Organization or a live management token. Names the Organization and who invited before the user accepts. Every other case, a malformed id or an invitation for another address included, is the same 404. Cookie session only: any other credential is answered 401. An account whose address is not verified is refused 403 `email_unverified`.
+     * @description Confeature addition (#1170). The invitation, when it is addressed to the session's verified email address (compared case-insensitively) and can still be accepted: pending, unexpired, sent by email, and its inviter still a verified member of the Organization or a live management token. Names the Organization and who invited before the user accepts. From #1289 it is also answered, with `acceptedAt` set, for an invitation to that address already accepted while the user is still a member of its Organization. Every other case, a malformed id or an invitation for another address included, is the same 404. Accepting stays possible only while pending. Cookie session only: any other credential is answered 401. An account whose address is not verified is refused 403 `email_unverified`.
      */
     get: operations["getOwnInvitation"];
     put?: never;
@@ -1988,7 +1988,7 @@ export interface components {
       error: "rate_limited" | "invite_mail_limit";
       message: string;
     };
-    /** @description Confeature addition (#1170). 200 response of GET /v1/me/invitations/{invitationId}: an invitation addressed to the signed-in user that can still be accepted. */
+    /** @description Confeature addition (#1170). 200 response of GET /v1/me/invitations/{invitationId}: an invitation addressed to the signed-in user that can still be accepted, or, from #1289, one they already accepted while they are still a member of its Organization. */
     OwnInvitation: {
       /** Format: uuid */
       invitationId: string;
@@ -2000,6 +2000,11 @@ export interface components {
       invitedBy: string | null;
       /** Format: date-time */
       expiresAt: string;
+      /**
+       * Format: date-time
+       * @description When the invitation was accepted, or null while it is pending (#1289). A string means the signed-in user already joined the Organization through it.
+       */
+      acceptedAt: string | null;
     };
     /** @description Confeature addition (#1170). 200 response of POST /v1/me/invitations/{invitationId}/accept: the Organization joined, in which the session now works. */
     InvitationAccepted: {
@@ -2080,6 +2085,8 @@ export interface components {
       return_to?: string;
       /** @description Confeature addition (#1125): re-authenticate the signed-in user (cookie session required, else 401). The provider is asked for its account chooser (`prompt=select_account` where it documents it), the callback refuses any account other than the signed-in one (403, no session), and on success sets a fresh session cookie and answers the signed-in `User`, as a sign-in does. A fresh session is how an account with no password confirms deleting itself. */
       reauth?: boolean;
+      /** @description Confeature addition (#1289): the plaintext invitation token of the link the person followed. An account the callback creates then joins only the inviting Organization, as a `member`, and gets no Organization of its own; an existing account is signed in unchanged. The start never resolves the token and keeps only its hash, in the single-use state record. Refused (400 `invalid_sso_state`) with `reauth: true`, and in any other shape. */
+      invite?: string;
     };
     /** @description 200 response of POST /v1/auth/sso/{provider}/start. The client navigates to `redirect_url`; the matching callback POSTs to `/v1/auth/sso/{provider}/callback` once the provider redirects back with `code` + `state` on the query string. */
     SsoStartResponse: {
@@ -4666,7 +4673,15 @@ export interface operations {
           "application/json": components["schemas"]["SsoStartResponse"];
         };
       };
-      400: components["responses"]["NotJsonWrite"];
+      /** @description `invalid_sso_state`, with the fixed SSO message, for every malformed start body (a malformed `return_to`, `reauth` or `invite` included: one validation hook answers them all, #1289), and for `invite` sent together with `reauth: true`. No state record is minted. The start never looks the invitation up, so a live, dead or unknown token in the right shape gets the same 200. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SsoError"];
+        };
+      };
       /** @description `unauthorized` — `reauth: true` with no valid web session (#1125). */
       401: {
         headers: {
