@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.11.0
+  version: 0.12.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -477,11 +477,16 @@ paths:
         flow is not part of their public API, so no parity drift exists
         to violate). Consumes a `confeature_invite_<…>` token and a
         password, atomically creates the `users` row + issues a
-        `__Host-cfsession` cookie. The invite row is DELETEd in the
-        same D1 transaction that inserts the user, making the link
-        single-use by construction. Expired, consumed,
-        unknown, and malformed tokens all return the SAME 410 generic
-        body — no token-existence enumeration.
+        `__Host-cfsession` cookie. The token arrived by email, so holding
+        it proves the mailbox: the account is created with its address
+        verified. The invitation is marked redeemed in the same D1
+        transaction that inserts the user, making the link single-use.
+        When the token is valid and its address already has an account,
+        the answer is 409 `account_exists`: that person signs in and
+        accepts with `POST /v1/me/invitations/{invitationId}/accept`.
+        Expired, consumed, revoked, unknown and malformed tokens, and a
+        token whose inviter no longer stands behind it, all return the
+        SAME 410 generic body — no token-existence enumeration.
       tags: [Auth]
       requestBody:
         required: true
@@ -505,6 +510,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "409":
+          description: >
+            `account_exists` — the token is valid and its address already has
+            an account. Nothing is written. Sign in with that account and
+            accept the invitation by id. Only the holder of a valid token can
+            see this answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "410":
           description: >
             Invite expired, consumed, unknown, or malformed — same generic body
@@ -1229,20 +1244,23 @@ paths:
       operationId: createInvite
       summary: Invite one or more members
       description: >
-        Invite one or more members in a single call — the request shape
-        aligns to ConfigCat's `InviteMembersRequest` (`emails[]` +
-        `permissionGroupId`). `permissionGroupId` is a v1 placeholder:
+        Invite one or more members in a single call — ConfigCat's
+        `InviteMembersRequest` (`emails[]` + `permissionGroupId`) and its
+        `204 No Content` answer. `permissionGroupId` is a v1 placeholder:
         Confeature has no permission-groups feature yet, so the only
         accepted value is `0` (the same rule as
         `InvitationModel.permissionGroupId`) — a non-zero value is a 400.
-        The `201` array response — one `{ email, invite_token, expires_at }`
-        entry per submitted email — is a deliberate, documented
-        Confeature-original divergence from ConfigCat's `204 No Content`:
-        Confeature has no server-side email delivery, so the operator
-        receives each invite token to relay (the back-office builds
-        `<origin>/signup#invite=<token>`). The hashed-at-rest, 7-day,
-        single-use token model and the best-effort per-email
-        duplicate-email guard are unchanged from the single-email path.
+        Addresses are lower-cased and deduplicated; addresses that are
+        already members of the Organization are left out. Every other
+        address gets an invitation and an email holding a single-use link
+        valid for 7 days; re-inviting an address replaces its pending
+        invitation, and only the new link works. The invitation token is
+        never returned to the caller. The answer does not depend on
+        whether an address has a Confeature account: someone who has one
+        signs in and accepts. Only the seats the batch adds count against
+        the plan's limit, so re-inviting a pending address at the limit is
+        accepted. A failed send is not reported to the caller: if someone
+        does not receive the email, invite them again.
         Inviting needs the `member:write` scope: a user's own credential
         carries every scope, so only a management token minted without it is
         refused. Any member of an Organization may invite into it, whatever
@@ -1261,16 +1279,10 @@ paths:
             schema:
               $ref: "#/components/schemas/InviteMembersRequest"
       responses:
-        "201":
+        "204":
           description: >
-            One invitation minted per submitted email; the plaintext
-            token of each is returned once (shown only once).
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/InviteCreateResultEntry"
+            The invitations are created and their emails are on their way.
+            No body.
         "400":
           description: >
             Malformed request — an empty or omitted `emails` array, a
@@ -1304,17 +1316,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-        "409":
+        "429":
           description: >
-            Whole-batch rejection — at least one submitted address
-            already belongs to a registered user (`email_taken`). The
-            batch is all-or-nothing: nothing is minted.
+            `rate_limited` — the Organization's write budget is spent (see
+            `RateLimited`); or `invite_mail_limit` — the batch would pass how
+            many people one Organization (40 an hour, 150 a day) or one
+            inviter (20 an hour, 60 a day) may invite. Nothing is created or
+            sent. Wait `Retry-After` seconds.
+          headers:
+            Retry-After:
+              required: true
+              schema:
+                type: integer
+                minimum: 1
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-        "429":
-          $ref: "#/components/responses/RateLimited"
+                $ref: "#/components/schemas/InviteRateLimited"
   /healthz:
     get:
       operationId: getHealthz
@@ -5249,6 +5267,109 @@ paths:
                   - $ref: "#/components/schemas/Error"
         "503":
           $ref: "#/components/responses/PasswordCheckUnavailable"
+  /v1/me/invitations/{invitationId}:
+    get:
+      operationId: getOwnInvitation
+      summary: Read an invitation addressed to the signed-in user (cookie-session authed)
+      description: >
+        Confeature addition (#1170). The invitation, when it is addressed to
+        the session's verified email address (compared case-insensitively)
+        and can still be accepted: pending, unexpired, sent by email, and its
+        inviter still a verified member of the Organization or a live
+        management token. Names the Organization and who invited before the
+        user accepts. Every other case, a malformed id or an invitation for
+        another address included, is the same 404. Cookie session only: any
+        other credential is answered 401. An account whose address is not
+        verified is refused 403 `email_unverified`.
+      tags: [Me]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The invitation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnInvitation"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "`email_unverified` — the account's address is not verified."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailUnverified"
+        "404":
+          description: No such invitation for this account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/me/invitations/{invitationId}/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept an invitation addressed to the signed-in user (cookie-session authed)
+      description: >
+        Confeature addition (#1170). Joins the inviting Organization as a
+        `member`, marks the invitation accepted, records an
+        `invite_accepted` security event, and moves the session to that
+        Organization, in one commit. The same refusals as
+        `getOwnInvitation`, each the same 404; an invitation accepted
+        concurrently is 404 too. Cookie session only; the request spends
+        the Organization's write budget, and is refused cross-origin.
+        No request body.
+      tags: [Me]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Joined; the session now works in that Organization.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationAccepted"
+        "400":
+          $ref: "#/components/responses/NotJsonWrite"
+        "401":
+          description: No valid web session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: >
+            `forbidden` (cross-origin request refused, see `CrossOriginWrite`),
+            or `email_unverified` — the account's address is not verified.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such invitation for this account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/organizations:
     get:
       operationId: organizationsList
@@ -7596,37 +7717,62 @@ components:
             field real values.
       description: >
         Request to invite one or more members in a single call — mirrors
-        ConfigCat's `InviteMembersRequest`. Email uniqueness is checked
-        best-effort against the existing `users` table: if ANY address
-        already belongs to a registered user the whole batch is rejected
-        with 409 and nothing is minted (the batch is all-or-nothing). The
-        real safety net is the `UNIQUE(email)` constraint that fires at
-        redemption time.
-    InviteCreateResultEntry:
+        ConfigCat's `InviteMembersRequest`. Whether an address has an
+        account is never checked here: every address that is not already a
+        member of the Organization is invited and emailed alike.
+    InviteRateLimited:
       type: object
-      required: [email, invite_token, expires_at]
+      required: [error, message]
       properties:
-        email:
+        error:
           type: string
-          format: email
-          description: The invitee address this entry was minted for (lower-cased).
-        invite_token:
+          enum: [rate_limited, invite_mail_limit]
+        message:
           type: string
-          pattern: "^confeature_invite_[A-Za-z0-9_-]{48}$"
-          description: >
-            Plaintext invite token, shape `confeature_invite_<48 url-safe
-            chars>` (≈ 288 bits of entropy). Returned ONCE; never
-            persisted server-side (only its SHA-256 digest is stored).
-            The back-office UI constructs the full link
-            (`<origin>/signup#invite=<token>`).
-        expires_at:
-          type: integer
-          description: Unix epoch seconds at which this invitation expires (created_at + 7 days).
       description: >
-        One element of the 201 response array of POST /v1/users/invite —
-        the invitation minted for one email in the batch. The plaintext
-        token is the only sensitive value on the wire; the back-office
-        MUST hold it in a function-scoped variable and never log it.
+        Confeature addition (#1170). The 429 of POST /v1/users/invite:
+        `rate_limited` is the Organization's write budget (the `RateLimited`
+        body); `invite_mail_limit` is the recipient budget, one constant body
+        whoever the addresses are. Both send `Retry-After`.
+    OwnInvitation:
+      type: object
+      required: [invitationId, organizationId, organizationName, invitedBy, expiresAt]
+      properties:
+        invitationId:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        organizationName:
+          type: string
+          description: The inviting Organization's name, as its members set it.
+        invitedBy:
+          type: string
+          nullable: true
+          description: >
+            The inviter's email address, or null when the invitation was made
+            with a management token (an administrator of the Organization).
+        expiresAt:
+          type: string
+          format: date-time
+      description: >
+        Confeature addition (#1170). 200 response of GET
+        /v1/me/invitations/{invitationId}: an invitation addressed to the
+        signed-in user that can still be accepted.
+    InvitationAccepted:
+      type: object
+      required: [organizationId, organizationName]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        organizationName:
+          type: string
+      description: >
+        Confeature addition (#1170). 200 response of POST
+        /v1/me/invitations/{invitationId}/accept: the Organization joined, in
+        which the session now works.
     AcceptInviteRequest:
       type: object
       required: [invite_token, password]
@@ -7634,7 +7780,7 @@ components:
         invite_token:
           type: string
           pattern: "^confeature_invite_[A-Za-z0-9_-]{48}$"
-          description: The plaintext token from the invite link's `#invite=` fragment.
+          description: The plaintext token from the emailed link's `#invite=` fragment.
         password:
           type: string
           minLength: 12
@@ -7645,9 +7791,9 @@ components:
             /v1/auth/bootstrap and /v1/auth/login. Hashed with
             argon2id server-side; never logged in plaintext.
       description: >
-        Request body for POST /v1/auth/accept-invite. The token is
-        observed on the wire exactly twice in its lifetime (here and in
-        the matching 201 from /v1/users/invite); the password is
+        Request body for POST /v1/auth/accept-invite. The token leaves
+        the server only inside the invitation email, and is observed on
+        the wire once, here; the password is
         observed once (here) and is hashed before persistence.
     SignupRequest:
       type: object
