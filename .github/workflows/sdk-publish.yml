@@ -595,7 +595,8 @@ jobs:
       needs.setup.result == 'success' &&
       needs.setup.outputs.registry == 'rubygems' &&
       (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
-    runs-on: ubuntu-latest
+    # ruby-builder has no Ruby build for ubuntu-26.04, ubuntu-latest since 2026-11.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
