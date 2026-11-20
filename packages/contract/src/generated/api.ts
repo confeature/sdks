@@ -2379,7 +2379,7 @@ export interface components {
      * @enum {string}
      */
     SettingType: "boolean" | "string" | "int" | "double";
-    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags` assigns tags to the new setting (#1009). `predefinedVariations` gives the new setting its predefined variations, written with the setting or not at all. `order`, `isJson` and `settingIdToInitFrom` are ConfigCat fields Confeature does not support yet: each is accepted when empty or null and refused with a 400 naming its ticket otherwise. */
+    /** @description ConfigCat's `CreateSettingInitialValues` (#938): `key`, `name`, `settingType` and an optional `hint` and `initialValues`. `settingType` is the canonical field; `type` is its alias, kept for clients written before it. One of the two is required, and a body with both must give the same type. An environment not named in `initialValues` is seeded with the type's zero value (`boolean → false`, `string → ""`, `int → 0`, `double → 0`). `tags` assigns tags to the new setting (#1009). `predefinedVariations` gives the new setting its predefined variations, written with the setting in the same operation. Public creation accepts an omitted, false or null `isJson` and refuses true with a 400 (#818). `order` and `settingIdToInitFrom` are accepted when omitted or null and otherwise refused with a 400 naming the corresponding ticket. */
     CreateSettingRequest: {
       key: components["schemas"]["SettingKey"];
       /** @description Human-readable display label (ConfigCat SettingModel.name). */
@@ -2399,7 +2399,7 @@ export interface components {
        * @description Not supported yet (#818): settings are ordered by creation. Accepted only when null.
        */
       order?: number | null;
-      /** @description Not supported yet (#818); accepted only when false or null. */
+      /** @description Public creation accepts omission, false or null. A true value returns 400 (#818). Product import can enable JSON-text mode. */
       isJson?: boolean | null;
       /**
        * Format: int32
@@ -2444,7 +2444,7 @@ export interface components {
        */
       order: number;
       settingType: components["schemas"]["SettingType"];
-      /** @description Always false in Confeature. */
+      /** @description True for a string setting with JSON-text mode enabled through product import. Its values remain strings. Ordinary settings report false. */
       isJson: boolean;
       /** Format: uuid */
       configId: string;
@@ -2592,6 +2592,7 @@ export interface components {
       name: string;
       hint: string | null;
       settingType: components["schemas"]["SettingType"];
+      /** @description True for a string setting with JSON-text mode enabled through product import. Its values remain strings. Ordinary settings report false. */
       isJson: boolean;
       /** Format: int32 */
       order: number;
