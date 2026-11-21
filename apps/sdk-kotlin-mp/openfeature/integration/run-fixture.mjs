@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const fixtureKey = "configcat-sdk-1/AAAAAAAAAAAAAAAAAAAAAA/BBBBBBBBBBBBBBBBBBBBBB";
 const lazyKey = "configcat-sdk-1/CCCCCCCCCCCCCCCCCCCCCC/DDDDDDDDDDDDDDDDDDDDDD";
+const refreshedLazyKey = "configcat-sdk-1/EEEEEEEEEEEEEEEEEEEEEE/FFFFFFFFFFFFFFFFFFFFFF";
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const companion = fileURLToPath(new URL("../", import.meta.url));
 const base = fileURLToPath(new URL("../../", import.meta.url));
@@ -45,11 +46,13 @@ const payload = {
     },
   },
 };
-const lazySeed = (value) => ({
-  sdkKey: lazyKey,
+const lazySeed = (sdkKey, value) => ({
+  sdkKey,
   payload: { f: { region: { t: 1, v: { s: value }, i: value } } },
   etag: `"kotlin-${value}"`,
 });
+const initialLazySeed = lazySeed(lazyKey, "stale");
+const refreshedLazySeed = lazySeed(refreshedLazyKey, "fresh");
 
 async function run(command, args, options) {
   const child = spawn(command, args, { stdio: "inherit", ...options });
@@ -94,19 +97,6 @@ function close(server) {
   });
 }
 
-async function updateLazySeed(harness) {
-  const response = await fetch(harness + "/admin/seed", {
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(5_000),
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ keys: [lazySeed("fresh")] }),
-  });
-  if (!response.ok || (await response.json()).appliedKeys !== 1) {
-    throw new Error("The local harness did not update the LazyLoad fixture.");
-  }
-}
-
 function createFixtureServers(harness) {
   let connections = 0;
   let seeded = 0;
@@ -133,9 +123,11 @@ function createFixtureServers(harness) {
       response.writeHead(404).end();
       return;
     }
-    const updateSeed = request.url === lazyPath && ++lazyRequests === 1;
+    // Both versions are seeded at boot. The SDK still sees one key and URL.
+    const upstreamPath =
+      request.url === lazyPath && ++lazyRequests > 1 ? pathFor(refreshedLazyKey) : request.url;
     try {
-      const upstream = await fetch(harness + request.url, {
+      const upstream = await fetch(harness + upstreamPath, {
         redirect: "error",
         signal: AbortSignal.timeout(5_000),
         headers: request.headers["if-none-match"]
@@ -143,7 +135,6 @@ function createFixtureServers(harness) {
           : {},
       });
       const body = Buffer.from(await upstream.arrayBuffer());
-      if (updateSeed) await updateLazySeed(harness);
       seeded++;
       const headers = { "content-type": "application/json", "cache-control": "no-store" };
       const etag = upstream.headers.get("etag");
@@ -157,7 +148,7 @@ function createFixtureServers(harness) {
   return { canary, facade, counts: () => ({ seeded, redirects, connections }) };
 }
 
-async function checkRequests(harness, key, expected) {
+async function checkRequest(harness, key, expectedEtag = null) {
   const endpoint = new URL("/admin/requests", harness);
   endpoint.searchParams.set("sdkKey", key);
   const response = await fetch(endpoint, {
@@ -168,10 +159,9 @@ async function checkRequests(harness, key, expected) {
   if (
     !response.ok ||
     !report.ok ||
-    report.requests.length !== expected ||
-    report.requests[0].ifNoneMatch !== null ||
-    report.requests.some((r) => new URL(r.url, harness).pathname !== pathFor(key)) ||
-    (key === lazyKey && report.requests[1].ifNoneMatch !== lazySeed("stale").etag)
+    report.requests.length !== 1 ||
+    report.requests[0].ifNoneMatch !== expectedEtag ||
+    new URL(report.requests[0].url, harness).pathname !== pathFor(key)
   ) {
     throw new Error(`Unexpected manual or LazyLoad request sequence for the ${target} fixture.`);
   }
@@ -271,8 +261,9 @@ internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
     if (code !== 0) return code;
 
     await checkTestResults(runtimes[target].at(-1));
-    await checkRequests(harness, fixtureKey, 1);
-    await checkRequests(harness, lazyKey, 2);
+    await checkRequest(harness, fixtureKey);
+    await checkRequest(harness, lazyKey);
+    await checkRequest(harness, refreshedLazyKey, initialLazySeed.etag);
     const { seeded, redirects, connections } = counts();
     if (seeded !== 3 || redirects !== 1 || connections !== 0) {
       throw new Error(
@@ -304,7 +295,7 @@ try {
       seed,
       JSON.stringify({
         schemaVersion: "1.0",
-        keys: [{ sdkKey: fixtureKey, payload }, lazySeed("stale")],
+        keys: [{ sdkKey: fixtureKey, payload }, initialLazySeed, refreshedLazySeed],
       }),
     );
     const inherited =
