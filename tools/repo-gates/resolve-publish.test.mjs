@@ -95,6 +95,54 @@ describe("the Maven release prerequisite", () => {
   });
 });
 
+describe("the NuGet release prerequisite", () => {
+  const parent = { registry: "nuget", coordinates: "Confeature.Client", version: "0.2.0" };
+  const url =
+    "https://api.nuget.org/v3-flatcontainer/confeature.client/0.2.0/confeature.client.nuspec";
+  const identity = "<id>Confeature.Client</id><version>0.2.0</version>";
+  const nuspec = `<?xml version="1.0"?><package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd"><metadata>${identity}</metadata></package>`;
+
+  it("looks up only the normalized package ID and version without redirects", async () => {
+    expect(registryUrl(parent, parent.version)).toBe(url);
+    expect(registryUrl(parent, "0.2.0-RC.1")).toBe(url.replace("/0.2.0/", "/0.2.0-rc.1/"));
+    expect(
+      registryUrl({ ...parent, coordinates: "Confeature/../Client" }, parent.version),
+    ).toBeNull();
+    expect(registryUrl(parent, "0.2.0/../0.1.1")).toBeNull();
+    await expect(
+      httpExists(url, parent, async (target, options) => {
+        expect(target).toBe(url);
+        expect(options).toEqual({
+          method: "GET",
+          headers: { accept: "application/xml" },
+          redirect: "error",
+        });
+        return new Response(nuspec.replace("Confeature.Client", "confeature.client"));
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("refuses missing or ambiguous direct identity fields", async () => {
+    await expect(
+      httpExists(url, parent, async () => new Response(null, { status: 404 })),
+    ).resolves.toBe(false);
+    for (const body of [
+      nuspec.replace("0.2.0", "0.1.1"),
+      nuspec.replace("Confeature.Client", "Confeature.Other"),
+      `<package><metadata><other>${identity}</other></metadata></package>`,
+      `<package><other><metadata>${identity}</metadata></other></package>`,
+      `<package><metadata>${identity}<version>0.2.0</version></metadata></package>`,
+      `<package><metadata>${identity}</metadata><metadata /></package>`,
+      `<package><metadata>${identity}</package>`,
+      nuspec + nuspec,
+    ]) {
+      await expect(httpExists(url, parent, async () => new Response(body))).rejects.toThrow(
+        /expected NuGet package/,
+      );
+    }
+  });
+});
+
 describe("the real publish table", () => {
   // A jsr entry rides along its unit's primary entry (#935, jsr-unit.test.mjs).
   const PRIMARIES = REAL.publish.filter((u) => u.registry !== "jsr");
@@ -307,6 +355,44 @@ describe("every refusal fails closed", () => {
     await expect(
       resolvePublish({ root, tag: "sdk-a-v1.2.3", exists: published, ...MAIN }),
     ).resolves.toMatchObject({ name: "a" });
+  });
+  it("resolves a NuGet after dependency from its exact published manifest", async () => {
+    const root = fixture(
+      [
+        unit({ registry: "nuget", coordinates: "Confeature.OpenFeature", after: ["b"] }),
+        unit({
+          name: "b",
+          gate: "b",
+          registry: "nuget",
+          coordinates: "Confeature.Client",
+          versionSource: { file: "b/v.txt", pattern: "^version=(\\S+)$" },
+        }),
+      ],
+      [covered(), covered("b")],
+      base,
+    );
+    const options = { root, tag: "sdk-a-v1.2.3", ...MAIN };
+    await expect(resolvePublish({ ...options, exists: unpublished })).rejects.toThrow(
+      /Confeature\.Client@0\.4\.0, which is not published yet/,
+    );
+    await expect(
+      resolvePublish({
+        ...options,
+        exists: async (url, dependency) => {
+          expect(url).toBe(
+            "https://api.nuget.org/v3-flatcontainer/confeature.client/0.4.0/confeature.client.nuspec",
+          );
+          return httpExists(
+            url,
+            dependency,
+            async () =>
+              new Response(
+                "<package><metadata><id>Confeature.Client</id><version>0.4.0</version></metadata></package>",
+              ),
+          );
+        },
+      }),
+    ).resolves.toMatchObject({ coordinates: "Confeature.OpenFeature", version: "1.2.3" });
   });
   it("an after dependency on a registry it cannot check", () => {
     const root = fixture(

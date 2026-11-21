@@ -48,6 +48,7 @@ import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
 import { matchesPomCoordinates } from "./check-maven-release.mjs";
 import { JSR, jsrProblems } from "./jsr-unit.mjs";
+import { readXmlIdentity } from "./xml-identity.mjs";
 
 export const MANIFEST = "dagger/sdk-manifest.json";
 
@@ -147,24 +148,49 @@ export function registryUrl(unit, version) {
       return `https://maven.confeature.io/io/confeature/${artifact}/${version}/${artifact}-${version}.pom`;
     }
   }
+  if (
+    unit.registry === "nuget" &&
+    typeof unit.coordinates === "string" &&
+    unit.coordinates.length <= 100 &&
+    /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(unit.coordinates) &&
+    new RegExp(`^${SEMVER}$`).test(version)
+  ) {
+    const id = unit.coordinates.toLowerCase();
+    return `https://api.nuget.org/v3-flatcontainer/${id}/${version.toLowerCase()}/${id}.nuspec`;
+  }
   return null;
 }
 
-/** A read-only lookup that also validates the identity of a published Maven project. */
-export async function httpExists(url, maven, fetcher = fetch) {
+/** A read-only lookup with identity checks for the Maven and NuGet manifests. */
+export async function httpExists(url, dependency, fetcher = fetch) {
   let res;
   try {
     res = await fetcher(url, {
       method: "GET",
-      headers: { accept: maven ? "application/xml" : "application/json" },
+      headers: { accept: dependency ? "application/xml" : "application/json" },
       redirect: "error",
     });
   } catch {
     throw new Refusal(`cannot reach ${url}`);
   }
   if (res.status === 200) {
-    if (maven && !matchesPomCoordinates(await res.text(), maven.coordinates, maven.version))
+    if (!dependency) return true;
+    const manifest = await res.text();
+    if (dependency.registry === "nuget") {
+      const identity = readXmlIdentity(
+        manifest,
+        ["package", "metadata"],
+        new Set(["id", "version"]),
+      );
+      if (
+        identity?.get("id")?.trim().toLowerCase() !== dependency.coordinates.toLowerCase() ||
+        identity?.get("version")?.trim().toLowerCase() !== dependency.version.toLowerCase()
+      ) {
+        throw new Refusal(`${url} did not identify the expected NuGet package`);
+      }
+    } else if (!matchesPomCoordinates(manifest, dependency.coordinates, dependency.version)) {
       throw new Refusal(`${url} did not identify the expected Maven project`);
+    }
     return true;
   }
   if (res.status === 404) return false;
@@ -283,11 +309,11 @@ export async function resolvePublish({
       const url = registryUrl(dep, depVersion);
       if (url === null)
         throw new Refusal(`unit "${name}": cannot check "${depName}" on registry ${dep.registry}`);
-      const maven =
-        dep.registry === "maven"
-          ? { coordinates: dep.coordinates, version: depVersion }
+      const dependency =
+        dep.registry === "maven" || dep.registry === "nuget"
+          ? { registry: dep.registry, coordinates: dep.coordinates, version: depVersion }
           : undefined;
-      if (!(await exists(url, maven)))
+      if (!(await exists(url, dependency)))
         throw new Refusal(
           `unit "${name}" must follow ${dep.coordinates}@${depVersion}, which is not published yet`,
         );

@@ -47,6 +47,7 @@ import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { isEntry } from "../lib/is-entry.mjs";
+import { readXmlIdentity } from "./xml-identity.mjs";
 
 const SUMS = ["md5", "sha1", "sha256", "sha512"];
 /** Clients fetch these two; the others Gradle writes are checked when present. */
@@ -94,40 +95,11 @@ function own(pomText, element) {
 
 /** Read the direct identity fields of a Gradle-generated Maven POM. */
 function pomIdentity(pomText) {
-  const fields = new Set(["modelVersion", "groupId", "artifactId", "version"]);
-  const xml = pomText.replace(/^\s*(?:<\?xml[^?]*\?>)?/, "");
-  const tokens =
-    /<!--[\s\S]*?-->|<\/([A-Za-z_][\w.:-]*)\s*>|<([A-Za-z_][\w.:-]*)(?:\s+[A-Za-z_][\w.:-]*\s*=\s*(?:"[^"<]*"|'[^'<]*'))*\s*\/?>|[^<]+/gy;
-  const stack = [];
-  const values = new Map();
-  let seenProject = false;
-  let consumed = 0;
-  for (const [token, closing, opening] of xml.matchAll(tokens)) {
-    consumed += token.length;
-    if (token.startsWith("<!--")) continue;
-    if (closing) {
-      if (stack.pop() !== closing) return null;
-      continue;
-    }
-    const field = stack.length === 2 && fields.has(stack[1]) ? stack[1] : null;
-    if (!opening) {
-      if (field) values.set(field, values.get(field) + token);
-      if (stack.length === 0 && token.trim()) return null;
-      continue;
-    }
-    if (field) return null;
-    if (stack.length === 0) {
-      if (seenProject || opening !== "project") return null;
-      seenProject = true;
-    }
-    if (stack.length === 1 && fields.has(opening)) {
-      if (values.has(opening)) return null;
-      values.set(opening, "");
-    }
-    if (!token.endsWith("/>")) stack.push(opening);
-  }
-  if (!seenProject || stack.length > 0 || consumed !== xml.length) return null;
-  return values;
+  return readXmlIdentity(
+    pomText,
+    ["project"],
+    new Set(["modelVersion", "groupId", "artifactId", "version"]),
+  );
 }
 
 export function matchesPomCoordinates(pomText, coordinates, version) {
