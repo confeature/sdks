@@ -1,0 +1,62 @@
+{
+  "name": "@confeature/openfeature-node",
+  "version": "0.1.0",
+  "description": "OpenFeature provider for the Confeature Node.js SDK.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-node-openfeature"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "test": "node tests/run.mjs",
+    "check": "vp check src tests vite.config.ts"
+  },
+  "devDependencies": {
+    "@confeature/sdk-node": "workspace:*",
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@confeature/test-harness-live-contract": "workspace:*",
+    "@nestjs/common": "11.2.11",
+    "@nestjs/core": "11.2.11",
+    "@openfeature/nestjs-sdk": "0.2.7",
+    "@openfeature/server-sdk": "1.23.0",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "typescript": "^6.0.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@confeature/sdk-node": "workspace:^",
+    "@openfeature/server-sdk": "^1.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "confeature": {
+    "owner": "sdk-node"
+  }
+}

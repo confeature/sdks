@@ -4,7 +4,7 @@
  * Phase 2 (#201, merged 2026-05-27) introduced `jsTest()` running sdk-node's
  * vitest suite inside `node:22.23.3-bookworm-slim`. Phase 3 (#202) widens this to:
  *
- *   - `jsTest`        sdk-node           (Phase 2, preserved verbatim)
+ *   - `jsTest`        sdk-node and its OpenFeature provider
  *   - `browserTest`   sdk-browser-js     (NEW — shares the node container)
  *   - `pythonTest`    sdk-python         (NEW — python:3.13-bookworm-slim + uv)
  *   - `goTest`        sdk-go             (NEW — golang:1.23-bookworm + staticcheck)
