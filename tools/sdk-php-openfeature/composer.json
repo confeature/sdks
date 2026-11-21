@@ -1,0 +1,36 @@
+{
+  "name": "confeature/sdk-php-openfeature-smoke",
+  "description": "Isolated Composer consumer for the optional Confeature PHP OpenFeature provider.",
+  "type": "project",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "MakerLabs"
+    }
+  ],
+  "require": {
+    "php": ">=8.2",
+    "confeature/confeature-php-sdk": "0.2.0",
+    "open-feature/sdk": "~2.3.0"
+  },
+  "repositories": [
+    {
+      "type": "path",
+      "url": "../../apps/sdk-php",
+      "options": {
+        "symlink": false,
+        "reference": "none",
+        "versions": {
+          "confeature/confeature-php-sdk": "0.2.0"
+        }
+      }
+    }
+  ],
+  "config": {
+    "allow-plugins": false,
+    "platform": {
+      "php": "8.2.0"
+    },
+    "sort-packages": true
+  }
+}

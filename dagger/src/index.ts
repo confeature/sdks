@@ -277,9 +277,11 @@ function rubyToolchain(source: Directory): Container {
     .withWorkdir("/work/apps/sdk-ruby");
 }
 
+const PHP_COMPOSER_IMAGE = "composer:2.9.8";
+
 function phpToolchain(source: Directory): Container {
   // composer binary copied from the official image (no curl-install needed).
-  const composerBin = dag.container().from("composer:2.9.8").file("/usr/bin/composer");
+  const composerBin = dag.container().from(PHP_COMPOSER_IMAGE).file("/usr/bin/composer");
   return (
     dag
       .container()
@@ -302,6 +304,26 @@ function phpToolchain(source: Directory): Container {
       .withMountedDirectory("/work", source)
       .withWorkdir("/work/apps/sdk-php")
   );
+}
+
+function phpConsumerToolchain(source: Directory, image: string): Container {
+  return dag
+    .container()
+    .from(image)
+    .withEnvVariable("CI", "true")
+    .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
+    .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
+    .withExec([
+      "sh",
+      "-ec",
+      "apt-get update -qq && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*",
+    ])
+    .withFile(
+      "/usr/local/bin/composer",
+      dag.container().from(PHP_COMPOSER_IMAGE).file("/usr/bin/composer"),
+    )
+    .withMountedDirectory("/work", source)
+    .withWorkdir("/work");
 }
 
 function goToolchain(source: Directory): Container {
@@ -528,6 +550,10 @@ async function liveContainer(source: Directory, sdk: string): Promise<Container>
   const toolchain = LIVE_TOOLCHAINS[id];
   const base = toolchain.build(source);
   if (toolchain.node) return base.withWorkdir("/work");
+  return withNativeHarness(base, source);
+}
+
+async function withNativeHarness(base: Container, source: Directory): Promise<Container> {
   const platform = await base.platform();
   const foreign = platform === (await dag.defaultPlatform()) ? undefined : platform;
   return base
@@ -712,12 +738,12 @@ export class Confeature {
     return `${lastLine} (Tier 2 dotnetTest)`;
   }
 
-  /** Run apps/sdk-php's composer `test` (phpunit) on PHP 8.3 + composer. */
+  /** Verify the PHP 8.1 base consumer and the PHP 8.2 OpenFeature integration. */
   @func()
   async phpTest(source: Directory): Promise<string> {
     // `composer lint` (php-cs-fixer, dry run) is the SDK's own merge bar:
     // zero offenses (#793 FR-007).
-    const result = await phpToolchain(source)
+    await phpToolchain(source)
       .withExec([
         "bash",
         "-eu",
@@ -725,8 +751,27 @@ export class Confeature {
         "composer install --no-interaction --no-progress && composer test && composer lint",
       ])
       .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Tier 2 phpTest)`;
+    const install = "install --no-dev --no-interaction --no-progress --no-plugins --no-scripts";
+    const base = await phpConsumerToolchain(source, "php:8.1.34-cli-bookworm")
+      .withExec(["sh", "-ec", `composer --working-dir=apps/sdk-php ${install}`])
+      .withExec(["php", "tools/sdk-php-openfeature/base.php", "apps/sdk-php/vendor/autoload.php"])
+      .stdout();
+    const optional = await withNativeHarness(
+      phpConsumerToolchain(source, "php:8.2.36-cli-bookworm"),
+      source,
+    );
+    const proof = await optional
+      .withExec(["sh", "-ec", `composer --working-dir=tools/sdk-php-openfeature ${install}`])
+      .withExec([
+        "node",
+        "tools/sdk-php-openfeature/run.mjs",
+        "--",
+        "php",
+        "tools/sdk-php-openfeature/consumer.php",
+        "tools/sdk-php-openfeature/vendor/autoload.php",
+      ])
+      .stdout();
+    return `${base.trim()}\n${proof.trim()} (Tier 2 phpTest)`;
   }
 
   /** Run apps/sdk-ruby's `rake` default (rubocop + rspec) on Ruby 3.3. */

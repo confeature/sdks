@@ -40,6 +40,38 @@ $enabled = $client->getValue('feature.dark-mode', false, $user);
 $client->close();
 ```
 
+## OpenFeature
+
+Install the optional provider and the official OpenFeature PHP SDK together.
+
+```bash
+composer require 'confeature/confeature-php-sdk:^0.2' 'open-feature/sdk:2.3.0'
+```
+
+```php
+<?php
+
+use Confeature\ConfeatureClient;
+use Confeature\OpenFeature\ConfeatureProvider;
+use OpenFeature\OpenFeatureAPI;
+
+$sdk = ConfeatureClient::create('YOUR_SDK_KEY');
+$api = OpenFeatureAPI::getInstance();
+$api->setProvider(new ConfeatureProvider($sdk));
+$enabled = $api->getClient()->getBooleanValue('feature.dark-mode', false);
+```
+
+OpenFeature PHP 2.3.0 uses one process-wide provider. The application manages
+registration and closes the borrowed Confeature client after evaluations
+finish. Each evaluation uses the SDK's existing polling mode. With
+ManualPoll, refresh the SDK explicitly before expecting data. An empty
+OpenFeature context evaluates anonymously. For targeting, pass an
+OpenFeature evaluation context with its targeting key and attributes.
+
+The provider supports booleans, strings, integers and finite floats. It
+returns the caller's default and an OpenFeature error when an evaluation
+fails. The integration is tested on PHP 8.2.
+
 ## SDK key format
 
 Confeature mints SDK keys in ConfigCat's own shape,

@@ -38,7 +38,13 @@ final class EvaluationResult
         public readonly ?array $matchedTargetingRule = null,
         public readonly ?array $matchedPercentageOption = null,
         public readonly ?string $evalError = null,
+        public readonly ?EvaluationFailure $failure = null,
     ) {
+    }
+
+    public static function failed(mixed $defaultValue, string $error, EvaluationFailure $failure): self
+    {
+        return new self($defaultValue, $error, failure: $failure);
     }
 
     public function ok(): bool

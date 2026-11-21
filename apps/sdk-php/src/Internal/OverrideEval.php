@@ -9,7 +9,9 @@ namespace Confeature\Internal;
 use Confeature\ConfigOverrideDataSource;
 use Confeature\FlagOverrides;
 use Confeature\OverrideBehaviour;
+use Confeature\SettingValue;
 use Confeature\User;
+use Psr\Log\LoggerInterface;
 
 /**
  * Synchronous override evaluation — PHP port of `EvaluateSync`.
@@ -20,8 +22,8 @@ use Confeature\User;
  *   - `apps/sdk-python/src/confeature_client/override_eval.py`
  *   - `apps/sdk-ruby/lib/confeature/internal/override_eval.rb`
  *
- * The helper is intentionally pure: no logger access, no SDK-key
- * access, no I/O. Pure data in → `[bool $found, mixed $value]` out.
+ * The value-only path takes override data and returns a [bool $found, mixed $value]
+ * tuple. The strict details path also classifies source failures.
  *
  * Returns:
  *   - `[false, null]` when overrides are absent, behaviour is
@@ -138,6 +140,82 @@ final class OverrideEval
         // Every other source (map / custom) keeps the byte-identical flat-map
         // path; the user is irrelevant there (value-only resolution).
         return self::evaluateSync($flagOverrides, $key, $defaultValue);
+    }
+
+    /** @internal Resolves LocalOnly details, preserving the native flat override contract. */
+    public static function evaluateDetails(
+        FlagOverrides $overrides,
+        string $key,
+        mixed $default,
+        ?User $user,
+        bool $strict,
+        LoggerInterface $logger,
+    ): EvaluationResult {
+        if ($overrides->dataSource instanceof ConfigOverrideDataSource) {
+            return Evaluator::evaluate($overrides->dataSource->config(), $key, $default, $user);
+        }
+
+        if ($strict) {
+            return self::evaluateStrictDetails($overrides, $key, $default, $logger);
+        }
+
+        [$found, $value] = self::evaluateSync($overrides, $key, $default);
+        // Legacy details recheck presence because the value-only path returns
+        // the default both for a missing slot and for a mistyped value.
+        try {
+            $map = $overrides->dataSource->getOverridesSync();
+            $present = $map !== null && \array_key_exists($key, $map);
+        } catch (\Throwable) {
+            // The native details contract treats a failed presence recheck as a missing key.
+            $present = false;
+        }
+
+        return $found && $present
+            ? new EvaluationResult($value)
+            : EvaluationResult::failed($default, 'KEY_NOT_FOUND', EvaluationFailure::FlagNotFound);
+    }
+
+    private static function evaluateStrictDetails(
+        FlagOverrides $overrides,
+        string $key,
+        mixed $default,
+        LoggerInterface $logger,
+    ): EvaluationResult {
+        // A custom source can return a different map on each read. Derive
+        // presence, type and value from one snapshot for provider details.
+        try {
+            $map = $overrides->dataSource->getOverridesSync();
+        } catch (\Throwable) {
+            $logger->warning('ConfeatureClient: LocalOnly override source failed.');
+
+            return EvaluationResult::failed($default, 'OVERRIDE_SOURCE_ERROR', EvaluationFailure::General);
+        }
+
+        if ($map === null) {
+            return EvaluationResult::failed($default, 'NO_CONFIG', EvaluationFailure::NotReady);
+        }
+        if (!\array_key_exists($key, $map)) {
+            return EvaluationResult::failed($default, 'KEY_NOT_FOUND', EvaluationFailure::FlagNotFound);
+        }
+
+        $slot = $map[$key];
+        if (!$slot instanceof SettingValue || !self::hasSingleValue($slot)) {
+            return EvaluationResult::failed($default, 'MALFORMED_VALUE', EvaluationFailure::ParseError);
+        }
+        $value = $slot->picked();
+        if (!self::sameKind($value, $default)) {
+            return EvaluationResult::failed($default, 'TYPE_MISMATCH', EvaluationFailure::TypeMismatch);
+        }
+
+        return new EvaluationResult($value);
+    }
+
+    private static function hasSingleValue(SettingValue $slot): bool
+    {
+        $populated = (int) ($slot->b !== null) + (int) ($slot->s !== null)
+            + (int) ($slot->i !== null) + (int) ($slot->d !== null);
+
+        return $populated === 1;
     }
 
     /**

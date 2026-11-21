@@ -7,6 +7,9 @@ declare(strict_types=1);
 namespace Confeature;
 
 use Confeature\Internal\ConfigFetcher;
+use Confeature\Internal\DetailsEvaluationResult;
+use Confeature\Internal\EvaluationFailure;
+use Confeature\Internal\EvaluationResult;
 use Confeature\Internal\Evaluator;
 use Confeature\Internal\FetchResult;
 use Confeature\Internal\FilesystemCache;
@@ -171,58 +174,37 @@ final class ConfeatureClient
         return Evaluator::evaluate($this->config, $key, $default, $effectiveUser)->value;
     }
 
-    /**
-     * Spec 087 / #266 — typed-envelope mirror of `getValue`.
-     *
-     * Drop-in equivalent of upstream
-     * `ConfigCat\ConfigCatClient::getValueDetails`: identical
-     * (string, mixed, ?User) signature and identical `EvaluationDetails`
-     * return shape.
-     *
-     * Closed clients return an envelope built via
-     * `EvaluationDetails::fromError($key, $default, $user, 'CLIENT_CLOSED')`
-     * to match the closed-client semantics of `getValue`.
-     *
-     * For LocalOnly consumers, the override map is the only source of
-     * truth: a key present in the map yields the typed value with
-     * `errorMessage = null`; a missing key yields the default with
-     * `errorMessage = 'KEY_NOT_FOUND'`. The override-eval helper
-     * returns the default on both KEY_NOT_FOUND and TYPE_MISMATCH
-     * branches, so we re-query the map to disambiguate.
-     *
-     * Non-LocalOnly clients route through the evaluator; the
-     * `EvaluationResult.error` string propagates verbatim into the
-     * envelope's `errorMessage` field.
-     */
+    /** Returns the native evaluation envelope using the client's default user when needed. */
     public function getValueDetails(string $key, mixed $default, ?User $user = null): EvaluationDetails
     {
+        return $this->evaluateDetails($key, $default, $user)->details;
+    }
+
+    /**
+     * @internal Resolves a typed flag for the optional provider. A null user is anonymous.
+     */
+    public function getValueDetailsForProvider(
+        string $key,
+        bool|string|int|float $default,
+        ?User $user,
+    ): DetailsEvaluationResult {
+        return $this->evaluateDetails($key, $default, $user, forProvider: true);
+    }
+
+    private function evaluateDetails(
+        string $key,
+        mixed $default,
+        ?User $user,
+        bool $forProvider = false,
+    ): DetailsEvaluationResult {
         if ($this->closed) {
-            $details = EvaluationDetails::fromError($key, $default, $user, 'CLIENT_CLOSED');
-            $this->hooks->fireOnFlagEvaluated($details);
-
-            return $details;
-        }
-
-        $effectiveUser = $user ?? $this->defaultUser;
-
-        // Full-config override path (spec 135 / #432; variationId propagation
-        // spec 152 / #475, the #395 gap class): a LOCAL_ONLY full-config source
-        // resolves targeting rules / segments / % options through the real
-        // evaluator, so the details envelope MUST carry the evaluator's
-        // variationId / matched-rule / matched-option — not the value-only
-        // flat-map branch (which always yields variationId=null). Mirrors how
-        // `getValue` routes full-config overrides via `OverrideEval::evaluate`.
-        if (
-            $this->localOnly
-            && $this->flagOverrides !== null
-            && $this->flagOverrides->dataSource instanceof ConfigOverrideDataSource
-        ) {
-            $result = Evaluator::evaluate(
-                $this->flagOverrides->dataSource->config(),
-                $key,
-                $default,
-                $effectiveUser,
+            $outcome = new DetailsEvaluationResult(
+                EvaluationDetails::fromError($key, $default, $user, 'CLIENT_CLOSED'),
+                EvaluationFailure::NotReady,
             );
+        } else {
+            $effectiveUser = $forProvider ? $user : ($user ?? $this->defaultUser);
+            $result = $this->evaluateCurrentConfigForDetails($key, $default, $effectiveUser, $forProvider);
             $details = new EvaluationDetails(
                 $key,
                 $result->variationId,
@@ -235,37 +217,27 @@ final class ConfeatureClient
                 $result->matchedTargetingRule,
                 $result->matchedPercentageOption,
             );
-            $this->hooks->fireOnFlagEvaluated($details);
-
-            return $details;
+            $outcome = new DetailsEvaluationResult($details, $result->failure);
         }
 
-        if ($this->localOnly) {
-            $details = $this->localOnlyDetails($key, $default, $effectiveUser);
-            $this->hooks->fireOnFlagEvaluated($details);
+        $this->hooks->fireOnFlagEvaluated($outcome->details);
 
-            return $details;
+        return $outcome;
+    }
+
+    private function evaluateCurrentConfigForDetails(
+        string $key,
+        mixed $default,
+        ?User $user,
+        bool $forProvider,
+    ): EvaluationResult {
+        if ($this->localOnly && $this->flagOverrides !== null) {
+            return OverrideEval::evaluateDetails($this->flagOverrides, $key, $default, $user, $forProvider, $this->logger);
         }
 
         $this->maybeFetch();
 
-        $result = Evaluator::evaluate($this->config, $key, $default, $effectiveUser);
-
-        $details = new EvaluationDetails(
-            $key,
-            $result->variationId,
-            $result->value,
-            $effectiveUser,
-            $result->error !== null,
-            $result->error,
-            null,
-            $this->fetchTimeUnixMilliseconds(),
-            $result->matchedTargetingRule,
-            $result->matchedPercentageOption,
-        );
-        $this->hooks->fireOnFlagEvaluated($details);
-
-        return $details;
+        return Evaluator::evaluate($this->config, $key, $default, $user);
     }
 
     /**
@@ -659,54 +631,6 @@ final class ConfeatureClient
         return $this->lastFetchedAt === null
             ? 0.0
             : $this->lastFetchedAt * 1000.0;
-    }
-
-    /**
-     * Spec 087 — LocalOnly branch of `getValueDetails`. The
-     * override-eval helper alone cannot tell us whether the key
-     * exists in the override map (it returns the default on missing
-     * keys and on type-mismatch). Re-query the map to disambiguate.
-     */
-    private function localOnlyDetails(string $key, mixed $default, ?User $effectiveUser): EvaluationDetails
-    {
-        [$found, $value] = OverrideEval::evaluateSync($this->flagOverrides, $key, $default);
-        $present = false;
-        if ($this->flagOverrides !== null) {
-            try {
-                $map = $this->flagOverrides->dataSource->getOverridesSync();
-                $present = \is_array($map) && \array_key_exists($key, $map);
-            } catch (\Throwable) {
-                $present = false;
-            }
-        }
-
-        if ($found && $present) {
-            return new EvaluationDetails(
-                $key,
-                null,
-                $value,
-                $effectiveUser,
-                false,
-                null,
-                null,
-                $this->fetchTimeUnixMilliseconds(),
-                null,
-                null,
-            );
-        }
-
-        return new EvaluationDetails(
-            $key,
-            null,
-            $default,
-            $effectiveUser,
-            true,
-            'KEY_NOT_FOUND',
-            null,
-            $this->fetchTimeUnixMilliseconds(),
-            null,
-            null,
-        );
     }
 
     /**

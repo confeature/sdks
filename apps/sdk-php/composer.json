@@ -31,6 +31,9 @@
     "friendsofphp/php-cs-fixer": "^3.0",
     "configcat/configcat-client": "^9.2"
   },
+  "suggest": {
+    "open-feature/sdk": "Install 2.3.0 to use the optional Confeature OpenFeature provider."
+  },
   "autoload": {
     "psr-4": {
       "Confeature\\": "src/"

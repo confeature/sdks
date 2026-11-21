@@ -49,10 +49,10 @@ final class Evaluator
     /**
      * SettingType discriminators from `packages/sdk-shared/src/config-json.ts`.
      */
-    public const SETTING_TYPE_BOOL = 0;
-    public const SETTING_TYPE_STRING = 1;
-    public const SETTING_TYPE_INT = 2;
-    public const SETTING_TYPE_DOUBLE = 3;
+    public const SETTING_TYPE_BOOL = SettingValueResolver::SETTING_TYPE_BOOL;
+    public const SETTING_TYPE_STRING = SettingValueResolver::SETTING_TYPE_STRING;
+    public const SETTING_TYPE_INT = SettingValueResolver::SETTING_TYPE_INT;
+    public const SETTING_TYPE_DOUBLE = SettingValueResolver::SETTING_TYPE_DOUBLE;
 
     private const MISSING_USER_OBJECT_ERROR = 'cannot evaluate, User Object is missing';
 
@@ -117,34 +117,34 @@ final class Evaluator
         ?TraceSink $sink = null,
     ): EvaluationResult {
         if ($config === null) {
-            return new EvaluationResult($defaultValue, 'NO_CONFIG');
+            return EvaluationResult::failed($defaultValue, 'NO_CONFIG', EvaluationFailure::NotReady);
         }
 
         $log = new TraceLog($sink);
 
         try {
             if (!\is_array($config)) {
-                return new EvaluationResult($defaultValue, 'MALFORMED_CONFIG');
+                return EvaluationResult::failed($defaultValue, 'MALFORMED_CONFIG', EvaluationFailure::ParseError);
             }
 
             $settings = $config['f'] ?? null;
             if (!\is_array($settings)) {
-                return new EvaluationResult($defaultValue, 'MALFORMED_CONFIG');
+                return EvaluationResult::failed($defaultValue, 'MALFORMED_CONFIG', EvaluationFailure::ParseError);
             }
 
             if (!\array_key_exists($key, $settings)) {
-                return new EvaluationResult($defaultValue, 'KEY_NOT_FOUND');
+                return EvaluationResult::failed($defaultValue, 'KEY_NOT_FOUND', EvaluationFailure::FlagNotFound);
             }
 
             $setting = $settings[$key];
             if (!\is_array($setting)) {
-                return new EvaluationResult($defaultValue, 'MALFORMED_CONFIG');
+                return EvaluationResult::failed($defaultValue, 'MALFORMED_CONFIG', EvaluationFailure::ParseError);
             }
 
             $settingType = $setting['t'] ?? null;
             // `t` must be an int discriminator. Anything else is malformed.
             if (!\is_int($settingType)) {
-                return new EvaluationResult($defaultValue, 'MALFORMED_CONFIG');
+                return EvaluationResult::failed($defaultValue, 'MALFORMED_CONFIG', EvaluationFailure::ParseError);
             }
 
             // Type guard BEFORE evaluating rules (mirrors evaluator.ts): the
@@ -152,11 +152,8 @@ final class Evaluator
             // A `null` default bypasses the check — used by the variation-id
             // matrix, which evaluates with a `null` default to read the
             // variation id regardless of value type.
-            if ($defaultValue !== null) {
-                $mismatch = self::checkDefaultType($settingType, $defaultValue);
-                if ($mismatch !== null) {
-                    return new EvaluationResult($defaultValue, $mismatch);
-                }
+            if ($defaultValue !== null && !SettingValueResolver::matchesType($settingType, $defaultValue)) {
+                return EvaluationResult::failed($defaultValue, 'TYPE_MISMATCH', EvaluationFailure::TypeMismatch);
             }
 
             // Evaluation-log trace (ADR 0003). Built lazily — only when the sink
@@ -191,7 +188,7 @@ final class Evaluator
 
             $valueSlot = $result->value;
             if (!\is_array($valueSlot)) {
-                return new EvaluationResult($defaultValue, 'MALFORMED_VALUE');
+                return EvaluationResult::failed($defaultValue, 'MALFORMED_VALUE', EvaluationFailure::ParseError);
             }
 
             $variationId = $result->variationId;
@@ -201,7 +198,7 @@ final class Evaluator
 
             // The typed-widening decision tree runs UNCHANGED on the resolved
             // envelope (rule-served, percentage-served, or static).
-            $typed = self::resolveTyped(
+            $typed = SettingValueResolver::resolve(
                 $settingType,
                 $valueSlot,
                 $defaultValue,
@@ -226,12 +223,16 @@ final class Evaluator
             // evaluation-error path.
             $log->circularDependency($key, $cycle->cycle);
 
-            return new EvaluationResult($defaultValue, 'EVAL_EXCEPTION');
-        } catch (\Throwable) {
+            return EvaluationResult::failed($defaultValue, 'EVAL_EXCEPTION', EvaluationFailure::General);
+        } catch (\Throwable $error) {
             // Bounded fail-closed (FR-007/SC-004): every internal failure — a
             // malformed prereq/segment reference, or any unexpected error —
             // resolves to the caller's default with an `EVAL_EXCEPTION` reason.
-            return new EvaluationResult($defaultValue, 'EVAL_EXCEPTION');
+            $failure = $error instanceof MalformedConfigException
+                ? EvaluationFailure::ParseError
+                : EvaluationFailure::General;
+
+            return EvaluationResult::failed($defaultValue, 'EVAL_EXCEPTION', $failure);
         }
     }
 
@@ -318,86 +319,6 @@ final class Evaluator
         $raw = $config['s'] ?? null;
 
         return \is_array($raw) ? array_values($raw) : [];
-    }
-
-    /**
-     * Return a TYPE_MISMATCH reason code if the default type is wrong, else
-     * null. Preserves the existing strict typed-default guards (SC-006).
-     */
-    private static function checkDefaultType(int $settingType, mixed $defaultValue): ?string
-    {
-        return match ($settingType) {
-            self::SETTING_TYPE_BOOL => \is_bool($defaultValue) ? null : 'TYPE_MISMATCH',
-            self::SETTING_TYPE_STRING => \is_string($defaultValue) ? null : 'TYPE_MISMATCH',
-            self::SETTING_TYPE_INT => (\is_int($defaultValue) && !\is_bool($defaultValue)) ? null : 'TYPE_MISMATCH',
-            self::SETTING_TYPE_DOUBLE => \is_float($defaultValue) ? null : 'TYPE_MISMATCH',
-            default => null,
-        };
-    }
-
-    /**
-     * Read the typed primitive from the resolved envelope (spec-072 widening).
-     * Runs UNCHANGED on rule-served / percentage-served / static envelopes.
-     *
-     * @param array<string, mixed> $valueSlot
-     */
-    private static function resolveTyped(
-        int $settingType,
-        array $valueSlot,
-        mixed $defaultValue,
-        ?string $variationId,
-        SettingResult $result,
-        ?string $evalError,
-    ): EvaluationResult {
-        $ok = static fn (mixed $raw): EvaluationResult => new EvaluationResult(
-            $raw,
-            null,
-            $variationId,
-            $result->matchedRule,
-            $result->matchedOption,
-            $evalError,
-        );
-
-        switch ($settingType) {
-            case self::SETTING_TYPE_BOOL:
-                $raw = $valueSlot['b'] ?? null;
-                if (!\is_bool($raw)) {
-                    return new EvaluationResult($defaultValue, 'VALUE_NOT_BOOL');
-                }
-
-                return $ok($raw);
-            case self::SETTING_TYPE_STRING:
-                $raw = $valueSlot['s'] ?? null;
-                if (!\is_string($raw)) {
-                    return new EvaluationResult($defaultValue, 'MALFORMED_VALUE');
-                }
-
-                return $ok($raw);
-            case self::SETTING_TYPE_INT:
-                $raw = $valueSlot['i'] ?? null;
-                if (!\is_int($raw) || \is_bool($raw)) {
-                    return new EvaluationResult($defaultValue, 'MALFORMED_VALUE');
-                }
-
-                return $ok($raw);
-            case self::SETTING_TYPE_DOUBLE:
-                $raw = $valueSlot['d'] ?? null;
-                if (\is_bool($raw)) {
-                    return new EvaluationResult($defaultValue, 'MALFORMED_VALUE');
-                }
-                // JSON numbers without a fractional part decode as int; ConfigCat
-                // double settings legitimately carry integral doubles (5.0 → 5).
-                if (\is_int($raw)) {
-                    $raw = (float) $raw;
-                }
-                if (!\is_float($raw)) {
-                    return new EvaluationResult($defaultValue, 'MALFORMED_VALUE');
-                }
-
-                return $ok($raw);
-            default:
-                return new EvaluationResult($defaultValue, 'UNSUPPORTED_TYPE');
-        }
     }
 
     // -----------------------------------------------------------------------
