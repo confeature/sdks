@@ -103,6 +103,62 @@ const check = (tree, live = {}) =>
   releaseProblems(tree, COORDINATES, VERSION, { ...absent(tree), ...live });
 const P = `io/confeature/${ROOT_ID}/${VERSION}/${ROOT_ID}-${VERSION}`;
 
+describe("Kotlin OpenFeature release inventory", () => {
+  const companion = "confeature-openfeature-kotlin";
+  const pathFor = (aid) => `io/confeature/${aid}/${VERSION}/${aid}-${VERSION}`;
+  const rootModule = `${pathFor(companion)}.module`;
+  const targets = ["android", "jvm", "js", "iosarm64", "iossimulatorarm64"].map(
+    (id) => `${companion}-${id}`,
+  );
+  const route = (aid) => ({
+    "available-at": {
+      group: GROUP,
+      module: aid,
+      version: VERSION,
+      url: `../../${aid}/${VERSION}/${aid}-${VERSION}.module`,
+    },
+  });
+  const root = (variants) =>
+    JSON.stringify({ component: { group: GROUP, module: companion, version: VERSION }, variants });
+  const tree = () => ({
+    ...release([companion, ...targets]),
+    ...withSums({
+      [rootModule]: root(targets.map(route)),
+      [`${pathFor(targets[0])}.aar`]: "Android release",
+      [`${pathFor(targets[2])}.klib`]: "JS release",
+      [`${pathFor(targets[3])}.klib`]: "iOS device release",
+      [`${pathFor(targets[4])}.klib`]: "iOS simulator release",
+    }),
+  });
+  const companionCheck = (files) =>
+    releaseProblems(files, `${GROUP}:${companion}`, VERSION, absent(files));
+
+  it("accepts the root and five referenced targets", () => {
+    expect(companionCheck(tree())).toEqual([]);
+  });
+
+  it("requires the artifact file for each target", () => {
+    const files = tree();
+    delete files[`${pathFor(targets[4])}.klib`];
+    expect(companionCheck(files)).toContain(`missing ${pathFor(targets[4])}.klib`);
+  });
+
+  it("rejects a root module that omits a target", () => {
+    const files = {
+      ...tree(),
+      ...withSums({ [rootModule]: root(targets.slice(0, -1).map(route)) }),
+    };
+    expect(companionCheck(files)).toContain(`${rootModule}: no reference to ${targets[4]}`);
+  });
+
+  it("rejects a root module with a different target URL", () => {
+    const variants = targets.map(route);
+    variants[0]["available-at"].url = "https://repo.invalid/redirect.module";
+    const files = { ...tree(), ...withSums({ [rootModule]: root(variants) }) };
+    expect(companionCheck(files)).toContain(`${rootModule}: invalid Kotlin target reference`);
+  });
+});
+
 describe("releaseProblems", () => {
   it("accepts a complete single-artifact release", () => {
     expect(check(release())).toEqual([]);

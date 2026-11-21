@@ -31,6 +31,8 @@
  *     listing), or a version that is already live;
  *   - has an artifact the live repository gave no answer for, or whose live
  *     answer is not that artifact's metadata listing a version.
+ *   - omits any of the Kotlin OpenFeature companion's five target artifacts
+ *     or a reference to it in the root Gradle module.
  *
  * There is no registry to refuse a bad upload here: R2 stores what it is
  * given. So every rule a registry would enforce is enforced before the upload.
@@ -50,6 +52,14 @@ const SUMS = ["md5", "sha1", "sha256", "sha512"];
 const REQUIRED_SUMS = ["md5", "sha1"];
 const METADATA = "maven-metadata.xml";
 const MAIN = /\.(?:jar|aar|klib)$/;
+const KOTLIN_OPENFEATURE = "io.confeature:confeature-openfeature-kotlin";
+const KOTLIN_TARGETS = {
+  android: "aar",
+  jvm: "jar",
+  js: "klib",
+  iosarm64: "klib",
+  iossimulatorarm64: "klib",
+};
 
 const sumOf = (path) => SUMS.find((alg) => path.endsWith(`.${alg}`));
 const text = (body) => (typeof body === "string" ? body : body.toString("utf8"));
@@ -184,6 +194,9 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
     aids.get(aid).push(rest.join("/"));
   }
   if (!aids.has(rootId)) problems.push(`no ${coordinates} in the release`);
+  if (coordinates === KOTLIN_OPENFEATURE) {
+    problems.push(...kotlinCompanionProblems(tree, base, rootId, version, aids));
+  }
 
   // Checksums, over the whole tree: present where clients need them, and true.
   for (const path of Object.keys(tree).sort()) {
@@ -271,6 +284,61 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
   for (const aid of Object.keys(live))
     if (!aids.has(aid))
       problems.push(`${aid}: live metadata for an artifact this release does not publish`);
+  return problems;
+}
+
+function kotlinCompanionProblems(tree, base, rootId, version, aids) {
+  const group = KOTLIN_OPENFEATURE.split(":")[0];
+  const expected = new Map([[rootId, "jar"]]);
+  for (const [target, extension] of Object.entries(KOTLIN_TARGETS)) {
+    expected.set(`${rootId}-${target}`, extension);
+  }
+  const problems = [];
+  for (const aid of aids.keys()) {
+    if (!expected.has(aid)) problems.push(`${aid}: unexpected Kotlin OpenFeature artifact`);
+  }
+  for (const [aid, extension] of expected) {
+    const path = `${base}${aid}/${version}/${aid}-${version}`;
+    for (const suffix of [extension, "module"]) {
+      if (!Object.hasOwn(tree, `${path}.${suffix}`)) problems.push(`missing ${path}.${suffix}`);
+    }
+  }
+  const modulePath = `${base}${rootId}/${version}/${rootId}-${version}.module`;
+  if (!Object.hasOwn(tree, modulePath)) return problems;
+  let module;
+  try {
+    module = JSON.parse(text(tree[modulePath]));
+  } catch (error) {
+    return [...problems, `${modulePath}: invalid Gradle metadata (${error.name})`];
+  }
+  if (
+    module?.component?.group !== group ||
+    module?.component?.module !== rootId ||
+    module?.component?.version !== version ||
+    !Array.isArray(module?.variants)
+  ) {
+    return [...problems, `${modulePath}: does not describe ${KOTLIN_OPENFEATURE}:${version}`];
+  }
+  expected.delete(rootId);
+  const referenced = new Set();
+  for (const variant of module.variants) {
+    if (!Object.hasOwn(variant ?? {}, "available-at")) continue;
+    const route = variant["available-at"];
+    const aid = route?.module;
+    if (
+      !expected.has(aid) ||
+      route.group !== group ||
+      route.version !== version ||
+      route.url !== `../../${aid}/${version}/${aid}-${version}.module`
+    ) {
+      problems.push(`${modulePath}: invalid Kotlin target reference`);
+    } else {
+      referenced.add(aid);
+    }
+  }
+  for (const aid of expected.keys()) {
+    if (!referenced.has(aid)) problems.push(`${modulePath}: no reference to ${aid}`);
+  }
   return problems;
 }
 

@@ -51,9 +51,12 @@ public class ConfeatureProvider(private val client: ConfeatureClient) : FeatureP
     override fun getDoubleEvaluation(key: String, defaultValue: Double, context: EvaluationContext?) =
         resolve(key, defaultValue, context, ProviderValueType.DOUBLE) { it as? Double }
 
-    override fun getObjectEvaluation(key: String, defaultValue: Value, context: EvaluationContext?) =
-        if (retired.load()) failure(defaultValue, ErrorCode.PROVIDER_NOT_READY)
-        else failure(defaultValue, ErrorCode.TYPE_MISMATCH)
+    override fun getObjectEvaluation(
+        key: String,
+        defaultValue: Value,
+        context: EvaluationContext?,
+    ): ProviderEvaluation<Value> =
+        fail(if (retired.load()) ErrorCode.PROVIDER_NOT_READY else ErrorCode.TYPE_MISMATCH)
 
     private inline fun <T : Any> resolve(
         key: String,
@@ -62,11 +65,11 @@ public class ConfeatureProvider(private val client: ConfeatureClient) : FeatureP
         type: ProviderValueType,
         valueOf: (Any?) -> T?,
     ): ProviderEvaluation<T> {
-        if (retired.load()) return failure(fallback, ErrorCode.PROVIDER_NOT_READY)
+        if (retired.load()) fail(ErrorCode.PROVIDER_NOT_READY)
         val user = try {
             OpenFeatureUser.from(context)
         } catch (_: Exception) {
-            return failure(fallback, ErrorCode.INVALID_CONTEXT)
+            fail(ErrorCode.INVALID_CONTEXT)
         }
 
         val details = client.getValueDetailsForProvider(key, fallback, user, type)
@@ -78,9 +81,9 @@ public class ConfeatureProvider(private val client: ConfeatureClient) : FeatureP
             ProviderResult.Status.PARSE_ERROR -> ErrorCode.PARSE_ERROR
             ProviderResult.Status.GENERAL -> ErrorCode.GENERAL
         }
-        if (error != null) return failure(fallback, error)
+        if (error != null) fail(error)
 
-        val value = valueOf(details.value) ?: return failure(fallback, ErrorCode.TYPE_MISMATCH)
+        val value = valueOf(details.value) ?: fail(ErrorCode.TYPE_MISMATCH)
         val reason = when (details.match) {
             ProviderResult.Match.PERCENTAGE_OPTION -> Reason.SPLIT.name
             ProviderResult.Match.TARGETING_RULE -> Reason.TARGETING_MATCH.name
@@ -100,16 +103,14 @@ public class ConfeatureProvider(private val client: ConfeatureClient) : FeatureP
     private companion object {
         const val NOT_READY = "The Confeature provider is not ready."
 
-        fun <T : Any> failure(fallback: T, error: ErrorCode): ProviderEvaluation<T> {
-            val message = when (error) {
-                ErrorCode.PROVIDER_NOT_READY -> NOT_READY
-                ErrorCode.FLAG_NOT_FOUND -> "The Confeature flag was not found."
-                ErrorCode.TYPE_MISMATCH -> "The Confeature flag type does not match."
-                ErrorCode.PARSE_ERROR -> "The Confeature configuration could not be evaluated."
-                ErrorCode.INVALID_CONTEXT -> "The OpenFeature evaluation context is invalid."
-                else -> "The Confeature evaluation failed."
-            }
-            return ProviderEvaluation(fallback, reason = Reason.ERROR.name, errorCode = error, errorMessage = message)
+        // The official client uses exceptions to run error hooks and supply its caller's fallback.
+        fun fail(error: ErrorCode): Nothing = throw when (error) {
+            ErrorCode.PROVIDER_NOT_READY -> OpenFeatureError.ProviderNotReadyError(NOT_READY)
+            ErrorCode.FLAG_NOT_FOUND -> OpenFeatureError.FlagNotFoundError(null, "The Confeature flag was not found.")
+            ErrorCode.TYPE_MISMATCH -> OpenFeatureError.TypeMismatchError("The Confeature flag type does not match.")
+            ErrorCode.PARSE_ERROR -> OpenFeatureError.ParseError("The Confeature configuration could not be evaluated.")
+            ErrorCode.INVALID_CONTEXT -> OpenFeatureError.InvalidContextError("The OpenFeature evaluation context is invalid.")
+            else -> OpenFeatureError.GeneralError("The Confeature evaluation failed.")
         }
     }
 }

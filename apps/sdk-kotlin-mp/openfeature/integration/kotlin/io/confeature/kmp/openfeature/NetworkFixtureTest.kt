@@ -8,15 +8,25 @@ import dev.openfeature.kotlin.sdk.exceptions.ErrorCode
 import dev.openfeature.kotlin.sdk.isolated.ExperimentalIsolatedApi
 import dev.openfeature.kotlin.sdk.isolated.createOpenFeatureAPIInstance
 import io.confeature.kmp.ConfeatureClient
+import io.confeature.kmp.ConfigCache
 import io.confeature.kmp.PollingMode
 import io.confeature.kmp.TypedEvaluationDetails
 import io.confeature.kmp.User
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalIsolatedApi::class)
 class NetworkFixtureTest {
@@ -76,6 +86,72 @@ class NetworkFixtureTest {
             try {
                 targetedApi.shutdown()
                 anonymousApi.shutdown()
+            } finally {
+                sdk.close()
+            }
+        }
+    }
+
+    @Test
+    fun concurrentLazyLoadCallsUseStaleValuesUntilTheSharedReloadFinishes() = runTest {
+        // Use real time for the SDK's wall-clock TTL and its transport.
+        withContext(Dispatchers.Default) {
+            withTimeout(15_000) { exerciseLazyLoad() }
+        }
+    }
+
+    private suspend fun exerciseLazyLoad() {
+        val firstWrite = CompletableDeferred<Unit>()
+        val releaseWrite = CompletableDeferred<Unit>()
+        val firstConfig = CompletableDeferred<Unit>()
+        val freshConfig = CompletableDeferred<Unit>()
+        val cache = object : ConfigCache {
+            override suspend fun read(cacheKey: String): String? = null
+
+            override suspend fun write(cacheKey: String, value: String) {
+                if (firstWrite.complete(Unit)) releaseWrite.await()
+            }
+        }
+        val ttl = 100.milliseconds
+        val sdk = ConfeatureClient.builder(FIXTURE_LAZY_KEY)
+            .baseUrl(FIXTURE_ORIGIN)
+            .pollingMode(PollingMode.lazyLoad(ttl))
+            .cache(cache)
+            .build()
+        sdk.getHooks().addOnConfigChanged {
+            if (!firstConfig.complete(Unit)) {
+                sdk.setOffline()
+                freshConfig.complete(Unit)
+            }
+        }
+        val api = createOpenFeatureAPIInstance()
+        try {
+            api.setProviderAndWait(ConfeatureProvider(sdk))
+            val client = api.getClient()
+            val cold = client.getStringDetails("region", "fallback")
+            assertEquals("fallback", cold.value)
+            assertEquals(ErrorCode.PROVIDER_NOT_READY, cold.errorCode)
+            firstWrite.await()
+            delay(ttl.inWholeMilliseconds + 50)
+
+            val stale = coroutineScope {
+                List(16) { async { client.getStringDetails("region", "fallback") } }.awaitAll()
+            }
+            assertTrue(stale.all { it.value == "stale" && it.variant == "stale" && it.errorCode == null })
+            releaseWrite.complete(Unit)
+            while (!freshConfig.isCompleted) {
+                client.getStringDetails("region", "fallback")
+                delay(10)
+            }
+            val fresh = client.getStringDetails("region", "fallback")
+            assertEquals("fresh", fresh.value)
+            assertEquals("fresh", fresh.variant)
+            assertNull(fresh.errorCode)
+            assertTrue(sdk.isOffline())
+        } finally {
+            releaseWrite.complete(Unit)
+            try {
+                api.shutdown()
             } finally {
                 sdk.close()
             }

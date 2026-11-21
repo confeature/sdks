@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: MIT
 
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const fixtureKey = "configcat-sdk-1/AAAAAAAAAAAAAAAAAAAAAA/BBBBBBBBBBBBBBBBBBBBBB";
+const lazyKey = "configcat-sdk-1/CCCCCCCCCCCCCCCCCCCCCC/DDDDDDDDDDDDDDDDDDDDDD";
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const companion = fileURLToPath(new URL("../", import.meta.url));
 const base = fileURLToPath(new URL("../../", import.meta.url));
 const runFile = fileURLToPath(import.meta.url);
-const configPath = `/configuration-files/${fixtureKey}/config_v6.json`;
+const pathFor = (key) => `/configuration-files/${key}/config_v6.json`;
+const configPath = pathFor(fixtureKey);
+const lazyPath = pathFor(lazyKey);
 const redirectPath = `/fixture-redirect${configPath}`;
 const runtimes = {
   jvm: ["jvmTest"],
@@ -42,6 +45,11 @@ const payload = {
     },
   },
 };
+const lazySeed = (value) => ({
+  sdkKey: lazyKey,
+  payload: { f: { region: { t: 1, v: { s: value }, i: value } } },
+  etag: `"kotlin-${value}"`,
+});
 
 async function run(command, args, options) {
   const child = spawn(command, args, { stdio: "inherit", ...options });
@@ -86,14 +94,26 @@ function close(server) {
   });
 }
 
-async function exercise(root, harness) {
-  let connections = 0;
-  const canary = createServer((_, response) => response.writeHead(404).end());
-  canary.on("connection", () => connections++);
-  const destination = await listen(canary);
+async function updateLazySeed(harness) {
+  const response = await fetch(harness + "/admin/seed", {
+    method: "POST",
+    redirect: "error",
+    signal: AbortSignal.timeout(5_000),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ keys: [lazySeed("fresh")] }),
+  });
+  if (!response.ok || (await response.json()).appliedKeys !== 1) {
+    throw new Error("The local harness did not update the LazyLoad fixture.");
+  }
+}
 
+function createFixtureServers(harness) {
+  let connections = 0;
   let seeded = 0;
   let redirects = 0;
+  let lazyRequests = 0;
+  const canary = createServer((_, response) => response.writeHead(404).end());
+  canary.on("connection", () => connections++);
   const expectedTransport = target === "node" || target === "browser" ? target : undefined;
   const facade = createServer(async (request, response) => {
     if (
@@ -105,15 +125,17 @@ async function exercise(root, harness) {
     }
     if (request.url === redirectPath) {
       redirects++;
-      response.writeHead(302, { location: `${destination}${configPath}` }).end();
+      const destination = `http://127.0.0.1:${canary.address().port}`;
+      response.writeHead(302, { location: destination + configPath }).end();
       return;
     }
-    if (request.url !== configPath) {
+    if (request.url !== configPath && request.url !== lazyPath) {
       response.writeHead(404).end();
       return;
     }
+    const updateSeed = request.url === lazyPath && ++lazyRequests === 1;
     try {
-      const upstream = await fetch(harness + configPath, {
+      const upstream = await fetch(harness + request.url, {
         redirect: "error",
         signal: AbortSignal.timeout(5_000),
         headers: request.headers["if-none-match"]
@@ -121,6 +143,7 @@ async function exercise(root, harness) {
           : {},
       });
       const body = Buffer.from(await upstream.arrayBuffer());
+      if (updateSeed) await updateLazySeed(harness);
       seeded++;
       const headers = { "content-type": "application/json" };
       const etag = upstream.headers.get("etag");
@@ -131,7 +154,58 @@ async function exercise(root, harness) {
       response.writeHead(502).end();
     }
   });
+  return { canary, facade, counts: () => ({ seeded, redirects, connections }) };
+}
 
+async function checkRequests(harness, key, expected) {
+  const endpoint = new URL("/admin/requests", harness);
+  endpoint.searchParams.set("sdkKey", key);
+  const response = await fetch(endpoint, {
+    redirect: "error",
+    signal: AbortSignal.timeout(5_000),
+  });
+  const report = await response.json();
+  if (
+    !response.ok ||
+    !report.ok ||
+    report.requests.length !== expected ||
+    report.requests[0].ifNoneMatch !== null ||
+    report.requests.some((r) => new URL(r.url, harness).pathname !== pathFor(key)) ||
+    (key === lazyKey && report.requests[1].ifNoneMatch !== lazySeed("stale").etag)
+  ) {
+    throw new Error(`Unexpected manual or LazyLoad request sequence for the ${target} fixture.`);
+  }
+}
+
+async function checkTestResults(task) {
+  for (const [name, minimum] of [
+    ["ConsumerSmokeTest", 2],
+    ["NetworkFixtureTest", 3],
+  ]) {
+    const report = await readFile(
+      join(
+        companion,
+        "build",
+        "test-results",
+        task,
+        `TEST-io.confeature.kmp.openfeature.${name}.xml`,
+      ),
+      "utf8",
+    );
+    const suite = /<testsuite\b[^>]*>/.exec(report)?.[0] ?? "";
+    const count = Number(/\btests="(\d+)"/.exec(suite)?.[1] ?? 0);
+    if (
+      count < minimum ||
+      !["skipped", "failures", "errors"].every((key) => suite.includes(`${key}="0"`))
+    ) {
+      throw new Error(`${task} did not run and pass the expected ${name} cases.`);
+    }
+  }
+}
+
+async function exercise(root, harness) {
+  const { canary, facade, counts } = createFixtureServers(harness);
+  const destination = await listen(canary);
   try {
     const facadeOrigin = await listen(facade);
     let origin = facadeOrigin;
@@ -154,6 +228,7 @@ async function exercise(root, harness) {
 package io.confeature.kmp.openfeature
 
 internal const val FIXTURE_KEY = "${fixtureKey}"
+internal const val FIXTURE_LAZY_KEY = "${lazyKey}"
 internal const val FIXTURE_ORIGIN = "${origin}"
 internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
 `,
@@ -183,8 +258,6 @@ internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
         ...simulator,
         ...runtimes[target],
         "--rerun",
-        "--tests",
-        "io.confeature.kmp.openfeature.NetworkFixtureTest",
       ],
       {
         cwd: companion,
@@ -197,29 +270,16 @@ internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
     );
     if (code !== 0) return code;
 
-    const endpoint = new URL("/admin/requests", harness);
-    endpoint.searchParams.set("sdkKey", fixtureKey);
-    const response = await fetch(endpoint, {
-      redirect: "error",
-      signal: AbortSignal.timeout(5_000),
-    });
-    const report = await response.json();
-    const request = report.requests?.[0];
-    if (
-      !response.ok ||
-      !report.ok ||
-      report.requests.length !== 1 ||
-      request.ifNoneMatch !== null ||
-      new URL(request.url, harness).pathname !== configPath ||
-      seeded !== 1 ||
-      redirects !== 1 ||
-      connections !== 0
-    ) {
+    await checkTestResults(runtimes[target].at(-1));
+    await checkRequests(harness, fixtureKey, 1);
+    await checkRequests(harness, lazyKey, 2);
+    const { seeded, redirects, connections } = counts();
+    if (seeded !== 3 || redirects !== 1 || connections !== 0) {
       throw new Error(
-        "Expected one seeded request, one local redirect response and zero canary connections.",
+        "Expected three seeded requests, one local redirect response and zero canary connections.",
       );
     }
-    console.log(`Verified Kotlin ${target}: one seeded request and zero canary connections.`);
+    console.log(`Verified Kotlin ${target}: manual and LazyLoad reads, zero canary connections.`);
     return 0;
   } finally {
     try {
@@ -242,7 +302,10 @@ try {
     const seed = join(root, "seed.json");
     await writeFile(
       seed,
-      JSON.stringify({ schemaVersion: "1.0", keys: [{ sdkKey: fixtureKey, payload }] }),
+      JSON.stringify({
+        schemaVersion: "1.0",
+        keys: [{ sdkKey: fixtureKey, payload }, lazySeed("stale")],
+      }),
     );
     const inherited =
       /^(?:cdn_(?:entry|config|base_url)|live_harness_url|confeature_live|confeature_kotlin_browser_.*|(?:npm_config_)?(?:http_|https_|all_|no_)?proxy|node_use_env_proxy|java_tool_options|jdk_java_options|_java_options|gradle_opts|java_opts)$/i;

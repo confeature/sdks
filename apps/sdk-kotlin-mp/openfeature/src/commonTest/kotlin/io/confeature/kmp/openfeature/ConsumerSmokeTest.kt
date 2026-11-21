@@ -2,9 +2,14 @@
 package io.confeature.kmp.openfeature
 
 import dev.openfeature.kotlin.sdk.ImmutableContext
+import dev.openfeature.kotlin.sdk.FlagEvaluationDetails
+import dev.openfeature.kotlin.sdk.FlagEvaluationOptions
+import dev.openfeature.kotlin.sdk.Hook
+import dev.openfeature.kotlin.sdk.HookContext
 import dev.openfeature.kotlin.sdk.Reason
 import dev.openfeature.kotlin.sdk.Value
 import dev.openfeature.kotlin.sdk.exceptions.ErrorCode
+import dev.openfeature.kotlin.sdk.exceptions.OpenFeatureError
 import dev.openfeature.kotlin.sdk.isolated.ExperimentalIsolatedApi
 import dev.openfeature.kotlin.sdk.isolated.createOpenFeatureAPIInstance
 import io.confeature.kmp.ConfeatureClient
@@ -14,6 +19,7 @@ import io.confeature.kmp.User
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -74,12 +80,64 @@ class ConsumerSmokeTest {
             assertTrue(details.all { it.user == null })
 
             primary.setProviderAndWait(ConfeatureProvider(base))
-            assertEquals(ErrorCode.PROVIDER_NOT_READY, adapter.getBooleanEvaluation("flag", false, null).errorCode)
+            assertFailsWith<OpenFeatureError.ProviderNotReadyError> {
+                adapter.getBooleanEvaluation("flag", false, null)
+            }
             assertEquals(true, base.getValueDetails("flag", false).value)
         } finally {
             primary.shutdown()
             anonymous.shutdown()
             base.close()
+        }
+    }
+
+    @Test
+    fun officialClientRunsAfterHooksForSuccessAndErrorHooksForAFallback() = runTest {
+        val base = ConfeatureClient.builder("configcat-sdk-1/AAAAAAAAAAAAAAAAAAAAAA/BBBBBBBBBBBBBBBBBBBBBB")
+            .flagOverrides(FlagOverrides.localConfig(config()))
+            .build()
+        val api = createOpenFeatureAPIInstance()
+        try {
+            api.setProviderAndWait(ConfeatureProvider(base))
+            val events = mutableListOf<String>()
+            val hook = object : Hook<Boolean> {
+                override fun after(
+                    ctx: HookContext<Boolean>,
+                    details: FlagEvaluationDetails<Boolean>,
+                    hints: Map<String, Any>,
+                ) {
+                    events.add("after")
+                }
+
+                override fun error(ctx: HookContext<Boolean>, error: Exception, hints: Map<String, Any>) {
+                    assertTrue(error is OpenFeatureError.FlagNotFoundError)
+                    events.add("error")
+                }
+
+                override fun finallyAfter(
+                    ctx: HookContext<Boolean>,
+                    details: FlagEvaluationDetails<Boolean>,
+                    hints: Map<String, Any>,
+                ) {
+                    events.add("finally")
+                }
+            }
+            val options = FlagEvaluationOptions(hooks = listOf(hook))
+            val client = api.getClient()
+            val resolved = client.getBooleanDetails("flag", true, options)
+            assertEquals(false, resolved.value)
+            assertNull(resolved.errorCode)
+            val fallback = client.getBooleanDetails("missing", true, options)
+            assertEquals(true, fallback.value)
+            assertEquals(ErrorCode.FLAG_NOT_FOUND, fallback.errorCode)
+            assertEquals(Reason.ERROR.name, fallback.reason)
+            assertEquals(listOf("after", "finally", "error", "finally"), events)
+        } finally {
+            try {
+                api.shutdown()
+            } finally {
+                base.close()
+            }
         }
     }
 
