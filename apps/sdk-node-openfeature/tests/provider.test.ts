@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-import { ClientCacheState, ConfigCatClient, PollingMode } from "@confeature/sdk-node";
+import {
+  ClientCacheState,
+  ConfigCatClient,
+  createFlagOverridesFromMap,
+  OverrideBehaviour,
+  PollingMode,
+} from "@confeature/sdk-node";
 import { ErrorCode, OpenFeature, StandardResolutionReasons } from "@openfeature/server-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,6 +98,31 @@ describe("ConfeatureProvider", () => {
     expect(result.variant).toBeUndefined();
     expect(JSON.stringify(result)).not.toMatch(/discard|secret-/);
     expect(evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes an absent flat local override from a type mismatch", async () => {
+    const client = new ConfigCatClient("offline-override-fixture", PollingMode.AutoPoll, {
+      offline: true,
+      flagOverrides: createFlagOverridesFromMap({ enabled: true }, OverrideBehaviour.LocalOnly),
+    });
+    try {
+      await OpenFeature.setProviderAndWait(new ConfeatureProvider(client));
+      const flags = OpenFeature.getClient();
+      await expect(flags.getBooleanDetails("enabled", false)).resolves.toMatchObject({
+        value: true,
+      });
+      await expect(flags.getBooleanDetails("missing", false)).resolves.toMatchObject({
+        value: false,
+        errorCode: ErrorCode.GENERAL,
+      });
+      await expect(flags.getStringDetails("enabled", "fallback")).resolves.toMatchObject({
+        value: "fallback",
+        errorCode: ErrorCode.TYPE_MISMATCH,
+      });
+    } finally {
+      await OpenFeature.close();
+      client.dispose();
+    }
   });
 
   it("sanitizes exceptions thrown by a borrowed client", async () => {

@@ -73,7 +73,8 @@ export class ConfeatureProvider implements Provider {
       // A null SDK default bypasses the SDK's type check. This lets the provider
       // classify a served value's type with one call and no SDK message parsing.
       const details = await this.client.getValueDetailsAsync<unknown>(key, null, toUser(context));
-      if (details.isDefaultValue) {
+      // A flat local override may return the null sentinel as a resolved default.
+      if (details.isDefaultValue || details.value === null) {
         return failure(defaultValue, ErrorCode.GENERAL, EVALUATION_FAILED);
       }
       const { value, variationId, matchedPercentageOption, matchedTargetingRule } = details;
