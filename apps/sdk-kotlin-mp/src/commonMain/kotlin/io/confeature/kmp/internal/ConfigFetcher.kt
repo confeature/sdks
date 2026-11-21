@@ -163,9 +163,7 @@ public class ConfigFetcher(
      */
     public suspend fun fetch(previousEtag: String?): FetchResult = fetch(previousEtag, logger)
 
-    internal suspend fun fetchQuietly(previousEtag: String?): FetchResult = fetch(previousEtag, null)
-
-    private suspend fun fetch(previousEtag: String?, diagnostics: Logger?): FetchResult {
+    internal suspend fun fetch(previousEtag: String?, diagnostics: Logger?): FetchResult {
         val target = url
         if (target == null) {
             val reason = refusal ?: INVALID_REQUEST

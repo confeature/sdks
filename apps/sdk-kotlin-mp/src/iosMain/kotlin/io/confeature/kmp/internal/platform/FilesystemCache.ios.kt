@@ -65,13 +65,13 @@ public actual class FilesystemCache actual constructor(
     }
 
     actual override suspend fun write(cacheKey: String, value: String) =
-        write(cacheKey, value, logger)
+        write(cacheKey, value, sanitize = false)
 
-    internal actual suspend fun writeQuietly(cacheKey: String, value: String) =
-        write(cacheKey, value, null)
+    internal actual suspend fun writeForProvider(cacheKey: String, value: String) =
+        write(cacheKey, value, sanitize = true)
 
     @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-    private suspend fun write(cacheKey: String, value: String, diagnostics: Logger?) {
+    private suspend fun write(cacheKey: String, value: String, sanitize: Boolean) {
         fallback.write(cacheKey, value)
         if (memoryOnly) return
 
@@ -89,12 +89,12 @@ public actual class FilesystemCache actual constructor(
                     error = null,
                 )
                 if (!ok) {
-                    engageFallback(path, IllegalStateException("mkdir failed at $parent"), diagnostics)
+                    engageFallback(path, IllegalStateException("mkdir failed at $parent"), sanitize)
                     return
                 }
             }
         } catch (ex: Exception) {
-            engageFallback(path, ex, diagnostics)
+            engageFallback(path, ex, sanitize)
             return
         }
 
@@ -112,20 +112,20 @@ public actual class FilesystemCache actual constructor(
                 error = null,
             )
             if (!ok) {
-                engageFallback(path, IllegalStateException("NSString.writeToURL returned false"), diagnostics)
+                engageFallback(path, IllegalStateException("NSString.writeToURL returned false"), sanitize)
             }
         } catch (ex: Exception) {
-            engageFallback(path, ex, diagnostics)
+            engageFallback(path, ex, sanitize)
         }
     }
 
-    private fun engageFallback(path: String, ex: Throwable, diagnostics: Logger? = logger) {
+    private fun engageFallback(path: String, ex: Throwable, sanitize: Boolean = false) {
         if (!memoryOnly) {
             memoryOnly = true
-            diagnostics?.warning(
+            logger.reportFilesystemWarning(sanitize) {
                 "FilesystemCache: filesystem unwritable at $path; falling back to in-memory " +
-                    "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}",
-            )
+                    "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}"
+            }
         }
     }
 

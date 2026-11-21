@@ -3,6 +3,7 @@ package io.confeature.kmp.internal.platform
 
 import io.confeature.kmp.ConfigCache
 import io.confeature.kmp.Logger
+import io.confeature.kmp.reportProviderFailure
 
 /**
  * Multiplatform filesystem-backed [ConfigCache] abstraction. Each target provides an `actual`
@@ -27,10 +28,18 @@ public expect class FilesystemCache(
 
     override suspend fun write(cacheKey: String, value: String)
 
-    internal suspend fun writeQuietly(cacheKey: String, value: String)
+    internal suspend fun writeForProvider(cacheKey: String, value: String)
 
     public companion object {
         /** Default cache directory inside the per-platform user-cache root. */
         public fun defaultCacheDir(): String
+    }
+}
+
+internal inline fun Logger.reportFilesystemWarning(sanitize: Boolean, message: () -> String) {
+    if (sanitize) {
+        reportProviderFailure("FilesystemCache: provider cache cannot be written to disk.")
+    } else {
+        warning(message())
     }
 }

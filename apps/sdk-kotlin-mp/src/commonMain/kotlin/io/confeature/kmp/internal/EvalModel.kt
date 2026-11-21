@@ -80,19 +80,28 @@ internal class SettingResult(val value: Map<String, Any?>?, var variationId: Str
 /** The two salts a sensitive (SHA-256) comparator hashes with: the config's and the context's. */
 internal class HashSalt(val config: String, val context: String)
 
+/** The requested flag, fallback and targeting policy shared by the cached and traced paths. */
+internal class EvaluationRequest(
+    val key: String,
+    val fallback: Any?,
+    val user: Evaluator.UserView?,
+    val providerType: ProviderValueType? = null,
+)
+
 /**
  * What one evaluation shares with every prerequisite it resolves: the config, the user, the
  * visited-flags stack (cycle detection) and the trace.
  */
 internal class EvalScope(
     val settings: Map<String, Any?>,
-    val segments: List<Any?>,
-    val configSalt: String,
+    config: Map<String, Any?>?,
     val user: Evaluator.UserView?,
     val log: EvalTraceLog,
     val logBuilder: EvalLog.EvaluateLogBuilder?,
     val requireDefaultPercentageIdentifier: Boolean = false,
 ) {
+    val segments: List<Any?> = asList(config?.get("s")) ?: emptyList()
+    val configSalt: String = (asMap(config?.get("p"))?.get("s") as? String) ?: ""
     val visitedFlags: MutableList<String> = ArrayList()
 }
 

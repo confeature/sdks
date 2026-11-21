@@ -2,7 +2,9 @@
 package io.confeature.kmp
 
 import io.confeature.kmp.internal.ConfigFetcher
+import io.confeature.kmp.internal.EvaluationRequest
 import io.confeature.kmp.internal.Evaluator
+import io.confeature.kmp.internal.FetchDiagnostics
 import io.confeature.kmp.internal.InMemoryCache
 import io.confeature.kmp.internal.OverrideEval
 import io.confeature.kmp.internal.ProviderResult
@@ -15,10 +17,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -35,6 +41,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Top-level entry point of the Confeature Kotlin Multiplatform SDK. Construct via [builder] or
@@ -67,7 +74,17 @@ public class ConfeatureClient private constructor(b: Builder) {
         val offline: Boolean = false,
     )
 
+    private class CacheWrite(
+        val rawBody: String,
+        val etag: String,
+        val fetchedAtSeconds: Long,
+        val providerRefresh: Boolean,
+    )
+
+    private data class CacheWriteQueue(val pending: CacheWrite? = null, val writing: Boolean = false)
+
     private val state = MutableStateFlow(CachedState())
+    private val cacheWriteQueue = MutableStateFlow(CacheWriteQueue())
     private val closedFlag: Boolean get() = state.value.closed
     private val offlineFlag: Boolean get() = state.value.offline
     private val localOnly: Boolean = flagOverrides?.behaviour == OverrideBehaviour.LOCAL_ONLY
@@ -82,7 +99,7 @@ public class ConfeatureClient private constructor(b: Builder) {
     /** The AutoPoll coroutine, exposed internally for tests to join after [close]. */
     internal val autopollJob: Job?
 
-    // Transport, configuration replacement and cache writes are coordinated under refreshMutex.
+    // Serialize the transport, config publication and enqueuing of cache writes.
     private var etag: String = ""
 
     init {
@@ -263,7 +280,7 @@ public class ConfeatureClient private constructor(b: Builder) {
         }
         if (!localOnly) scheduleLazyRefresh(cached)
         val result = try {
-            resolveCachedDetails(cached.configRoot, flagOverrides, key, defaultValue, user, type)
+            resolveCachedDetails(cached.configRoot, flagOverrides, EvaluationRequest(key, defaultValue, user, type))
         } catch (failure: Throwable) {
             if (isFatalError(failure)) throw failure
             logger.reportProviderFailure("ConfeatureClient: provider evaluation failed.")
@@ -388,6 +405,7 @@ public class ConfeatureClient private constructor(b: Builder) {
             return
         }
         state.update { it.copy(closed = true) }
+        cacheWriteQueue.update { it.copy(pending = null) }
         closeMutex.unlock()
         try {
             if (scope.isInitialized()) scope.value.cancel()
@@ -411,8 +429,8 @@ public class ConfeatureClient private constructor(b: Builder) {
 
     private fun shouldLazyFetch(cached: CachedState): Boolean {
         if (cached.closed || cached.offline || pollingMode.kind != PollingMode.Kind.LAZY_LOAD) return false
-        val refreshSeconds = pollingMode.cacheRefreshInterval?.inWholeSeconds ?: return false
-        return currentEpochSeconds() - cached.fetchTimeMillis / 1000L >= refreshSeconds
+        val interval = pollingMode.cacheRefreshInterval ?: return false
+        return cached.fetchTimeMillis == 0L || (currentEpochMillis() - cached.fetchTimeMillis).milliseconds >= interval
     }
 
     private suspend fun maybeLazyFetch() {
@@ -427,8 +445,10 @@ public class ConfeatureClient private constructor(b: Builder) {
         clientScope.launch {
             try {
                 fetchAndApply(lazyOnly = true, providerRefresh = true)
+            } catch (failure: CancellationException) {
+                throw failure
             } catch (failure: Throwable) {
-                if (failure is CancellationException || isFatalError(failure)) throw failure
+                if (isFatalError(failure)) throw failure
                 logger.reportProviderFailure("ConfeatureClient: provider refresh failed.")
             }
         }.invokeOnCompletion { providerRefreshMutex.unlock() }
@@ -441,12 +461,17 @@ public class ConfeatureClient private constructor(b: Builder) {
     )
 
     private suspend fun fetchAndApply(lazyOnly: Boolean = false, providerRefresh: Boolean = false): Boolean {
+        val diagnostics = if (providerRefresh) null else FetchDiagnostics()
         val outcome = refreshMutex.withLock {
-            refreshLocked(lazyOnly, providerRefresh)
+            refreshLocked(lazyOnly, providerRefresh, diagnostics)
         } ?: return false
         if (closedFlag) return false
 
-        // Application hooks can re-enter the client. Never invoke them under the refresh mutex.
+        // The cache, logger and listeners may re-enter the client.
+        if (outcome.status == ConfigFetcher.Status.FETCHED) flushCacheWrites()
+        if (closedFlag) return false
+        diagnostics?.replay(logger)
+        if (closedFlag) return false
         when (outcome.status) {
             ConfigFetcher.Status.FETCHED -> hooks.invokeOnConfigChanged(
                 outcome.settings?.let { decodeSettingsMap(it) } ?: emptyMap(),
@@ -461,15 +486,20 @@ public class ConfeatureClient private constructor(b: Builder) {
                 return false
             }
         }
-        if (outcome.becameReady) hooks.invokeOnClientReady(sanitizeFailure = providerRefresh)
+        if (outcome.becameReady && !closedFlag) hooks.invokeOnClientReady(sanitizeFailure = providerRefresh)
         return true
     }
 
-    private suspend fun refreshLocked(lazyOnly: Boolean, providerRefresh: Boolean): RefreshOutcome? {
+    private suspend fun refreshLocked(
+        lazyOnly: Boolean,
+        providerRefresh: Boolean,
+        diagnostics: FetchDiagnostics?,
+    ): RefreshOutcome? {
         val cached = state.value
-        if (cached.closed || cached.offline || (lazyOnly && !shouldLazyFetch(cached))) return null
+        if (cached.closed || cached.offline) return null
+        if (lazyOnly && !shouldLazyFetch(cached)) return null
 
-        val result = if (providerRefresh) fetcher.fetchQuietly(etag) else fetcher.fetch(etag)
+        val result = fetcher.fetch(etag, diagnostics)
         if (closedFlag) return null
         if (result.status == ConfigFetcher.Status.FAILED) return RefreshOutcome(result.status, null, false)
 
@@ -479,7 +509,12 @@ public class ConfeatureClient private constructor(b: Builder) {
         val root = if (fetched) decodeConfigRoot(result.body) else cached.configRoot
         if (!publishRefresh(settings, root, nowMillis, providerRefresh)) return null
         if (fetched || result.etag.isNotEmpty()) etag = result.etag
-        if (fetched) persistCache(result.rawBody, result.etag, nowMillis / 1000L, providerRefresh)
+        if (fetched && !closedFlag) {
+            result.rawBody?.let { rawBody ->
+                val write = CacheWrite(rawBody, result.etag, nowMillis / 1000L, providerRefresh)
+                cacheWriteQueue.update { if (closedFlag) it else it.copy(pending = write) }
+            }
+        }
 
         val becameReady = !clientReadyFired
         clientReadyFired = true
@@ -516,36 +551,76 @@ public class ConfeatureClient private constructor(b: Builder) {
         return body.mapValues { decodeJsonElement(it.value) }
     }
 
-    private suspend fun persistCache(
-        rawBody: String?,
-        etagValue: String,
-        nowSeconds: Long,
-        providerRefresh: Boolean,
-    ) {
-        if (rawBody == null) return
+    private suspend fun flushCacheWrites() {
+        if (!claimCacheWriter()) return
+        val clientScope = scope.value
+        if (closedFlag) clientScope.cancel()
+        clientScope.async { drainCacheWrites() }.await()
+    }
+
+    private suspend fun drainCacheWrites() {
+        try {
+            while (true) {
+                val write = takeCacheWrite() ?: return
+                persistCache(write)
+                currentCoroutineContext().ensureActive()
+            }
+        } catch (failure: Throwable) {
+            val queue = cacheWriteQueue.updateAndGet { it.copy(writing = false) }
+            if (queue.pending != null && !closedFlag && !isFatalError(failure)) {
+                scope.value.launch { flushCacheWrites() }
+            }
+            throw failure
+        }
+    }
+
+    private fun claimCacheWriter(): Boolean {
+        while (true) {
+            val queue = cacheWriteQueue.value
+            if (queue.writing || queue.pending == null || closedFlag) return false
+            if (cacheWriteQueue.compareAndSet(queue, queue.copy(writing = true))) return true
+        }
+    }
+
+    // Relinquish ownership atomically when empty so an arriving write always has a drainer.
+    private fun takeCacheWrite(): CacheWrite? {
+        while (true) {
+            val queue = cacheWriteQueue.value
+            val next = queue.pending.takeUnless { closedFlag }
+            if (cacheWriteQueue.compareAndSet(queue, CacheWriteQueue(writing = next != null))) return next
+        }
+    }
+
+    private suspend fun persistCache(write: CacheWrite) {
         try {
             val envelope = JsonObject(
                 mapOf(
-                    "body" to Json.parseToJsonElement(rawBody),
-                    "etag" to kotlinx.serialization.json.JsonPrimitive(etagValue),
-                    "fetched_at" to kotlinx.serialization.json.JsonPrimitive(nowSeconds),
+                    "body" to Json.parseToJsonElement(write.rawBody),
+                    "etag" to kotlinx.serialization.json.JsonPrimitive(write.etag),
+                    "fetched_at" to kotlinx.serialization.json.JsonPrimitive(write.fetchedAtSeconds),
                 ),
             )
-            if (providerRefresh && cache is FilesystemCache) {
-                cache.writeQuietly(cacheKey, envelope.toString())
+            if (write.providerRefresh && cache is FilesystemCache) {
+                cache.writeForProvider(cacheKey, envelope.toString())
             } else {
                 cache.write(cacheKey, envelope.toString())
             }
+        } catch (ex: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            reportCachePersistenceFailure(ex, write.providerRefresh)
         } catch (ex: Exception) {
-            if (providerRefresh) {
-                if (ex is CancellationException) throw ex
-                logger.reportProviderFailure("ConfeatureClient: provider cache write failed.")
-            } else {
-                logger.warning(
-                    "ConfeatureClient: failed to persist cache entry. sdkKey=" +
-                        "${SdkKey.redact(sdkKey)} reason=${ex.message}",
-                )
-            }
+            reportCachePersistenceFailure(ex, write.providerRefresh)
+        }
+    }
+
+    private fun reportCachePersistenceFailure(ex: Exception, providerRefresh: Boolean) {
+        if (providerRefresh) {
+            logger.reportProviderFailure("ConfeatureClient: provider cache write failed.")
+        } else {
+            logger.warning(
+                "ConfeatureClient: failed to persist cache entry. sdkKey=" +
+                    "${SdkKey.redact(sdkKey)} reason=${ex.message}",
+            )
         }
     }
 
@@ -619,20 +694,5 @@ public class ConfeatureClient private constructor(b: Builder) {
     }
 }
 
-/** Multiplatform epoch-seconds helper. JVM/JS/Native all expose `Clock.System` via kotlinx-datetime
- * — but to avoid pulling that whole dep, we use `kotlin.time.TimeSource` semantics indirectly via
- * the actual filesystem cache; the client only needs monotonic-ish seconds for the lazy-load
- * staleness check, where `currentTimeMillis()` equivalents are sufficient. Each platform has a
- * built-in helper:
- * - JVM: `System.currentTimeMillis()`.
- * - iOS: `NSDate().timeIntervalSince1970`.
- * - JS: `Date.now()`.
- *
- * We funnel through a tiny `expect` helper to keep the common code clean. */
-internal expect fun currentEpochSeconds(): Long
-
-/** Multiplatform wall-clock epoch-millis. Surfaces via
- * [TypedEvaluationDetails.fetchTimeUnixMilliseconds] on every successful fetch (spec 082 /
- * #266 slice 4/12). Each platform's `actual` mirrors the existing [currentEpochSeconds] backing
- * source so the two helpers can never disagree on what "now" means. */
+/** Wall-clock milliseconds for LazyLoad expiry and the published evaluation timestamp. */
 internal expect fun currentEpochMillis(): Long

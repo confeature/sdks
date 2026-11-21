@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 class ProviderLazyLoadTest {
     @Test
@@ -104,6 +105,111 @@ class ProviderLazyLoadTest {
     }
 
     @Test
+    fun closingFromConfigChangedPreventsTheReadyCallback() = runBlocking {
+        DelayedConfig().use { fixture ->
+            val client = fixture.client()
+            val closedFromCallback = CountDownLatch(1)
+            val ready = CountDownLatch(1)
+            client.getHooks().addOnClientReady { ready.countDown() }
+            client.getHooks().addOnConfigChanged {
+                client.close()
+                closedFromCallback.countDown()
+            }
+            try {
+                assertEquals(Status.NOT_READY, client.providerDetails().status)
+                fixture.firstRelease.countDown()
+                assertTrue(closedFromCallback.await(5, TimeUnit.SECONDS))
+                assertFalse(ready.await(200, TimeUnit.MILLISECONDS))
+                assertEquals(Status.NOT_READY, client.providerDetails().status)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun customCacheCanRefreshAndItsLastWriteIsTheNewestSnapshot() = runBlocking {
+        DelayedConfig().use { fixture ->
+            lateinit var client: ConfeatureClient
+            val writes = mutableListOf<String>()
+            val cache = object : ConfigCache {
+                override suspend fun read(cacheKey: String): String? = null
+
+                override suspend fun write(cacheKey: String, value: String) {
+                    if (writes.isEmpty()) {
+                        // The nested refresh must complete while this write is in progress.
+                        assertTrue(withTimeout(3_000) { client.forceRefresh() })
+                    }
+                    writes.add(value)
+                }
+            }
+            client = fixture.client(customCache = cache)
+            try {
+                fixture.firstRelease.countDown()
+                assertTrue(withTimeout(5_000) { client.forceRefresh() })
+                assertEquals(2, fixture.requests.get())
+                assertEquals(2, writes.size)
+                assertTrue(writes.first().contains("\"b\":true"))
+                assertTrue(writes.last().contains("\"b\":false"))
+                assertEquals(false, client.providerDetails().value)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun nativeFetchDiagnosticsAllowAReentrantLogger() = runBlocking {
+        DelayedConfig(firstStatus = 503).use { fixture ->
+            lateinit var client: ConfeatureClient
+            var nestedRefresh: Boolean? = null
+            val logger = object : Logger by Logger.default() {
+                override fun error(message: String, throwable: Throwable?) {
+                    if (message.contains("HTTP 503")) {
+                        nestedRefresh = runBlocking { withTimeout(3_000) { client.forceRefresh() } }
+                    }
+                }
+            }
+            client = fixture.client(logger = logger)
+            try {
+                fixture.firstRelease.countDown()
+                assertFalse(client.forceRefresh())
+                assertEquals(true, nestedRefresh)
+                assertEquals(2, fixture.requests.get())
+                assertEquals(Status.RESOLVED, client.providerDetails().status)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun aPositiveSubsecondTtlDoesNotRefreshTheWarmConfigurationImmediately() = runBlocking {
+        DelayedConfig().use { fixture ->
+            val client = fixture.client(polling = PollingMode.lazyLoad(900.milliseconds))
+            try {
+                fixture.firstRelease.countDown()
+                assertTrue(client.forceRefresh())
+                repeat(4) {
+                    assertEquals(true, client.providerDetails().value)
+                    delay(25)
+                }
+                assertFalse(fixture.secondEntered.await(150, TimeUnit.MILLISECONDS))
+                assertEquals(1, fixture.requests.get())
+                withTimeout(5_000) {
+                    while (fixture.requests.get() < 2) {
+                        client.providerDetails()
+                        delay(25)
+                    }
+                }
+                assertEquals(2, fixture.requests.get())
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
     fun providerCacheFallbackKeepsTheConfiguredPathOutOfDiagnostics() = runBlocking {
         DelayedConfig().use { fixture ->
             val path = Files.createTempFile("confeature-fixture-cache-sentinel", ".file")
@@ -117,6 +223,7 @@ class ProviderLazyLoadTest {
                 fixture.firstRelease.countDown()
                 assertTrue(ready.await(5, TimeUnit.SECONDS))
                 assertEquals(true, client.providerDetails().value)
+                assertTrue(logger.messages.contains("ERROR FilesystemCache: provider cache cannot be written to disk."))
                 assertTrue(logger.messages.none { it.contains("confeature-fixture-cache-sentinel") })
             } finally {
                 client.close()
@@ -128,7 +235,7 @@ class ProviderLazyLoadTest {
     private fun ConfeatureClient.providerDetails(): ProviderResult =
         getValueDetailsForProvider("flag", false, null, ProviderValueType.BOOLEAN)
 
-    private class DelayedConfig : AutoCloseable {
+    private class DelayedConfig(private val firstStatus: Int = 200) : AutoCloseable {
         val requests = AtomicInteger()
         val firstEntered = CountDownLatch(1)
         val firstRelease = CountDownLatch(1)
@@ -152,7 +259,7 @@ class ProviderLazyLoadTest {
                     }
                     val body = """{"f":{"flag":{"t":0,"v":{"b":${index == 1}}}}}""".encodeToByteArray()
                     exchange.responseHeaders.set("ETag", "\"fixture-$index\"")
-                    exchange.sendResponseHeaders(200, body.size.toLong())
+                    exchange.sendResponseHeaders(if (index == 1) firstStatus else 200, body.size.toLong())
                     exchange.responseBody.use { it.write(body) }
                 } finally {
                     exchange.close()
@@ -162,12 +269,18 @@ class ProviderLazyLoadTest {
             server.start()
         }
 
-        fun client(cache: String = ":memory:", logger: Logger = Logger.default()): ConfeatureClient =
+        fun client(
+            cache: String = ":memory:",
+            logger: Logger = Logger.default(),
+            customCache: ConfigCache? = null,
+            polling: PollingMode = PollingMode.lazyLoad(),
+        ): ConfeatureClient =
             ConfeatureClient.builder("configcat-sdk-1/AAAAAAAAAAAAAAAAAAAAAA/BBBBBBBBBBBBBBBBBBBBBB")
                 .baseUrl("http://127.0.0.1:${server.address.port}")
-                .pollingMode(PollingMode.lazyLoad())
+                .pollingMode(polling)
                 .cacheDirectory(cache)
                 .logger(logger)
+                .apply { if (customCache != null) cache(customCache) }
                 .build()
 
         override fun close() {

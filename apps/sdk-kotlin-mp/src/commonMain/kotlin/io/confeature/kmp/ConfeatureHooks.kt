@@ -70,14 +70,15 @@ public class ConfeatureHooks internal constructor(private val logger: Logger) {
     private inline fun invokeListener(name: String, sanitizeFailure: Boolean, listener: () -> Unit) {
         try {
             listener()
-        } catch (failure: Throwable) {
+        } catch (failure: Exception) {
             if (sanitizeFailure) {
-                if (isFatalError(failure)) throw failure
                 logger.reportProviderFailure("ConfeatureHooks: $name listener raised.")
             } else {
-                if (failure !is Exception) throw failure
                 logger.error("ConfeatureHooks: $name listener raised.", failure)
             }
+        } catch (failure: Throwable) {
+            if (!sanitizeFailure || isFatalError(failure)) throw failure
+            logger.reportProviderFailure("ConfeatureHooks: $name listener raised.")
         }
     }
 }

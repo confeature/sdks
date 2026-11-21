@@ -132,35 +132,26 @@ public object Evaluator {
         defaultValue: Any?,
         user: UserView?,
         sink: EvalTraceLog.Sink?,
-    ): Result = resolve(config, key, defaultValue, user, sink, null)
+    ): Result = resolve(config, EvaluationRequest(key, defaultValue, user), sink)
 
-    internal fun evaluateForProvider(
-        config: Map<String, Any?>?,
-        key: String,
-        defaultValue: Any?,
-        user: UserView?,
-        type: ProviderValueType,
-    ): Result = resolve(config, key, defaultValue, user, null, type)
+    internal fun evaluateCached(config: Map<String, Any?>?, request: EvaluationRequest): Result =
+        resolve(config, request, null)
 
     private fun resolve(
         config: Map<String, Any?>?,
-        key: String,
-        defaultValue: Any?,
-        user: UserView?,
+        request: EvaluationRequest,
         sink: EvalTraceLog.Sink?,
-        providerType: ProviderValueType?,
     ): Result {
+        val key = request.key
+        val defaultValue = request.fallback
+        val providerType = request.providerType
         val log = EvalTraceLog(sink)
         val located = locateSetting(config, key, defaultValue, providerType)
         if (located.error != Error.NONE) return Result(defaultValue, located.error)
 
-        val preferences = asMap(config?.get("p"))
-        val configSalt = (preferences?.get("s") as? String) ?: ""
-        val segments = asList(config?.get("s")) ?: emptyList()
-
-        val logBuilder = startTrace(log, key, user)
+        val logBuilder = startTrace(log, key, request.user)
         val scope = EvalScope(
-            located.settings, segments, configSalt, user, log, logBuilder,
+            located.settings, config, request.user, log, logBuilder,
             requireDefaultPercentageIdentifier = providerType != null,
         )
         val ctx = EvalContext(key, located.setting, scope)
@@ -278,8 +269,11 @@ public object Evaluator {
             // setting + the chain), not the generic evaluation path.
             ctx.log.circularDependency(ctx.key, e.cycle)
             null
+        } catch (e: MalformedConfigException) {
+            ctx.log.settingEvaluationFailed(GET_VALUE_METHOD, ctx.key, defaultValue, e)
+            null
         } catch (e: RuntimeException) {
-            if (providerEvaluation && e !is MalformedConfigException) throw e
+            if (providerEvaluation) throw e
             ctx.log.settingEvaluationFailed(GET_VALUE_METHOD, ctx.key, defaultValue, e)
             null
         }

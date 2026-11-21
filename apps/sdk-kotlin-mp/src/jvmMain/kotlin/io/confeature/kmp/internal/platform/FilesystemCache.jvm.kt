@@ -55,12 +55,12 @@ public actual class FilesystemCache actual constructor(
     }
 
     actual override suspend fun write(cacheKey: String, value: String) =
-        write(cacheKey, value, logger)
+        write(cacheKey, value, sanitize = false)
 
-    internal actual suspend fun writeQuietly(cacheKey: String, value: String) =
-        write(cacheKey, value, null)
+    internal actual suspend fun writeForProvider(cacheKey: String, value: String) =
+        write(cacheKey, value, sanitize = true)
 
-    private suspend fun write(cacheKey: String, value: String, diagnostics: Logger?) {
+    private suspend fun write(cacheKey: String, value: String, sanitize: Boolean) {
         // Mirror every write into memory first so a subsequent read after a
         // failed disk write still returns the entry.
         fallback.write(cacheKey, value)
@@ -89,30 +89,30 @@ public actual class FilesystemCache actual constructor(
                 Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING)
             }
         } catch (ex: IOException) {
-            tryDeleteQuietly(tmp, diagnostics)
-            engageFallback(path, ex, diagnostics)
+            tryDeleteQuietly(tmp, sanitize)
+            engageFallback(path, ex, sanitize)
         }
     }
 
-    private fun engageFallback(path: Path, ex: IOException, diagnostics: Logger? = logger) {
+    private fun engageFallback(path: Path, ex: IOException, sanitize: Boolean = false) {
         if (memoryOnly.compareAndSet(false, true)) {
-            diagnostics?.warning(
+            logger.reportFilesystemWarning(sanitize) {
                 "FilesystemCache: filesystem unwritable at $path; falling back to in-memory " +
-                    "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}",
-            )
+                    "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}"
+            }
         }
     }
 
-    private fun tryDeleteQuietly(path: Path, diagnostics: Logger?) {
+    private fun tryDeleteQuietly(path: Path, sanitize: Boolean) {
         try {
             Files.deleteIfExists(path)
         } catch (ex: IOException) {
             // Best-effort cleanup — already in the failure path. Log at
             // WARN so an operator investigating disk pressure sees the
             // residue and the catch is not silent.
-            diagnostics?.warning(
-                "FilesystemCache: residual tempfile cleanup failed at $path; reason=${ex.message}",
-            )
+            logger.reportFilesystemWarning(sanitize) {
+                "FilesystemCache: residual tempfile cleanup failed at $path; reason=${ex.message}"
+            }
         }
     }
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp
 
+import io.confeature.kmp.internal.EvaluationRequest
 import io.confeature.kmp.internal.Evaluator
 import io.confeature.kmp.internal.OverrideEval
-import io.confeature.kmp.internal.ProviderValueType
 
 /**
  * Immutable read-side view returned by `ConfeatureClient.snapshot()`.
@@ -77,9 +77,8 @@ public class Snapshot(
         user: User? = null,
     ): TypedEvaluationDetails<Any?> {
         val effectiveUser = user ?: defaultUser
-        val result = resolveCachedDetails(
-            configRoot, flagOverrides, key, defaultValue, Evaluator.fromPublicUser(effectiveUser),
-        )
+        val request = EvaluationRequest(key, defaultValue, Evaluator.fromPublicUser(effectiveUser))
+        val result = resolveCachedDetails(configRoot, flagOverrides, request)
         return result.toDetails(key, effectiveUser, fetchTimeUnixMillis)
     }
 }
@@ -88,22 +87,21 @@ public class Snapshot(
 internal fun resolveCachedDetails(
     configRoot: Map<String, Any?>?,
     flagOverrides: FlagOverrides?,
-    key: String,
-    defaultValue: Any?,
-    user: Evaluator.UserView?,
-    providerType: ProviderValueType? = null,
+    request: EvaluationRequest,
 ): Evaluator.Result {
     val local = flagOverrides?.takeIf { it.behaviour == OverrideBehaviour.LOCAL_ONLY }
     if (local != null) {
         // Keep the full Config V2 root so salt, segments and variation IDs survive LocalOnly.
         val root = local.dataSource.getConfigRootSync()
         if (root == null) {
+            val key = request.key
+            val defaultValue = request.fallback
             val values = local.dataSource.getOverridesSync()
             if (values == null || !values.containsKey(key)) {
                 return Evaluator.Result(defaultValue, Evaluator.Error.KEY_NOT_FOUND)
             }
             val value = values[key] ?: return Evaluator.Result(defaultValue, Evaluator.Error.MALFORMED_VALUE)
-            val matches = providerType?.matchesLocalValue(value)
+            val matches = request.providerType?.matchesLocalValue(value)
                 ?: (defaultValue == null || value::class == defaultValue::class)
             return if (matches) {
                 Evaluator.Result(value, Evaluator.Error.NONE)
@@ -111,21 +109,9 @@ internal fun resolveCachedDetails(
                 Evaluator.Result(defaultValue, Evaluator.Error.TYPE_MISMATCH)
             }
         }
-        return evaluateCachedRoot(root, key, defaultValue, user, providerType)
+        return Evaluator.evaluateCached(root, request)
     }
-    return evaluateCachedRoot(configRoot, key, defaultValue, user, providerType)
-}
-
-private fun evaluateCachedRoot(
-    root: Map<String, Any?>?,
-    key: String,
-    defaultValue: Any?,
-    user: Evaluator.UserView?,
-    providerType: ProviderValueType?,
-): Evaluator.Result = if (providerType == null) {
-    Evaluator.evaluateWith(root, key, defaultValue, user)
-} else {
-    Evaluator.evaluateForProvider(root, key, defaultValue, user, providerType)
+    return Evaluator.evaluateCached(configRoot, request)
 }
 
 internal fun Evaluator.Result.toDetails(
