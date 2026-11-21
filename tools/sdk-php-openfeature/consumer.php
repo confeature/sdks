@@ -173,6 +173,9 @@ function verifyFlatOverrides(FixtureHttp $fixture, OpenFeatureAPI $api, Client $
                 'wrong' => new SettingValue(s: 'wrong-type'),
                 'empty' => new SettingValue(),
                 'ambiguous' => new SettingValue(b: true, s: 'second-slot'),
+                'positive-infinity' => new SettingValue(d: INF),
+                'negative-infinity' => new SettingValue(d: -INF),
+                'not-a-number' => new SettingValue(d: NAN),
             ];
         }
     };
@@ -189,6 +192,9 @@ function verifyFlatOverrides(FixtureHttp $fixture, OpenFeatureAPI $api, Client $
             $reads = $source->reads;
             expectError($code, false, $client->getBooleanDetails($key, false));
             same($reads + 1, $source->reads, "$key reads the override map once");
+        }
+        foreach (['positive-infinity', 'negative-infinity', 'not-a-number'] as $key) {
+            expectError('TYPE_MISMATCH', 0.0, $client->getFloatDetails($key, 0.0));
         }
         $source->available = false;
         expectError('PROVIDER_NOT_READY', false, $client->getBooleanDetails('present', false));
@@ -218,20 +224,22 @@ function verifyTransportDenials(FixtureHttp $fixture, OpenFeatureAPI $api, Clien
     }
     same(['origin', 'origin', 'origin'], $fixture->denials, 'fallback, wrong host and wrong port were stopped');
 
-    try {
-        $fixture->client()->get($origin . $fixture->configPath, ['proxy' => $fixture->canary]);
-        throw new LogicException('A proxy override reached the transport');
-    } catch (RuntimeException $error) {
-        same('Fixture transport blocked a request before I/O', $error->getMessage(), 'proxy rejected');
+    foreach ([['proxy' => $fixture->canary], ['curl' => []], ['stream_context' => []]] as $options) {
+        try {
+            $fixture->client()->get($origin . $fixture->configPath, $options);
+            throw new LogicException('A transport override reached I/O');
+        } catch (RuntimeException $error) {
+            same('Fixture transport blocked a request before I/O', $error->getMessage(), 'transport override rejected');
+        }
     }
-    same(['origin', 'origin', 'origin', 'proxy'], $fixture->denials, 'the proxy was stopped');
+    same(['origin', 'origin', 'origin', 'proxy', 'transport options', 'transport options'], $fixture->denials, 'all transport overrides were stopped');
 
     $sdk = makeNative($fixture, ['pollingMode' => PollingMode::manualPoll()]);
     try {
         $fixture->redirectNextConfig = true;
         same(false, $sdk->forceRefresh(), 'redirect did not produce usable flag data');
         same(1, $fixture->redirects, 'the synthetic off-origin 302 occurred');
-        same(4, count($fixture->denials), 'the HTTP stack did not attempt to follow the redirect');
+        same(6, count($fixture->denials), 'the HTTP stack did not attempt to follow the redirect');
         same($before, $fixture->seededRequests(), 'negative controls made no extra seeded request');
     } finally {
         $sdk->close();

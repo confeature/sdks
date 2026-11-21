@@ -15,6 +15,7 @@ use Confeature\OverrideDataSource;
 use Confeature\SettingValue;
 use Confeature\User;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
 
 final class ProviderEvaluationDetailsTest extends TestCase
@@ -98,6 +99,43 @@ final class ProviderEvaluationDetailsTest extends TestCase
         self::assertSame(EvaluationFailure::ParseError, $malformed->failure);
         self::assertSame('VALUE_NOT_BOOL', $malformed->details->getErrorMessage());
         self::assertSame('VALUE_NOT_BOOL', $client->getValueDetails('broken', false)->getErrorMessage());
+    }
+
+    public function testLegacyOverridePresenceFailurePreservesFallbackAndLogsFixedMessage(): void
+    {
+        $source = new class () implements OverrideDataSource {
+            private int $reads = 0;
+
+            public function getOverridesSync(): ?array
+            {
+                if (++$this->reads > 1) {
+                    throw new \RuntimeException('synthetic sensitive source detail');
+                }
+
+                return ['flag' => new SettingValue(b: true)];
+            }
+        };
+        $logger = new class () extends AbstractLogger {
+            public array $messages = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->messages[] = [$level, (string) $message, $context];
+            }
+        };
+        $client = ConfeatureClient::create(WorkspaceRoot::SAMPLE_SDK_KEY, [
+            'flagOverrides' => new FlagOverrides($source, OverrideBehaviour::LOCAL_ONLY),
+            'cache' => null,
+            'logger' => $logger,
+        ]);
+
+        $result = $client->getValueDetails('flag', false);
+        self::assertTrue($result->isDefaultValue());
+        self::assertFalse($result->getValue());
+        self::assertSame('KEY_NOT_FOUND', $result->getErrorMessage());
+        self::assertSame([
+            ['warning', 'ConfeatureClient: LocalOnly override presence check failed.', []],
+        ], $logger->messages);
     }
 
     private static function client(FlagOverrides $overrides, ?User $defaultUser = null): ConfeatureClient

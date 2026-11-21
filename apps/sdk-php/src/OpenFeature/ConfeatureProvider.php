@@ -88,8 +88,13 @@ final class ConfeatureProvider extends AbstractProvider
             return self::failure($default, $outcome->failure ?? EvaluationFailure::General);
         }
 
+        $value = $details->getValue();
+        if (\is_float($value) && !\is_finite($value)) {
+            return self::failure($default, EvaluationFailure::TypeMismatch);
+        }
+
         $resolution = new ResolutionDetails();
-        $resolution->setValue($details->getValue());
+        $resolution->setValue($value);
         $resolution->setVariant($details->getVariationId());
         $resolution->setReason(match (true) {
             $details->getMatchedPercentageOption() !== null => Reason::SPLIT,

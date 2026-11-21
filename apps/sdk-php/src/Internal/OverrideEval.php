@@ -167,6 +167,7 @@ final class OverrideEval
             $present = $map !== null && \array_key_exists($key, $map);
         } catch (\Throwable) {
             // The native details contract treats a failed presence recheck as a missing key.
+            $logger->warning('ConfeatureClient: LocalOnly override presence check failed.');
             $present = false;
         }
 

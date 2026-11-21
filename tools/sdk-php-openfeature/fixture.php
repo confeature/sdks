@@ -111,6 +111,9 @@ final class FixtureHttp
         if (($options['proxy'] ?? '') !== '') {
             $this->deny('proxy');
         }
+        if (array_key_exists('curl', $options) || array_key_exists('stream_context', $options)) {
+            $this->deny('transport options');
+        }
         $target = $uri->getPath() . ($uri->getQuery() === '' ? '' : '?' . $uri->getQuery());
         if ($request->getMethod() !== 'GET'
             || !in_array($target, [$this->configPath, '/admin/requests?sdkKey=' . rawurlencode($this->key)], true)) {

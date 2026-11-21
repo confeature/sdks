@@ -31,6 +31,7 @@
 import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
 import { BROWSER_PROVIDER, runBrowserProviderSuites } from "./browser-provider-suites.js";
 import { runNodeSuites } from "./node-suites.js";
+import { phpConsumerToolchain, phpToolchain } from "./php-toolchains.js";
 
 // SC-001 + Principle VII line 168 — "≤ 5 minutes wall-clock"
 const BUDGET_MS = 300_000;
@@ -275,55 +276,6 @@ function rubyToolchain(source: Directory): Container {
     .withMountedCache("/cache/bundle", dag.cacheVolume("bundle-cache"))
     .withMountedDirectory("/work", source)
     .withWorkdir("/work/apps/sdk-ruby");
-}
-
-const PHP_COMPOSER_IMAGE = "composer:2.9.8";
-
-function phpToolchain(source: Directory): Container {
-  // composer binary copied from the official image (no curl-install needed).
-  const composerBin = dag.container().from(PHP_COMPOSER_IMAGE).file("/usr/bin/composer");
-  return (
-    dag
-      .container()
-      .from("php:8.3.35-cli-bookworm")
-      .withEnvVariable("CI", "true")
-      .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
-      .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
-      // git + unzip for composer; libonig/libxml/libzip for the
-      // mbstring/dom/xml/zip extensions phpunit 10 requires; pcov (built via
-      // $PHPIZE_DEPS) is the code-coverage driver — without it phpunit emits a
-      // "No code coverage driver available" warning and exits 1 even though the
-      // suite passes.
-      .withExec([
-        "bash",
-        "-eu",
-        "-c",
-        'apt-get update >/dev/null && apt-get install -y --no-install-recommends git unzip libonig-dev libxml2-dev libzip-dev $PHPIZE_DEPS >/dev/null && docker-php-ext-install -j"$(nproc)" mbstring dom xml zip >/dev/null && pecl install pcov >/dev/null && docker-php-ext-enable pcov && rm -rf /var/lib/apt/lists/*',
-      ])
-      .withFile("/usr/local/bin/composer", composerBin)
-      .withMountedDirectory("/work", source)
-      .withWorkdir("/work/apps/sdk-php")
-  );
-}
-
-function phpConsumerToolchain(source: Directory, image: string): Container {
-  return dag
-    .container()
-    .from(image)
-    .withEnvVariable("CI", "true")
-    .withEnvVariable("COMPOSER_CACHE_DIR", "/cache/composer")
-    .withMountedCache("/cache/composer", dag.cacheVolume("composer-cache"))
-    .withExec([
-      "sh",
-      "-ec",
-      "apt-get update -qq && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*",
-    ])
-    .withFile(
-      "/usr/local/bin/composer",
-      dag.container().from(PHP_COMPOSER_IMAGE).file("/usr/bin/composer"),
-    )
-    .withMountedDirectory("/work", source)
-    .withWorkdir("/work");
 }
 
 function goToolchain(source: Directory): Container {
