@@ -131,19 +131,20 @@ public sealed class ConfeatureSnapshot
     /// <param name="defaultValue">Fallback returned on any failure path.</param>
     /// <param name="user">Targeting context, or null to use the snapshot's default user.</param>
     public EvaluationDetails<T> GetValueDetails<T>(string key, T defaultValue, User? user = null) =>
-        GetValueDetailsCore(key, defaultValue, user ?? _defaultUser, null).Details;
+        GetValueDetailsCore(key, defaultValue, user ?? _defaultUser, null, requireExactType: false).Details;
 
     internal (EvaluationDetails<T> Details, EvaluationError Error) GetProviderValueDetails<T>(
         string key,
         T defaultValue,
         IEvalUser? user) =>
-        GetValueDetailsCore(key, defaultValue, null, user);
+        GetValueDetailsCore(key, defaultValue, null, user, requireExactType: true);
 
     private (EvaluationDetails<T> Details, EvaluationError Error) GetValueDetailsCore<T>(
         string key,
         T defaultValue,
         User? nativeUser,
-        IEvalUser? providerUser)
+        IEvalUser? providerUser,
+        bool requireExactType)
     {
         if (key is null)
         {
@@ -155,7 +156,7 @@ public sealed class ConfeatureSnapshot
         {
             if (_flagOverrides.DataSource is not ConfigOverrideDataSource source)
             {
-                return GetFlatOverrideDetails(key, defaultValue, nativeUser, _flagOverrides.DataSource);
+                return GetFlatOverrideDetails(key, defaultValue, nativeUser, _flagOverrides.DataSource, requireExactType);
             }
 
             // Use the parsed full config so local rules retain their variation IDs.
@@ -164,6 +165,12 @@ public sealed class ConfeatureSnapshot
 
         var attributes = nativeUser is null ? providerUser : new UserAttributes(nativeUser);
         var result = Evaluator.EvaluateCore(settings, key, defaultValue, attributes);
+        // The legacy evaluator also accepts a null fallback for a type-erased read.
+        if (requireExactType && result.Error == EvaluationError.None && result.Value is not T)
+        {
+            return BuildDetails(key, defaultValue, nativeUser, EvaluationError.TypeMismatch);
+        }
+
         var value = result.Error == EvaluationError.None ? CoerceValue(result.Value, defaultValue) : defaultValue;
         return BuildDetails(key, value, nativeUser, result.Error, result);
     }
@@ -172,7 +179,8 @@ public sealed class ConfeatureSnapshot
         string key,
         T defaultValue,
         User? user,
-        IOverrideDataSource source)
+        IOverrideDataSource source,
+        bool requireExactType)
     {
         var map = source.GetOverridesSync();
         if (map is null || !map.TryGetValue(key, out var setting) || setting is null)
@@ -186,7 +194,7 @@ public sealed class ConfeatureSnapshot
             return BuildDetails(key, defaultValue, user, EvaluationError.MalformedValue);
         }
 
-        if (defaultValue is not null && rawValue.GetType() != typeof(T))
+        if ((requireExactType || defaultValue is not null) && rawValue.GetType() != typeof(T))
         {
             return BuildDetails(key, defaultValue, user, EvaluationError.TypeMismatch);
         }

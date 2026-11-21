@@ -48,6 +48,41 @@ public class ProviderEvaluationDetailsTests
         snapshot.GetProviderValueDetails("missing", false, null).Error.Should().Be(EvaluationError.KeyNotFound);
     }
 
+    [Fact]
+    public void Provider_checks_the_requested_type_with_a_null_fallback_on_all_data_sources()
+    {
+        using var config = JsonDocument.Parse("""
+            {"f":{"boolean":{"t":0,"v":{"b":true},"i":"boolean"},"text":{"t":1,"v":{"s":"resolved"},"i":"text"}}}
+            """);
+        var parsed = new ConfigOverrideDataSource(config.RootElement);
+        var flat = new MapOverrideDataSource(new Dictionary<string, object>
+        {
+            ["boolean"] = true,
+            ["text"] = "resolved",
+        });
+
+        ConfeatureSnapshot[] snapshots =
+        [
+            new(parsed.Settings, null, null),
+            new(null, new FlagOverrides(parsed, OverrideBehaviour.LocalOnly), null),
+            new(null, new FlagOverrides(flat, OverrideBehaviour.LocalOnly), null),
+        ];
+        foreach (var snapshot in snapshots)
+        {
+            var mismatched = snapshot.GetProviderValueDetails<string?>("boolean", null, null);
+            mismatched.Error.Should().Be(EvaluationError.TypeMismatch);
+            mismatched.Details.Value.Should().BeNull();
+            mismatched.Details.IsDefaultValue.Should().BeTrue();
+            mismatched.Details.VariationId.Should().BeNull();
+
+            var resolved = snapshot.GetProviderValueDetails<string?>("text", null, null);
+            resolved.Error.Should().Be(EvaluationError.None);
+            resolved.Details.Value.Should().Be("resolved");
+
+            snapshot.GetValueDetails<string?>("boolean", null).IsDefaultValue.Should().BeFalse();
+        }
+    }
+
     private sealed class AnonymousAttributes : IEvalUser
     {
         public string Identifier => string.Empty;
