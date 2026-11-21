@@ -12,9 +12,10 @@ public enum class ProviderValueType(internal val settingType: Int) {
         when (this) {
             BOOLEAN -> value is Boolean
             STRING -> value is String
-            INTEGER -> value is Int
-            // On JS, an untyped integral number is an Int. A full config carries the wire type.
-            DOUBLE -> value !is Int && value is Double && value.isFinite()
+            // Kotlin/JS lowers both is-checks to typeof number. KClass still distinguishes
+            // signed Int values from Double. A full config carries its wire type independently.
+            INTEGER -> value::class == Int::class
+            DOUBLE -> value::class == Double::class && (value as Double).isFinite()
         }
 }
 

@@ -30,6 +30,8 @@ public actual class FilesystemCache actual constructor(
         fallback.write(cacheKey, value)
     }
 
+    internal actual suspend fun writeQuietly(cacheKey: String, value: String) = write(cacheKey, value)
+
     public actual companion object {
         /** JS default — a memory-only sentinel; the directory is informational only. */
         public actual fun defaultCacheDir(): String = ":memory:"

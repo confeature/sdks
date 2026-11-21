@@ -165,9 +165,13 @@ public object Evaluator {
         )
         val ctx = EvalContext(key, located.setting, scope)
 
-        val sr = resolveFailClosed(ctx, defaultValue) ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
+        val sr = resolveFailClosed(ctx, defaultValue, providerType != null)
+            ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
         val raw = selectSettingValue(sr.value, located.type)
         val typed = coerceTyped(raw, located.type) ?: return Result(defaultValue, Error.MALFORMED_VALUE)
+        if (providerType == ProviderValueType.DOUBLE && !(typed as Double).isFinite()) {
+            return Result(defaultValue, Error.MALFORMED_VALUE)
+        }
 
         // Footer + emit. The INFO 5000 trace is emitted only when the resolved value is clean.
         if (logBuilder != null) {
@@ -175,7 +179,11 @@ public object Evaluator {
             log.info(EvalLog.EVENT_ID, logBuilder.toString())
         }
 
-        val variationId = sr.variationId ?: readString(located.setting["i"])
+        val variationId = if (providerType != null && (sr.matchedRule || sr.matchedOption)) {
+            sr.variationId
+        } else {
+            sr.variationId ?: readString(located.setting["i"])
+        }
         return Result(
             typed,
             Error.NONE,
@@ -258,7 +266,11 @@ public object Evaluator {
      * take the same log line. The method name is `getValue`: [evaluate] is what the client's
      * `getValue` calls.
      */
-    private fun resolveFailClosed(ctx: EvalContext, defaultValue: Any?): SettingResult? =
+    private fun resolveFailClosed(
+        ctx: EvalContext,
+        defaultValue: Any?,
+        providerEvaluation: Boolean,
+    ): SettingResult? =
         try {
             SettingEvaluator.evaluateSetting(ctx)
         } catch (e: CircularDependencyException) {
@@ -267,6 +279,7 @@ public object Evaluator {
             ctx.log.circularDependency(ctx.key, e.cycle)
             null
         } catch (e: RuntimeException) {
+            if (providerEvaluation && e !is MalformedConfigException) throw e
             ctx.log.settingEvaluationFailed(GET_VALUE_METHOD, ctx.key, defaultValue, e)
             null
         }

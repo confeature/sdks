@@ -27,6 +27,8 @@ public expect class FilesystemCache(
 
     override suspend fun write(cacheKey: String, value: String)
 
+    internal suspend fun writeQuietly(cacheKey: String, value: String)
+
     public companion object {
         /** Default cache directory inside the per-platform user-cache root. */
         public fun defaultCacheDir(): String

@@ -64,8 +64,14 @@ public actual class FilesystemCache actual constructor(
         }
     }
 
+    actual override suspend fun write(cacheKey: String, value: String) =
+        write(cacheKey, value, logger)
+
+    internal actual suspend fun writeQuietly(cacheKey: String, value: String) =
+        write(cacheKey, value, null)
+
     @OptIn(kotlinx.cinterop.BetaInteropApi::class)
-    actual override suspend fun write(cacheKey: String, value: String) {
+    private suspend fun write(cacheKey: String, value: String, diagnostics: Logger?) {
         fallback.write(cacheKey, value)
         if (memoryOnly) return
 
@@ -83,12 +89,12 @@ public actual class FilesystemCache actual constructor(
                     error = null,
                 )
                 if (!ok) {
-                    engageFallback(path, IllegalStateException("mkdir failed at $parent"))
+                    engageFallback(path, IllegalStateException("mkdir failed at $parent"), diagnostics)
                     return
                 }
             }
         } catch (ex: Exception) {
-            engageFallback(path, ex)
+            engageFallback(path, ex, diagnostics)
             return
         }
 
@@ -106,17 +112,17 @@ public actual class FilesystemCache actual constructor(
                 error = null,
             )
             if (!ok) {
-                engageFallback(path, IllegalStateException("NSString.writeToURL returned false"))
+                engageFallback(path, IllegalStateException("NSString.writeToURL returned false"), diagnostics)
             }
         } catch (ex: Exception) {
-            engageFallback(path, ex)
+            engageFallback(path, ex, diagnostics)
         }
     }
 
-    private fun engageFallback(path: String, ex: Throwable) {
+    private fun engageFallback(path: String, ex: Throwable, diagnostics: Logger? = logger) {
         if (!memoryOnly) {
             memoryOnly = true
-            logger.warning(
+            diagnostics?.warning(
                 "FilesystemCache: filesystem unwritable at $path; falling back to in-memory " +
                     "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}",
             )

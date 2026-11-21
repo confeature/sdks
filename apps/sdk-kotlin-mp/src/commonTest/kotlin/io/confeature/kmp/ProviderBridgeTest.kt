@@ -104,9 +104,44 @@ class ProviderBridgeTest {
             val valid = client.getValueDetailsForProvider("fraction", 0.0, null, ProviderValueType.DOUBLE)
             assertEquals(Status.RESOLVED, valid.status)
             assertEquals(1.25, valid.value)
-            assertEquals(2, details.size)
-            assertEquals(List(2) { "ConfeatureHooks: onFlagEvaluated listener raised." }, logs)
+            val wrongInt = client.getValueDetailsForProvider("fraction", 0, null, ProviderValueType.INTEGER)
+            assertEquals(Status.TYPE_MISMATCH, wrongInt.status)
+            assertEquals(3, details.size)
+            assertEquals(List(3) { "ConfeatureHooks: onFlagEvaluated listener raised." }, logs)
             assertTrue(loggedFailures.all { it == null })
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun emitsOnlyEstablishedMetadataAndMapsOpaqueFailures() = runTest {
+        val client = clientWithOverrides(FlagOverrides.localConfig(config()))
+        val events = mutableListOf<TypedEvaluationDetails<*>>()
+        client.getHooks().addOnFlagEvaluated { events.add(it) }
+        try {
+            val noVariant = client.getValueDetailsForProvider(
+                "anonymous-variant", false, Evaluator.fromPublicUser(User("targeted")), ProviderValueType.BOOLEAN,
+            )
+            assertEquals(Status.RESOLVED, noVariant.status)
+            assertEquals(Match.TARGETING_RULE, noVariant.match)
+            assertNull(noVariant.variationId)
+            assertEquals("default-variant", client.getValueDetails("anonymous-variant", false).variationId)
+
+            val invalid = client.getValueDetailsForProvider("not-finite", 3.5, null, ProviderValueType.DOUBLE)
+            assertEquals(Status.PARSE_ERROR, invalid.status)
+            assertEquals(3.5, invalid.value)
+            assertTrue(events.last().isDefaultValue)
+
+            val failingContext = object : Evaluator.UserView {
+                override fun identifier(): String = "targeted"
+                override fun attribute(name: String): Any? = error("fixture raw context sentinel")
+            }
+            val failed = client.getValueDetailsForProvider("flag", false, failingContext, ProviderValueType.BOOLEAN)
+            assertEquals(Status.GENERAL, failed.status)
+            assertEquals(false, failed.value)
+            assertEquals("EVALUATION_ERROR", events.last().error)
+            assertNull(events.last().user)
         } finally {
             client.close()
         }
@@ -123,23 +158,27 @@ class ProviderBridgeTest {
 
     private fun config(): Map<String, Any?> = mapOf(
         "f" to mapOf(
-            "flag" to mapOf(
-                "t" to 0,
-                "v" to mapOf("b" to false),
-                "i" to "default-variant",
-                "r" to listOf(
-                    mapOf(
-                        "c" to listOf(mapOf("u" to mapOf("a" to "Identifier", "c" to 0, "l" to listOf("targeted")))),
-                        "s" to mapOf("v" to mapOf("b" to true), "i" to "targeted-variant"),
-                    ),
-                ),
-            ),
+            "flag" to targetedFlag("targeted-variant"),
+            "anonymous-variant" to targetedFlag(null),
             "decimal" to mapOf("t" to 3, "v" to mapOf("d" to 1.0)),
+            "not-finite" to mapOf("t" to 3, "v" to mapOf("d" to Double.POSITIVE_INFINITY)),
             "integer" to mapOf("t" to 2, "v" to mapOf("i" to 1)),
             "rollout" to mapOf(
                 "t" to 0,
                 "v" to mapOf("b" to false),
                 "p" to listOf(mapOf("p" to 100, "v" to mapOf("b" to true), "i" to "split-variant")),
+            ),
+        ),
+    )
+
+    private fun targetedFlag(variant: String?): Map<String, Any?> = mapOf(
+        "t" to 0,
+        "v" to mapOf("b" to false),
+        "i" to "default-variant",
+        "r" to listOf(
+            mapOf(
+                "c" to listOf(mapOf("u" to mapOf("a" to "Identifier", "c" to 0, "l" to listOf("targeted")))),
+                "s" to mapOf("v" to mapOf("b" to true), "i" to variant),
             ),
         ),
     )

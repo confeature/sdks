@@ -47,7 +47,13 @@ public actual class FilesystemCache actual constructor(
         }
     }
 
-    actual override suspend fun write(cacheKey: String, value: String) {
+    actual override suspend fun write(cacheKey: String, value: String) =
+        write(cacheKey, value, logger)
+
+    internal actual suspend fun writeQuietly(cacheKey: String, value: String) =
+        write(cacheKey, value, null)
+
+    private suspend fun write(cacheKey: String, value: String, diagnostics: Logger?) {
         fallback.write(cacheKey, value)
         if (memoryOnly.get()) return
 
@@ -69,25 +75,25 @@ public actual class FilesystemCache actual constructor(
                 Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING)
             }
         } catch (ex: IOException) {
-            tryDeleteQuietly(tmp)
-            engageFallback(path, ex)
+            tryDeleteQuietly(tmp, diagnostics)
+            engageFallback(path, ex, diagnostics)
         }
     }
 
-    private fun engageFallback(path: Path, ex: IOException) {
+    private fun engageFallback(path: Path, ex: IOException, diagnostics: Logger? = logger) {
         if (memoryOnly.compareAndSet(false, true)) {
-            logger.warning(
+            diagnostics?.warning(
                 "FilesystemCache: filesystem unwritable at $path; falling back to in-memory " +
                     "cache. sdkKey=${SdkKey.redact(sdkKey)} reason=${ex.message}",
             )
         }
     }
 
-    private fun tryDeleteQuietly(path: Path) {
+    private fun tryDeleteQuietly(path: Path, diagnostics: Logger?) {
         try {
             Files.deleteIfExists(path)
         } catch (ex: IOException) {
-            logger.warning(
+            diagnostics?.warning(
                 "FilesystemCache: residual tempfile cleanup failed at $path; reason=${ex.message}",
             )
         }

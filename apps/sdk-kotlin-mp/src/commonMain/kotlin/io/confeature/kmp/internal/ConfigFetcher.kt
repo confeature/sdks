@@ -161,7 +161,11 @@ public class ConfigFetcher(
      * runtime's fatal errors ([isFatalError]: `OutOfMemoryError`, `StackOverflowError`, … on the
      * JVM), which propagate unchanged.
      */
-    public suspend fun fetch(previousEtag: String?): FetchResult {
+    public suspend fun fetch(previousEtag: String?): FetchResult = fetch(previousEtag, logger)
+
+    internal suspend fun fetchQuietly(previousEtag: String?): FetchResult = fetch(previousEtag, null)
+
+    private suspend fun fetch(previousEtag: String?, diagnostics: Logger?): FetchResult {
         val target = url
         if (target == null) {
             val reason = refusal ?: INVALID_REQUEST
@@ -170,25 +174,25 @@ public class ConfigFetcher(
             } else {
                 "the base URL is not an absolute http(s) URL with a host"
             }
-            logger.error(
+            diagnostics?.error(
                 "ConfigFetcher: $reason — $why; not fetching. sdkKey=" + SdkKey.redact(sdkKey),
             )
             return FetchResult.failed(reason)
         }
-        return fetchFrom(target, previousEtag)
+        return fetchFrom(target, previousEtag, diagnostics)
     }
 
     // Throwable, not Exception: Ktor's JS engine surfaces a failed `fetch` as a `kotlin.Error`.
     // [failFrom] rethrows the VM's fatal errors (OutOfMemoryError, …) — those are not fetch failures.
-    private suspend fun fetchFrom(target: String, previousEtag: String?): FetchResult = try {
-        request(target, previousEtag)
+    private suspend fun fetchFrom(target: String, previousEtag: String?, diagnostics: Logger?): FetchResult = try {
+        request(target, previousEtag, diagnostics)
     } catch (ex: Throwable) {
         // Ktor wraps every network/IO error in a thrown exception whose message may quote the
         // request URL — and the URL carries the SDK key. Only the exception's type picks a code.
-        failFrom(ex, NETWORK_ERROR)
+        failFrom(ex, NETWORK_ERROR, diagnostics)
     }
 
-    private suspend fun request(target: String, previousEtag: String?): FetchResult {
+    private suspend fun request(target: String, previousEtag: String?, diagnostics: Logger?): FetchResult {
         val resp = client.get(target) {
             header(HttpHeaders.UserAgent, userAgent)
             header(HttpHeaders.Accept, "application/json")
@@ -201,7 +205,7 @@ public class ConfigFetcher(
                     // on it, so every later fetch failed; CIO sends it mangled. Drop it and fetch
                     // whole — the next 200 replaces it, as sdk-java and sdk-android do (#803,
                     // #840). The value is not logged.
-                    logger.warning(
+                    diagnostics?.warning(
                         "ConfigFetcher: dropped a stored ETag that is not a valid header value; " +
                             "fetching without If-None-Match. sdkKey=" + SdkKey.redact(sdkKey),
                     )
@@ -217,7 +221,7 @@ public class ConfigFetcher(
                 val raw = try {
                     resp.bodyAsText()
                 } catch (ex: Throwable) {
-                    return failFrom(ex, BODY_READ_FAILED)
+                    return failFrom(ex, BODY_READ_FAILED, diagnostics)
                 }
                 try {
                     val parsed = JSON.parseToJsonElement(raw)
@@ -233,7 +237,7 @@ public class ConfigFetcher(
                     if (parsed is JsonObject && parsed.containsKey("f")) {
                         FetchResult.fetched(parsed, raw, etag)
                     } else {
-                        logger.error(
+                        diagnostics?.error(
                             "ConfigFetcher: 200 response not a valid config envelope. " +
                                 "sdkKey=" + SdkKey.redact(sdkKey),
                         )
@@ -241,12 +245,12 @@ public class ConfigFetcher(
                     }
                 } catch (ex: Exception) {
                     // The parser's message is never passed on — only the fixed code (FR-002).
-                    fail(classifyFetchError(ex, MALFORMED_JSON))
+                    fail(classifyFetchError(ex, MALFORMED_JSON), diagnostics)
                 }
             }
             else -> {
                 val reason = "HTTP ${resp.status.value}"
-                logger.error(
+                diagnostics?.error(
                     "ConfigFetcher: fetch failed. sdkKey=" +
                         "${SdkKey.redact(sdkKey)} reason=$reason",
                 )
@@ -266,15 +270,15 @@ public class ConfigFetcher(
      *   [CancellationException] raised while this coroutine is still active (Ktor's own
      *   request-timeout cancellation) is a transport failure like any other.
      */
-    private suspend fun failFrom(error: Throwable, fallback: String): FetchResult {
+    private suspend fun failFrom(error: Throwable, fallback: String, diagnostics: Logger?): FetchResult {
         if (isFatalError(error)) throw error
         if (error is CancellationException) currentCoroutineContext().ensureActive()
-        return fail(classifyFetchError(error, fallback))
+        return fail(classifyFetchError(error, fallback), diagnostics)
     }
 
     /** Logs a fixed reason code (never exception text) and returns it as a failed result. */
-    private fun fail(reason: String): FetchResult {
-        logger.error("ConfigFetcher: fetch raised. sdkKey=${SdkKey.redact(sdkKey)} reason=$reason")
+    private fun fail(reason: String, diagnostics: Logger?): FetchResult {
+        diagnostics?.error("ConfigFetcher: fetch raised. sdkKey=${SdkKey.redact(sdkKey)} reason=$reason")
         return FetchResult.failed(reason)
     }
 

@@ -75,14 +75,14 @@ public class ConfeatureClient private constructor(b: Builder) {
     private val hooks = ConfeatureHooks(logger)
     private var clientReadyFired = false
     private val closeMutex = Mutex()
-    private val stateMutex = Mutex()
+    private val refreshMutex = Mutex()
     private val providerRefreshMutex = Mutex()
     private val scope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
 
     /** The AutoPoll coroutine, exposed internally for tests to join after [close]. */
     internal val autopollJob: Job?
 
-    // The ETag and config replacement are coordinated under stateMutex.
+    // Transport, configuration replacement and cache writes are coordinated under refreshMutex.
     private var etag: String = ""
 
     init {
@@ -416,7 +416,7 @@ public class ConfeatureClient private constructor(b: Builder) {
     }
 
     private suspend fun maybeLazyFetch() {
-        if (shouldLazyFetch(state.value)) fetchAndApply()
+        if (shouldLazyFetch(state.value)) fetchAndApply(lazyOnly = true)
     }
 
     private fun scheduleLazyRefresh(cached: CachedState) {
@@ -426,7 +426,7 @@ public class ConfeatureClient private constructor(b: Builder) {
         if (closedFlag) clientScope.cancel()
         clientScope.launch {
             try {
-                if (shouldLazyFetch(state.value)) fetchAndApply(providerRefresh = true)
+                fetchAndApply(lazyOnly = true, providerRefresh = true)
             } catch (failure: Throwable) {
                 if (failure is CancellationException || isFatalError(failure)) throw failure
                 logger.reportProviderFailure("ConfeatureClient: provider refresh failed.")
@@ -434,52 +434,69 @@ public class ConfeatureClient private constructor(b: Builder) {
         }.invokeOnCompletion { providerRefreshMutex.unlock() }
     }
 
-    private suspend fun fetchAndApply(providerRefresh: Boolean = false): Boolean {
-        if (offlineFlag) return false
-        val previousEtag = stateMutex.withLock { etag }
-        val result = fetcher.fetch(previousEtag)
-        return when (result.status) {
-            ConfigFetcher.Status.FETCHED -> {
-                val parsedSettings = extractSettings(result.body)
-                val parsedRoot = decodeConfigRoot(result.body)
-                val nowMillis = currentEpochMillis()
-                val nowSeconds = nowMillis / 1000L
-                stateMutex.withLock {
-                    etag = result.etag
-                    state.update {
-                        it.copy(settings = parsedSettings, configRoot = parsedRoot, fetchTimeMillis = nowMillis)
-                    }
-                }
-                persistCache(result.rawBody, result.etag, nowSeconds, providerRefresh)
-                // Fire configChanged, then clientReady on the first successful fetch.
-                hooks.invokeOnConfigChanged(
-                    parsedSettings?.let { decodeSettingsMap(it) } ?: emptyMap(),
-                    sanitizeFailure = providerRefresh,
-                )
-                fireClientReadyOnce(providerRefresh)
-                true
-            }
-            ConfigFetcher.Status.NOT_MODIFIED -> {
-                val nowMillis = currentEpochMillis()
-                stateMutex.withLock {
-                    if (result.etag.isNotEmpty()) etag = result.etag
-                    state.update { it.copy(fetchTimeMillis = nowMillis) }
-                }
-                fireClientReadyOnce(providerRefresh)
-                true
-            }
+    private class RefreshOutcome(
+        val status: ConfigFetcher.Status,
+        val settings: Map<String, JsonElement>?,
+        val becameReady: Boolean,
+    )
+
+    private suspend fun fetchAndApply(lazyOnly: Boolean = false, providerRefresh: Boolean = false): Boolean {
+        val outcome = refreshMutex.withLock {
+            refreshLocked(lazyOnly, providerRefresh)
+        } ?: return false
+        if (closedFlag) return false
+
+        // Application hooks can re-enter the client. Never invoke them under the refresh mutex.
+        when (outcome.status) {
+            ConfigFetcher.Status.FETCHED -> hooks.invokeOnConfigChanged(
+                outcome.settings?.let { decodeSettingsMap(it) } ?: emptyMap(),
+                sanitizeFailure = providerRefresh,
+            )
+            ConfigFetcher.Status.NOT_MODIFIED -> Unit
             ConfigFetcher.Status.FAILED -> {
-                // Hook bus (spec 105 / #268) — fire clientError on fetch failure.
+                if (providerRefresh) {
+                    logger.reportProviderFailure("ConfeatureClient: provider config fetch failed.")
+                }
                 hooks.invokeOnError("Config fetch failed.", sanitizeFailure = providerRefresh)
-                false
+                return false
             }
         }
+        if (outcome.becameReady) hooks.invokeOnClientReady(sanitizeFailure = providerRefresh)
+        return true
     }
 
-    private fun fireClientReadyOnce(sanitizeFailure: Boolean) {
-        if (!clientReadyFired) {
-            clientReadyFired = true
-            hooks.invokeOnClientReady(sanitizeFailure)
+    private suspend fun refreshLocked(lazyOnly: Boolean, providerRefresh: Boolean): RefreshOutcome? {
+        val cached = state.value
+        if (cached.closed || cached.offline || (lazyOnly && !shouldLazyFetch(cached))) return null
+
+        val result = if (providerRefresh) fetcher.fetchQuietly(etag) else fetcher.fetch(etag)
+        if (closedFlag) return null
+        if (result.status == ConfigFetcher.Status.FAILED) return RefreshOutcome(result.status, null, false)
+
+        val fetched = result.status == ConfigFetcher.Status.FETCHED
+        val nowMillis = currentEpochMillis()
+        val settings = if (fetched) extractSettings(result.body) else cached.settings
+        val root = if (fetched) decodeConfigRoot(result.body) else cached.configRoot
+        if (!publishRefresh(settings, root, nowMillis, providerRefresh)) return null
+        if (fetched || result.etag.isNotEmpty()) etag = result.etag
+        if (fetched) persistCache(result.rawBody, result.etag, nowMillis / 1000L, providerRefresh)
+
+        val becameReady = !clientReadyFired
+        clientReadyFired = true
+        return RefreshOutcome(result.status, settings, becameReady)
+    }
+
+    private fun publishRefresh(
+        settings: Map<String, JsonElement>?,
+        root: Map<String, Any?>?,
+        fetchTimeMillis: Long,
+        providerRefresh: Boolean,
+    ): Boolean {
+        while (true) {
+            val current = state.value
+            if (current.closed || (providerRefresh && current.offline)) return false
+            val next = current.copy(settings = settings, configRoot = root, fetchTimeMillis = fetchTimeMillis)
+            if (state.compareAndSet(current, next)) return true
         }
     }
 
@@ -514,7 +531,11 @@ public class ConfeatureClient private constructor(b: Builder) {
                     "fetched_at" to kotlinx.serialization.json.JsonPrimitive(nowSeconds),
                 ),
             )
-            cache.write(cacheKey, envelope.toString())
+            if (providerRefresh && cache is FilesystemCache) {
+                cache.writeQuietly(cacheKey, envelope.toString())
+            } else {
+                cache.write(cacheKey, envelope.toString())
+            }
         } catch (ex: Exception) {
             if (providerRefresh) {
                 if (ex is CancellationException) throw ex
