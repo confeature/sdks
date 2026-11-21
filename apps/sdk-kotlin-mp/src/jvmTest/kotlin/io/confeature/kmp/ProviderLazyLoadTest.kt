@@ -269,7 +269,11 @@ class ProviderLazyLoadTest {
                     throw AssertionError("pending provider cache sentinel")
                 }
             }
-            val client = fixture.client(logger = logger, customCache = cache, polling = PollingMode.lazyLoad(25.milliseconds))
+            val client = fixture.client(
+                logger = logger,
+                customCache = cache,
+                polling = PollingMode.lazyLoad(25.milliseconds),
+            )
             client.getHooks().addOnConfigChanged { providerChanged.complete(Unit) }
             try {
                 fixture.firstRelease.countDown()
