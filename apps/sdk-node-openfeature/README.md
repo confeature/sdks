@@ -3,7 +3,8 @@
 # Confeature OpenFeature provider for Node.js
 
 Use the Confeature Node.js SDK through OpenFeature in an ES module application
-on Node.js 20 or later.
+on Node.js 22 or later. The published Node.js SDK depends on
+`@confeature/sdk-shared`, which requires Node.js 22 or later.
 
 ```sh
 npm install @confeature/openfeature-node @confeature/sdk-node @openfeature/server-sdk

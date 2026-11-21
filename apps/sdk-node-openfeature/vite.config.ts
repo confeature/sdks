@@ -6,7 +6,7 @@ import { PUBLISHED_COMMENTS } from "../../tools/sdk-pack/comments.mjs";
 
 export default defineConfig({
   pack: {
-    target: "node20",
+    target: "node22",
     deps: {
       neverBundle: ["@confeature/sdk-node", "@openfeature/server-sdk"],
     },

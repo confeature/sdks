@@ -54,7 +54,7 @@
     "@openfeature/server-sdk": "^1.23.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "confeature": {
     "owner": "sdk-node"
