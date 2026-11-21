@@ -25,6 +25,8 @@ import java.util.Map;
  */
 public final class OverrideEval {
 
+  private static final Object MISSING_OVERRIDE = new Object();
+
   private OverrideEval() {
     // Utility class.
   }
@@ -120,6 +122,31 @@ public final class OverrideEval {
 
     // Branch 7: happy path — typed override value.
     return new EvalResult(true, candidate);
+  }
+
+  /**
+   * Resolves a flat LocalOnly override from one source read. A missing map, missing key, and
+   * explicit null value have distinct meanings for the provider.
+   */
+  public static Evaluator.Result evaluateFlatProviderDetails(
+      FlagOverrides flagOverrides, String key, Object defaultValue) {
+    final Map<String, Object> overrides = flagOverrides.getDataSource().getOverridesSync();
+    if (overrides == null) {
+      return new Evaluator.Result(defaultValue, Evaluator.Error.NO_CONFIG);
+    }
+    final Object candidate = overrides.getOrDefault(key, MISSING_OVERRIDE);
+    if (candidate == MISSING_OVERRIDE) {
+      return new Evaluator.Result(defaultValue, Evaluator.Error.KEY_NOT_FOUND);
+    }
+    if (candidate == null) {
+      return new Evaluator.Result(defaultValue, Evaluator.Error.MALFORMED_VALUE);
+    }
+    // OpenFeature's long accessor accepts the SDK's native Config V2 integer.
+    final boolean widensInteger = defaultValue instanceof Long && candidate instanceof Integer;
+    if (defaultValue != null && !widensInteger && candidate.getClass() != defaultValue.getClass()) {
+      return new Evaluator.Result(defaultValue, Evaluator.Error.TYPE_MISMATCH);
+    }
+    return new Evaluator.Result(candidate, Evaluator.Error.NONE);
   }
 
   /**

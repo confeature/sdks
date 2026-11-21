@@ -3,6 +3,7 @@ package io.confeature.client;
 
 import io.confeature.client.internal.Evaluator;
 import io.confeature.client.internal.OverrideEval;
+import io.confeature.client.internal.ProviderResult;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
@@ -155,100 +156,64 @@ public final class Snapshot {
    */
   public EvaluationDetails<Object> getValueDetails(String key, Object defaultValue, User user) {
     final User effectiveUser = user == null ? defaultUser : user;
-    final boolean isLocalOnly =
-        flagOverrides != null && flagOverrides.getBehaviour() == OverrideBehaviour.LOCAL_ONLY;
+    final Evaluator.Result result = evaluateConfigDetails(key, defaultValue, effectiveUser);
+    return result == null
+        ? nativeFlatOverrideDetails(key, defaultValue, effectiveUser)
+        : detailsFromResult(key, effectiveUser, result);
+  }
 
-    // Full-config override path (#395 / spec 152): a rule-bearing
-    // ConfigOverrideDataSource resolves through the real evaluator, so the
-    // details envelope carries the matched option's variationId — the seam the
-    // full-config corpus surfaced as null. Dispatch on the source TYPE (mirrors
-    // the value path's OverrideEval.evaluate), never falling back to the
-    // flat-map branches for a full-config source.
-    final Evaluator.Result overrideDetails =
-        OverrideEval.evaluateFullConfigDetails(flagOverrides, key, defaultValue, effectiveUser);
-    if (overrideDetails != null) {
-      final String overrideErrorCode =
-          overrideDetails.getError() == Evaluator.Error.NONE
-              ? null
-              : overrideDetails.getError().name();
-      return new EvaluationDetails<>(
-          key,
-          overrideDetails.getValue(),
-          overrideErrorCode != null ? null : overrideDetails.getVariationId(),
-          fetchTimeUnixMillis,
-          effectiveUser,
-          overrideErrorCode != null,
-          overrideErrorCode,
-          overrideDetails.hasMatchedTargetingRule() ? TargetingRule.MATCHED : null,
-          overrideDetails.hasMatchedPercentageOption() ? PercentageOption.MATCHED : null);
-    }
-
-    if (isLocalOnly) {
-      final OverrideEval.EvalResult overrideResult =
-          OverrideEval.evaluateSync(flagOverrides, key, defaultValue);
-      // LocalOnly contract: distinguish "override hit" from "missing key
-      // returning default". We re-query the map to disambiguate —
-      // OverrideEval.evaluateSync returns the default on both
-      // KEY_NOT_FOUND and TYPE_MISMATCH branches, indistinguishable from
-      // a legitimate hit whose value equals the default.
-      final OverrideDataSource dataSource = flagOverrides.getDataSource();
-      final Map<String, Object> overridesMap =
-          dataSource == null ? null : dataSource.getOverridesSync();
-      final boolean keyPresent = overridesMap != null && overridesMap.containsKey(key);
-      if (!keyPresent) {
-        return new EvaluationDetails<>(
-            key,
-            defaultValue,
-            null,
-            fetchTimeUnixMillis,
-            effectiveUser,
-            true,
-            "KEY_NOT_FOUND",
-            null,
-            null);
-      }
-      final Object candidate = overridesMap.get(key);
-      if (candidate == null) {
-        // Branch 5 — empty/null override slot returns default.
-        return new EvaluationDetails<>(
-            key,
-            defaultValue,
-            null,
-            fetchTimeUnixMillis,
-            effectiveUser,
-            true,
-            "MALFORMED_VALUE",
-            null,
-            null);
-      }
-      if (defaultValue != null && !candidate.getClass().equals(defaultValue.getClass())) {
-        // Branch 6 — TYPE_MISMATCH.
-        return new EvaluationDetails<>(
-            key,
-            defaultValue,
-            null,
-            fetchTimeUnixMillis,
-            effectiveUser,
-            true,
-            "TYPE_MISMATCH",
-            null,
-            null);
-      }
-      // Branch 7 — happy path.
-      return new EvaluationDetails<>(
-          key,
-          overrideResult.getValue(),
-          null,
-          fetchTimeUnixMillis,
-          effectiveUser,
-          false,
-          null,
-          null,
-          null);
-    }
-
+  ProviderResult getValueDetailsForProvider(String key, Object defaultValue, User user) {
+    final Evaluator.Result configResult = evaluateConfigDetails(key, defaultValue, user);
     final Evaluator.Result result =
-        Evaluator.evaluate(configForEval(), key, defaultValue, effectiveUser);
+        configResult == null
+            ? OverrideEval.evaluateFlatProviderDetails(flagOverrides, key, defaultValue)
+            : configResult;
+    // The native hook receives the same result details without the provider's targeting context.
+    return new ProviderResult(
+        detailsFromResult(key, null, result), providerStatus(result.getError()));
+  }
+
+  /**
+   * Full-config overrides and cached configs share one evaluator. A flat override has no config.
+   */
+  private Evaluator.Result evaluateConfigDetails(String key, Object defaultValue, User user) {
+    final Evaluator.Result override =
+        OverrideEval.evaluateFullConfigDetails(flagOverrides, key, defaultValue, user);
+    if (override != null
+        || (flagOverrides != null
+            && flagOverrides.getBehaviour() == OverrideBehaviour.LOCAL_ONLY)) {
+      return override;
+    }
+    return Evaluator.evaluate(configForEval(), key, defaultValue, user);
+  }
+
+  private EvaluationDetails<Object> nativeFlatOverrideDetails(
+      String key, Object defaultValue, User user) {
+    final OverrideEval.EvalResult override =
+        OverrideEval.evaluateSync(flagOverrides, key, defaultValue);
+    // Native details historically read the source again to distinguish defaults from a hit.
+    final OverrideDataSource source = flagOverrides.getDataSource();
+    final Map<String, Object> overrides = source == null ? null : source.getOverridesSync();
+    if (overrides == null || !overrides.containsKey(key)) {
+      return flatDetails(key, defaultValue, user, "KEY_NOT_FOUND");
+    }
+    final Object candidate = overrides.get(key);
+    if (candidate == null) {
+      return flatDetails(key, defaultValue, user, "MALFORMED_VALUE");
+    }
+    if (defaultValue != null && !candidate.getClass().equals(defaultValue.getClass())) {
+      return flatDetails(key, defaultValue, user, "TYPE_MISMATCH");
+    }
+    return flatDetails(key, override.getValue(), user, null);
+  }
+
+  private EvaluationDetails<Object> flatDetails(String key, Object value, User user, String error) {
+    return new EvaluationDetails<>(
+        key, value, null, fetchTimeUnixMillis, user, error != null, error, null, null);
+  }
+
+  private EvaluationDetails<Object> detailsFromResult(
+      String key, User user, Evaluator.Result result) {
     final String errorCode =
         result.getError() == Evaluator.Error.NONE ? null : result.getError().name();
     return new EvaluationDetails<>(
@@ -256,11 +221,30 @@ public final class Snapshot {
         result.getValue(),
         errorCode != null ? null : result.getVariationId(),
         fetchTimeUnixMillis,
-        effectiveUser,
+        user,
         errorCode != null,
         errorCode,
         result.hasMatchedTargetingRule() ? TargetingRule.MATCHED : null,
         result.hasMatchedPercentageOption() ? PercentageOption.MATCHED : null);
+  }
+
+  private static ProviderResult.Status providerStatus(Evaluator.Error error) {
+    switch (error) {
+      case NONE:
+        return ProviderResult.Status.RESOLVED;
+      case NO_CONFIG:
+        return ProviderResult.Status.NOT_READY;
+      case KEY_NOT_FOUND:
+        return ProviderResult.Status.NOT_FOUND;
+      case TYPE_MISMATCH:
+      case UNSUPPORTED_TYPE:
+        return ProviderResult.Status.TYPE_MISMATCH;
+      case MALFORMED_VALUE:
+        return ProviderResult.Status.PARSE_ERROR;
+      default:
+        // MALFORMED_CONFIG also covers opaque evaluation failures such as prerequisite cycles.
+        return ProviderResult.Status.GENERAL;
+    }
   }
 
   /**

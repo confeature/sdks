@@ -6,6 +6,7 @@ import io.confeature.client.internal.ConfigFetcher;
 import io.confeature.client.internal.Evaluator;
 import io.confeature.client.internal.FilesystemCache;
 import io.confeature.client.internal.OverrideEval;
+import io.confeature.client.internal.ProviderResult;
 import io.confeature.client.internal.SdkKey;
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -261,25 +262,10 @@ public final class ConfeatureClient implements AutoCloseable {
   public EvaluationDetails<Object> getValueDetails(String key, Object defaultValue, User user) {
     Objects.requireNonNull(key, "key");
     if (closed.get()) {
-      logger.warning(
-          "getValueDetails called after close. sdkKey=" + SdkKey.redact(sdkKey) + " key=" + key);
-      final User effectiveUser = user == null ? defaultUser : user;
-      return new EvaluationDetails<>(
-          key,
-          defaultValue,
-          null,
-          fetchTimeUnixMillis,
-          effectiveUser,
-          true,
-          "CLIENT_CLOSED",
-          null,
-          null);
+      return closedNativeDetails(key, defaultValue, user);
     }
-    // LazyLoad's staleness-driven fetch hook (synchronous customer contract).
-    maybeLazyFetch();
-    final EvaluationDetails<Object> details = snapshot().getValueDetails(key, defaultValue, user);
-    hooks.invokeOnFlagEvaluated(details);
-    return details;
+    return publishFlagEvaluation(
+        snapshotForDetails(false).getValueDetails(key, defaultValue, user));
   }
 
   /**
@@ -291,24 +277,52 @@ public final class ConfeatureClient implements AutoCloseable {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(type, "type");
     if (closed.get()) {
-      logger.warning(
-          "getValueDetails called after close. sdkKey=" + SdkKey.redact(sdkKey) + " key=" + key);
-      final User effectiveUser = user == null ? defaultUser : user;
-      return new EvaluationDetails<>(
-          key,
-          defaultValue,
-          null,
-          fetchTimeUnixMillis,
-          effectiveUser,
-          true,
-          "CLIENT_CLOSED",
-          null,
-          null);
+      return closedNativeDetails(key, defaultValue, user);
     }
-    maybeLazyFetch();
-    final EvaluationDetails<T> details = snapshot().getValueDetails(key, defaultValue, user, type);
+    return publishFlagEvaluation(
+        snapshotForDetails(false).getValueDetails(key, defaultValue, user, type));
+  }
+
+  /**
+   * Optional provider bridge ({@code @internal}). A null user is anonymous so a borrowed client's
+   * default user cannot affect a provider evaluation.
+   */
+  public ProviderResult getValueDetailsForProvider(String key, Object defaultValue, User user) {
+    Objects.requireNonNull(key, "key");
+    if (closed.get()) {
+      return new ProviderResult(
+          closedDetails(key, defaultValue, null), ProviderResult.Status.NOT_READY);
+    }
+    final ProviderResult result =
+        snapshotForDetails(true).getValueDetailsForProvider(key, defaultValue, user);
+    publishFlagEvaluation(result.getDetails());
+    return result;
+  }
+
+  private Snapshot snapshotForDetails(boolean providerEvaluation) {
+    // A provider backed by LocalOnly overrides must stay offline even in LazyLoad mode.
+    if (!providerEvaluation
+        || flagOverrides == null
+        || flagOverrides.getBehaviour() != OverrideBehaviour.LOCAL_ONLY) {
+      maybeLazyFetch();
+    }
+    return snapshot();
+  }
+
+  private <T> EvaluationDetails<T> publishFlagEvaluation(EvaluationDetails<T> details) {
     hooks.invokeOnFlagEvaluated(details);
     return details;
+  }
+
+  private <T> EvaluationDetails<T> closedNativeDetails(String key, T defaultValue, User user) {
+    logger.warning(
+        "getValueDetails called after close. sdkKey=" + SdkKey.redact(sdkKey) + " key=" + key);
+    return closedDetails(key, defaultValue, user == null ? defaultUser : user);
+  }
+
+  private <T> EvaluationDetails<T> closedDetails(String key, T defaultValue, User user) {
+    return new EvaluationDetails<>(
+        key, defaultValue, null, fetchTimeUnixMillis, user, true, "CLIENT_CLOSED", null, null);
   }
 
   /**

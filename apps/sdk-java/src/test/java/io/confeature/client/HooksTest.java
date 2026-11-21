@@ -3,6 +3,9 @@ package io.confeature.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.confeature.client.internal.ProviderResult;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -201,5 +204,74 @@ final class HooksTest {
     } finally {
       client.close();
     }
+  }
+
+  @Test
+  void providerDetails_doNotFetchForLocalOnlyLazyLoad() {
+    server.enqueue(new MockResponse().setResponseCode(200).setBody(CONFIG_BODY));
+    try (ConfeatureClient client =
+        ConfeatureClient.builder(SDK_KEY)
+            .pollingMode(PollingMode.lazyLoad())
+            .cacheDirectory(":memory:")
+            .baseUrl(server.url("/").toString())
+            .flagOverrides(FlagOverrides.localOnly(new MapOverrideDataSource(Map.of("flag", true))))
+            .build()) {
+      final ProviderResult result = client.getValueDetailsForProvider("flag", false, null);
+      assertThat(result.getStatus()).isEqualTo(ProviderResult.Status.RESOLVED);
+      assertThat(result.getDetails().getValue()).isEqualTo(true);
+      assertThat(result.getDetails().getFetchTimeUnixMilliseconds()).isZero();
+      assertThat(server.getRequestCount()).isZero();
+    }
+  }
+
+  @Test
+  void everyHookRedactsListenerExceptionAndContinuesWhenLoggerThrows() {
+    final List<String> logMessages = new ArrayList<>();
+    final Logger logger =
+        new Logger() {
+          @Override
+          public void error(String message, Throwable throwable) {
+            logMessages.add(message);
+            assertThat(throwable).isNull();
+            throw new IllegalStateException("logger-sentinel");
+          }
+
+          @Override
+          public void warning(String message) {}
+
+          @Override
+          public void info(String message) {}
+
+          @Override
+          public void debug(String message) {}
+        };
+    final ConfeatureHooks hooks = new ConfeatureHooks(logger);
+    final List<String> downstream = new ArrayList<>();
+    final Runnable fail =
+        () -> {
+          throw new IllegalStateException("listener-sentinel");
+        };
+    hooks.addOnClientReady(fail);
+    hooks.addOnClientReady(() -> downstream.add("clientReady"));
+    hooks.addOnConfigChanged(settings -> fail.run());
+    hooks.addOnConfigChanged(settings -> downstream.add("configChanged"));
+    hooks.addOnFlagEvaluated(details -> fail.run());
+    hooks.addOnFlagEvaluated(details -> downstream.add(details.getKey()));
+    hooks.addOnError(message -> fail.run());
+    hooks.addOnError(downstream::add);
+
+    hooks.invokeOnClientReady();
+    hooks.invokeOnConfigChanged(Map.of());
+    hooks.invokeOnFlagEvaluated(
+        new EvaluationDetails<>("flag", true, null, 0L, null, false, null, null, null));
+    hooks.invokeOnError("config unavailable");
+    assertThat(downstream)
+        .containsExactly("clientReady", "configChanged", "flag", "config unavailable");
+    assertThat(logMessages)
+        .containsExactly(
+            "ConfeatureHooks: onClientReady listener raised.",
+            "ConfeatureHooks: onConfigChanged listener raised.",
+            "ConfeatureHooks: onFlagEvaluated listener raised.",
+            "ConfeatureHooks: onError listener raised.");
   }
 }

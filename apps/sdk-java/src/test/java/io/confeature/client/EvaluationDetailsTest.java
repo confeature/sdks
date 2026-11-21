@@ -3,9 +3,14 @@ package io.confeature.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.confeature.client.internal.ProviderResult;
+import io.confeature.client.internal.ProviderResult.Status;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -174,5 +179,160 @@ final class EvaluationDetailsTest {
     } finally {
       client.close();
     }
+  }
+
+  @Test
+  void providerDetails_readFlatOverridesOnceAndKeepNativeReads() {
+    final AtomicInteger reads = new AtomicInteger();
+    final OverrideDataSource source =
+        () -> {
+          reads.incrementAndGet();
+          return Map.of("int", 42, "double", 42.0);
+        };
+    try (ConfeatureClient client =
+        ConfeatureClient.builder(VALID_SDK_KEY)
+            .pollingMode(PollingMode.manualPoll())
+            .cacheDirectory(":memory:")
+            .flagOverrides(FlagOverrides.localOnly(source))
+            .build()) {
+      final ProviderResult equalToDefault = client.getValueDetailsForProvider("int", 42L, null);
+      assertThat(equalToDefault.getStatus()).isEqualTo(Status.RESOLVED);
+      assertThat(equalToDefault.getDetails().getValue()).isEqualTo(42);
+      assertThat(equalToDefault.getDetails().isDefaultValue()).isFalse();
+      assertThat(reads.get()).isEqualTo(1);
+
+      final ProviderResult wrongType = client.getValueDetailsForProvider("double", 42L, null);
+      assertThat(wrongType.getStatus()).isEqualTo(Status.TYPE_MISMATCH);
+      assertThat(wrongType.getDetails().getValue()).isEqualTo(42L);
+      assertThat(reads.get()).isEqualTo(2);
+
+      final EvaluationDetails<Object> nativeDetails = client.getValueDetails("int", 42L, null);
+      assertThat(nativeDetails.getError()).isEqualTo("TYPE_MISMATCH");
+      assertThat(reads.get()).isEqualTo(4);
+    }
+  }
+
+  @Test
+  void providerDetails_distinguishAbsentAndMalformedFlatValues() {
+    final Map<String, Object> overrides = new HashMap<>();
+    overrides.put("malformed", null);
+    try (ConfeatureClient client = buildClient(overrides)) {
+      assertThat(client.getValueDetailsForProvider("absent", false, null).getStatus())
+          .isEqualTo(Status.NOT_FOUND);
+      assertThat(client.getValueDetailsForProvider("malformed", false, null).getStatus())
+          .isEqualTo(Status.PARSE_ERROR);
+    }
+    try (ConfeatureClient client =
+        ConfeatureClient.builder(VALID_SDK_KEY)
+            .pollingMode(PollingMode.manualPoll())
+            .cacheDirectory(":memory:")
+            .flagOverrides(FlagOverrides.localOnly(() -> null))
+            .build()) {
+      assertThat(client.getValueDetailsForProvider("absent", false, null).getStatus())
+          .isEqualTo(Status.NOT_READY);
+      assertThat(client.getValueDetails("absent", false, null).getError())
+          .isEqualTo("KEY_NOT_FOUND");
+    }
+  }
+
+  @Test
+  void providerDetails_useExplicitIdentityAndFireTheSameOutcomeWithoutUser() {
+    final User defaultUser = User.builder("default-identity").build();
+    final User explicitUser = User.builder("targeting-sentinel").build();
+    final Map<String, Object> condition =
+        Map.of(
+            "u",
+            Map.of(
+                "a", "Identifier", "c", 0, "l", List.of("default-identity", "targeting-sentinel")));
+    final Map<String, Object> rule =
+        Map.of("c", List.of(condition), "s", Map.of("v", Map.of("b", true), "i", "targeted"));
+    final Map<String, Object> setting =
+        Map.of("t", 0, "v", Map.of("b", false), "i", "anonymous", "r", List.of(rule));
+    final Map<String, Object> config = Map.of("f", Map.of("flag", setting));
+    try (ConfeatureClient client =
+        ConfeatureClient.builder(VALID_SDK_KEY)
+            .pollingMode(PollingMode.manualPoll())
+            .cacheDirectory(":memory:")
+            .defaultUser(defaultUser)
+            .flagOverrides(FlagOverrides.localConfig(config, OverrideBehaviour.LOCAL_ONLY))
+            .build()) {
+      final List<EvaluationDetails<?>> events = new ArrayList<>();
+      client.getHooks().addOnFlagEvaluated(events::add);
+
+      final ProviderResult explicit =
+          client.getValueDetailsForProvider("flag", false, explicitUser);
+      assertThat(explicit.getStatus()).isEqualTo(Status.RESOLVED);
+      assertThat(explicit.getDetails().getValue()).isEqualTo(true);
+      assertThat(explicit.getDetails().getVariationId()).isEqualTo("targeted");
+      assertThat(explicit.getDetails().getMatchedTargetingRule()).isNotNull();
+      assertThat(explicit.getDetails().getUser()).isNull();
+
+      final ProviderResult anonymous = client.getValueDetailsForProvider("flag", false, null);
+      assertThat(anonymous.getStatus()).isEqualTo(Status.RESOLVED);
+      assertThat(anonymous.getDetails().getValue()).isEqualTo(false);
+      assertThat(anonymous.getDetails().getVariationId()).isEqualTo("anonymous");
+      assertThat(anonymous.getDetails().getUser()).isNull();
+
+      final EvaluationDetails<Object> nativeDetails = client.getValueDetails("flag", false, null);
+      assertThat(nativeDetails.getValue()).isEqualTo(true);
+      assertThat(nativeDetails.getUser()).isSameAs(defaultUser);
+      assertThat(events)
+          .containsExactly(explicit.getDetails(), anonymous.getDetails(), nativeDetails);
+    }
+  }
+
+  @Test
+  void providerDetails_classifyEvaluatorFailuresWithoutReplacingNativeErrors() {
+    final Map<String, Object> settings =
+        Map.of(
+            "integer", Map.of("t", 2, "v", Map.of("i", Integer.MIN_VALUE)),
+            "malformed", Map.of("t", 0, "v", Map.of("s", "not-a-boolean")),
+            "opaque", Map.of("v", Map.of("b", true)),
+            "unsupported", Map.of("t", 4));
+    try (ConfeatureClient client =
+        ConfeatureClient.builder(VALID_SDK_KEY)
+            .pollingMode(PollingMode.manualPoll())
+            .cacheDirectory(":memory:")
+            .flagOverrides(
+                FlagOverrides.localConfig(Map.of("f", settings), OverrideBehaviour.LOCAL_ONLY))
+            .build()) {
+      final ProviderResult integer = client.getValueDetailsForProvider("integer", 0L, null);
+      assertThat(integer.getStatus()).isEqualTo(Status.RESOLVED);
+      assertThat(integer.getDetails().getValue()).isEqualTo(Integer.MIN_VALUE);
+      assertThat(client.getValueDetailsForProvider("malformed", false, null).getStatus())
+          .isEqualTo(Status.PARSE_ERROR);
+      assertThat(client.getValueDetailsForProvider("opaque", false, null).getStatus())
+          .isEqualTo(Status.GENERAL);
+      assertThat(client.getValueDetailsForProvider("unsupported", false, null).getStatus())
+          .isEqualTo(Status.TYPE_MISMATCH);
+      assertThat(client.getValueDetails("opaque", false, null).getError())
+          .isEqualTo("MALFORMED_CONFIG");
+    }
+  }
+
+  @Test
+  void providerDetails_reportColdAndClosedClientsAsUnavailable() {
+    final User defaultUser = User.builder("native-default").build();
+    final ConfeatureClient client =
+        ConfeatureClient.builder(VALID_SDK_KEY)
+            .pollingMode(PollingMode.manualPoll())
+            .cacheDirectory(":memory:")
+            .defaultUser(defaultUser)
+            .build();
+    final List<EvaluationDetails<?>> events = new ArrayList<>();
+    try {
+      client.getHooks().addOnFlagEvaluated(events::add);
+      final ProviderResult cold = client.getValueDetailsForProvider("flag", false, null);
+      assertThat(cold.getStatus()).isEqualTo(Status.NOT_READY);
+      assertThat(cold.getDetails().getError()).isEqualTo("NO_CONFIG");
+      assertThat(events).containsExactly(cold.getDetails());
+    } finally {
+      client.close();
+    }
+    final ProviderResult closed = client.getValueDetailsForProvider("flag", false, defaultUser);
+    assertThat(closed.getStatus()).isEqualTo(Status.NOT_READY);
+    assertThat(closed.getDetails().getUser()).isNull();
+    assertThat(client.getValueDetails("flag", false, null).getUser()).isSameAs(defaultUser);
+    assertThat(events).hasSize(1);
   }
 }

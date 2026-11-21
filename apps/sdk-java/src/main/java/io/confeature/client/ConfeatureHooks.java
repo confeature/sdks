@@ -54,7 +54,7 @@ public final class ConfeatureHooks {
       try {
         listener.run();
       } catch (RuntimeException ex) {
-        logger.error("ConfeatureHooks: onClientReady listener raised.", ex);
+        logListenerFailure("ConfeatureHooks: onClientReady listener raised.");
       }
     }
   }
@@ -64,7 +64,7 @@ public final class ConfeatureHooks {
       try {
         listener.accept(settings);
       } catch (RuntimeException ex) {
-        logger.error("ConfeatureHooks: onConfigChanged listener raised.", ex);
+        logListenerFailure("ConfeatureHooks: onConfigChanged listener raised.");
       }
     }
   }
@@ -74,7 +74,7 @@ public final class ConfeatureHooks {
       try {
         listener.accept(details);
       } catch (RuntimeException ex) {
-        logger.error("ConfeatureHooks: onFlagEvaluated listener raised.", ex);
+        logListenerFailure("ConfeatureHooks: onFlagEvaluated listener raised.");
       }
     }
   }
@@ -84,8 +84,17 @@ public final class ConfeatureHooks {
       try {
         listener.accept(message);
       } catch (RuntimeException ex) {
-        logger.error("ConfeatureHooks: onError listener raised.", ex);
+        logListenerFailure("ConfeatureHooks: onError listener raised.");
       }
+    }
+  }
+
+  private void logListenerFailure(String message) {
+    try {
+      // Listener exceptions can contain targeting data or application secrets.
+      logger.error(message, null);
+    } catch (RuntimeException ignored) {
+      // A failed logger must leave the outcome and remaining listeners intact.
     }
   }
 }
