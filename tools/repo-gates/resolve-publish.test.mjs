@@ -23,6 +23,11 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REAL = JSON.parse(readFileSync(join(ROOT, MANIFEST), "utf8"));
+const PYTHON_VERSION = /^version = "([^"]+)"$/m.exec(
+  readFileSync(join(ROOT, "apps/sdk-python/pyproject.toml"), "utf8"),
+)?.[1];
+if (!PYTHON_VERSION) throw new Error("Expected a declared Python version in pyproject.toml");
+const PYTHON_TAG = `sdk-python-v${PYTHON_VERSION}`;
 const published = async () => true;
 const MAIN = { mainRef: "origin/main", isOnMain: () => true };
 const unpublished = async () => false;
@@ -73,13 +78,14 @@ describe("the real publish table", () => {
   it("a release tag carries the declared version, never a substring of the tag", async () => {
     const out = await resolvePublish({
       root: ROOT,
-      tag: "sdk-python-v0.1.1",
+      tag: PYTHON_TAG,
       exists: published,
       ...MAIN,
     });
     expect(out).toMatchObject({
       name: "python",
       registry: "pypi",
+      version: PYTHON_VERSION,
       gate: "test",
       daggerFn: "python-test",
     });
@@ -349,17 +355,24 @@ describe("the CLI", () => {
     expect(() => parseArgs(["--tag", "a", "--tag", "b"])).toThrow(InputError);
   });
   it("--main-ref reaches the git ancestry check (an unknown ref is refused, exit 1)", () => {
-    const r = cli("--tag", "sdk-python-v0.1.1", "--main-ref", "refs/does/not/exist");
+    const r = cli("--tag", PYTHON_TAG, "--main-ref", "refs/does/not/exist");
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/could not compare/);
   });
   it("a tag on main is accepted (HEAD is its own ancestor)", () => {
-    const r = cli("--tag", "sdk-python-v0.1.1", "--commit", "HEAD", "--main-ref", "HEAD");
+    const r = cli("--tag", PYTHON_TAG, "--commit", "HEAD", "--main-ref", "HEAD");
     expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout)).toMatchObject({ name: "python", registry: "pypi" });
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      name: "python",
+      registry: "pypi",
+      version: PYTHON_VERSION,
+    });
   });
-  it("a tag without --main-ref is refused, exit 1", () =>
-    expect(cli("--tag", "sdk-python-v0.1.1").status).toBe(1));
+  it("a tag without --main-ref is refused, exit 1", () => {
+    const r = cli("--tag", PYTHON_TAG);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/needs --main-ref/);
+  });
   it("a usage error is exit 2", () => expect(cli("--nope", "x").status).toBe(2));
 });
 
