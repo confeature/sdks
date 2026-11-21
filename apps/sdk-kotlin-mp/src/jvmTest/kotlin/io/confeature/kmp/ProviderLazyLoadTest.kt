@@ -189,6 +189,22 @@ class ProviderLazyLoadTest {
     }
 
     @Test
+    fun anInvalidFlagEnvelopeLeavesTheLastUsableSnapshotIntact() = runBlocking {
+        DelayedConfig(secondBody = """{"f":null}""").use { fixture ->
+            val client = fixture.client()
+            try {
+                fixture.firstRelease.countDown()
+                assertTrue(client.forceRefresh())
+                assertFalse(client.forceRefresh())
+                assertEquals(true, client.providerDetails().value)
+                assertEquals(2, fixture.requests.get())
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
     fun cancellingTheNativeWriterPreservesItsCallerContextAndLeavesReadyAvailable() = runBlocking {
         DelayedConfig().use { fixture ->
             val marker = ThreadLocal<String>()
@@ -376,7 +392,10 @@ class ProviderLazyLoadTest {
     private fun ConfeatureClient.providerDetails(): ProviderResult =
         getValueDetailsForProvider("flag", false, null, ProviderValueType.BOOLEAN)
 
-    private class DelayedConfig(private val firstStatus: Int = 200) : AutoCloseable {
+    private class DelayedConfig(
+        private val firstStatus: Int = 200,
+        private val secondBody: String? = null,
+    ) : AutoCloseable {
         val requests = AtomicInteger()
         val firstEntered = CountDownLatch(1)
         val firstRelease = CountDownLatch(1)
@@ -398,7 +417,8 @@ class ProviderLazyLoadTest {
                         secondEtag.set(exchange.requestHeaders.getFirst("If-None-Match"))
                         secondEntered.countDown()
                     }
-                    val body = """{"f":{"flag":{"t":0,"v":{"b":${index == 1}}}}}""".encodeToByteArray()
+                    val body = (secondBody?.takeIf { index == 2 }
+                        ?: """{"f":{"flag":{"t":0,"v":{"b":${index == 1}}}}}""").encodeToByteArray()
                     exchange.responseHeaders.set("ETag", "\"fixture-$index\"")
                     exchange.sendResponseHeaders(if (index == 1) firstStatus else 200, body.size.toLong())
                     exchange.responseBody.use { it.write(body) }

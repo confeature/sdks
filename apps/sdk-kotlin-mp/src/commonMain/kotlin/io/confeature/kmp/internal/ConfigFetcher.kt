@@ -232,7 +232,7 @@ public class ConfigFetcher(
                     // key in the schema; we collapse the "not-an-object" and
                     // "missing-f" failures into one branch so the wire-cases corpus
                     // exercises every line.
-                    if (parsed is JsonObject && parsed.containsKey("f")) {
+                    if (parsed is JsonObject && parsed["f"] is JsonObject) {
                         FetchResult.fetched(parsed, raw, etag)
                     } else {
                         diagnostics?.error(

@@ -61,6 +61,44 @@ class ProviderBridgeTest {
     }
 
     @Test
+    fun rejectsMalformedIntegerValuesAndDiscriminatorsWithoutRounding() {
+        val integers = listOf(1.75, 2147483648L, -2147483649L, Double.NaN, Double.POSITIVE_INFINITY)
+        val malformed = integers.mapIndexed { index, value ->
+            "bad-$index" to mapOf("t" to 2, "v" to mapOf("i" to value))
+        }.toMap() + mapOf("bad-type" to mapOf("t" to 2.5, "v" to mapOf("i" to 1)), "null-flag" to null)
+        val boundary = "negative-limit" to mapOf("t" to 2, "v" to mapOf("i" to Int.MIN_VALUE))
+        val client = clientWithOverrides(FlagOverrides.localConfig(mapOf("f" to (malformed + boundary))))
+        val details = mutableListOf<TypedEvaluationDetails<*>>()
+        client.getHooks().addOnFlagEvaluated { details.add(it) }
+        try {
+            for (key in malformed.keys) {
+                val result = client.getValueDetailsForProvider(key, Long.MAX_VALUE, null, ProviderValueType.INTEGER)
+                assertEquals(Status.PARSE_ERROR, result.status, key)
+                assertEquals(Long.MAX_VALUE, result.value, key)
+            }
+            val result = client.getValueDetailsForProvider(boundary.first, 0, null, ProviderValueType.INTEGER)
+            assertEquals(Status.RESOLVED, result.status)
+            assertEquals(Int.MIN_VALUE, result.value)
+            assertEquals(malformed.size + 1, details.size)
+            assertTrue(details.take(malformed.size).all { it.isDefaultValue && it.user == null })
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
+    fun reportsAnInvalidOverrideEnvelopeAsAParseFailure() {
+        val client = clientWithOverrides(FlagOverrides.localConfig(mapOf("f" to listOf("invalid"))))
+        try {
+            val outcome = client.getValueDetailsForProvider("flag", false, null, ProviderValueType.BOOLEAN)
+            assertEquals(Status.PARSE_ERROR, outcome.status)
+            assertEquals(false, outcome.value)
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun doesNotChooseADefaultPercentageBucketWithoutAnIdentifier() {
         val client = clientWithOverrides(FlagOverrides.localConfig(config()))
         val context = object : Evaluator.UserView {

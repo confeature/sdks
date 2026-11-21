@@ -5,6 +5,7 @@ import io.confeature.kmp.User
 import io.confeature.kmp.internal.ConfigValues.asMap
 import io.confeature.kmp.internal.ConfigValues.coerceTyped
 import io.confeature.kmp.internal.ConfigValues.defaultMatchesType
+import io.confeature.kmp.internal.ConfigValues.exactInt
 import io.confeature.kmp.internal.ConfigValues.readInt
 import io.confeature.kmp.internal.ConfigValues.readString
 import io.confeature.kmp.internal.ConfigValues.selectSettingValue
@@ -158,10 +159,7 @@ public object Evaluator {
         val sr = resolveFailClosed(ctx, defaultValue, providerType != null)
             ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
         val raw = selectSettingValue(sr.value, located.type)
-        val typed = coerceTyped(raw, located.type) ?: return Result(defaultValue, Error.MALFORMED_VALUE)
-        if (providerType == ProviderValueType.DOUBLE && !(typed as Double).isFinite()) {
-            return Result(defaultValue, Error.MALFORMED_VALUE)
-        }
+        val typed = readValue(raw, located.type, providerType) ?: return Result(defaultValue, Error.MALFORMED_VALUE)
 
         // Footer + emit. The INFO 5000 trace is emitted only when the resolved value is clean.
         if (logBuilder != null) {
@@ -183,6 +181,13 @@ public object Evaluator {
             ctx.evalError,
         )
     }
+
+    private fun readValue(raw: Any?, type: Int, providerType: ProviderValueType?): Any? =
+        when (providerType) {
+            ProviderValueType.INTEGER -> exactInt(raw)
+            ProviderValueType.DOUBLE -> ConfigValues.readDouble(raw)?.takeIf(Double::isFinite)
+            else -> coerceTyped(raw, type)
+        }
 
     /** The setting [key] names, its type, and the error ([Error.NONE] when it can be evaluated). */
     private class LocatedSetting(
@@ -206,11 +211,13 @@ public object Evaluator {
         val settings = asMap(config?.get("f"))
         val settingAny = settings?.get(key)
         val setting = asMap(settingAny)
-        val type = readInt(setting?.get("t"))
+        val rawType = setting?.get("t")
+        val type = if (providerType == null) readInt(rawType) else exactInt(rawType)
         val error =
             when {
-                config == null || settings == null -> Error.NO_CONFIG
-                settingAny == null -> Error.KEY_NOT_FOUND
+                config == null -> Error.NO_CONFIG
+                settings == null -> if (providerType == null) Error.NO_CONFIG else Error.MALFORMED_CONFIG
+                settingAny == null && (providerType == null || !settings.containsKey(key)) -> Error.KEY_NOT_FOUND
                 setting == null || type == null -> Error.MALFORMED_CONFIG
                 else -> typeError(type, defaultValue, providerType)
             }
