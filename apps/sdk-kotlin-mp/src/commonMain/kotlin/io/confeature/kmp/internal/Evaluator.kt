@@ -5,7 +5,6 @@ import io.confeature.kmp.User
 import io.confeature.kmp.internal.ConfigValues.asMap
 import io.confeature.kmp.internal.ConfigValues.coerceTyped
 import io.confeature.kmp.internal.ConfigValues.defaultMatchesType
-import io.confeature.kmp.internal.ConfigValues.exactInt
 import io.confeature.kmp.internal.ConfigValues.readInt
 import io.confeature.kmp.internal.ConfigValues.readString
 import io.confeature.kmp.internal.ConfigValues.selectSettingValue
@@ -159,7 +158,8 @@ public object Evaluator {
         val sr = resolveFailClosed(ctx, defaultValue, providerType != null)
             ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
         val raw = selectSettingValue(sr.value, located.type)
-        val typed = readValue(raw, located.type, providerType) ?: return Result(defaultValue, Error.MALFORMED_VALUE)
+        val typed = if (providerType == null) coerceTyped(raw, located.type) else providerType.readWireValue(raw)
+        if (typed == null) return Result(defaultValue, Error.MALFORMED_VALUE)
 
         // Footer + emit. The INFO 5000 trace is emitted only when the resolved value is clean.
         if (logBuilder != null) {
@@ -181,13 +181,6 @@ public object Evaluator {
             ctx.evalError,
         )
     }
-
-    private fun readValue(raw: Any?, type: Int, providerType: ProviderValueType?): Any? =
-        when (providerType) {
-            ProviderValueType.INTEGER -> exactInt(raw)
-            ProviderValueType.DOUBLE -> ConfigValues.readDouble(raw)?.takeIf(Double::isFinite)
-            else -> coerceTyped(raw, type)
-        }
 
     /** The setting [key] names, its type, and the error ([Error.NONE] when it can be evaluated). */
     private class LocatedSetting(

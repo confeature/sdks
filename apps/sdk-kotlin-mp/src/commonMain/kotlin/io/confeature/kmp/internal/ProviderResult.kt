@@ -17,6 +17,21 @@ public enum class ProviderValueType(internal val settingType: Int) {
             INTEGER -> value::class == Int::class
             DOUBLE -> value::class == Double::class && (value as Double).isFinite()
         }
+
+    internal fun readWireValue(raw: Any?): Any? =
+        when (this) {
+            BOOLEAN -> raw as? Boolean
+            STRING -> raw as? String
+            INTEGER -> exactInt(raw)
+            DOUBLE -> ConfigValues.readDouble(raw)?.takeIf(Double::isFinite)
+        }
+}
+
+/** Read an integer without truncating a fraction or saturating outside the Config V2 range. */
+internal fun exactInt(raw: Any?): Int? {
+    val value = ConfigValues.readDouble(raw) ?: return null
+    val integral = value.toInt()
+    return integral.takeIf { it.toDouble() == value }
 }
 
 /** Context-free evaluation result for the optional provider companion. */

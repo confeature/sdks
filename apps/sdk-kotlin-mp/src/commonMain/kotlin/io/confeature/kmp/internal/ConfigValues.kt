@@ -38,13 +38,6 @@ internal object ConfigValues {
             else -> null
         }
 
-    /** Read an integer without truncating a fraction or saturating outside the Config V2 range. */
-    fun exactInt(raw: Any?): Int? {
-        val value = readDouble(raw) ?: return null
-        val integral = value.toInt()
-        return integral.takeIf { it.toDouble() == value }
-    }
-
     /** Select the typed value out of a `v` envelope by the setting's `t` discriminator. */
     fun selectSettingValue(value: Map<String, Any?>?, type: Int): Any? {
         if (value == null) return null
