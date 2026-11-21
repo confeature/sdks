@@ -6,6 +6,7 @@ import pytest
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.exception import ErrorCode
 from openfeature.flag_evaluation import Reason
+from openfeature.provider.no_op_provider import NoOpProvider
 
 from confeature_client import ConfeatureClient, EvaluationDetails, User
 from confeature_client.openfeature import ConfeatureProvider
@@ -17,6 +18,24 @@ SENTINELS = ("synthetic-key-secret", "synthetic-context-secret", "synthetic-exce
 @pytest.fixture
 def sdk():
     return Mock(spec=ConfeatureClient)
+
+
+def test_example_cleanup_is_scoped_to_its_domain(sdk):
+    sdk.get_value_details.return_value = EvaluationDetails("flag", True)
+    api.set_provider_and_wait(ConfeatureProvider(sdk), domain="app")
+    api.set_provider_and_wait(ConfeatureProvider(sdk), domain="other")
+    try:
+        app = api.get_client(domain="app")
+        other = api.get_client(domain="other")
+        assert app.get_boolean_value("flag", False) is True
+
+        api.set_provider_and_wait(NoOpProvider(), domain="app")
+
+        assert app.get_boolean_value("flag", False) is False
+        assert other.get_boolean_value("flag", False) is True
+    finally:
+        api.clear_providers()
+    sdk.close.assert_not_called()
 
 
 @pytest.mark.parametrize(

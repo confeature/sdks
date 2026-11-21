@@ -14,10 +14,6 @@ uv add confeature-client
 pip install confeature-client
 ```
 
-> PyPI publish is deferred to a future release; for now, build the wheel
-> from this repository (`uv build` in `apps/sdk-python/`) and install
-> via `pip install dist/confeature_client-*.whl`.
-
 Requires Python 3.10+.
 
 ## Quickstart
@@ -47,6 +43,7 @@ from confeature_client import ConfeatureClient
 from confeature_client.openfeature import ConfeatureProvider
 from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
+from openfeature.provider.no_op_provider import NoOpProvider
 
 with ConfeatureClient(sdk_key="YOUR-CONFEATURE-KEY") as sdk:
     api.set_provider_and_wait(ConfeatureProvider(sdk), domain="app")
@@ -55,16 +52,23 @@ with ConfeatureClient(sdk_key="YOUR-CONFEATURE-KEY") as sdk:
         context = EvaluationContext("user-123", {"Country": "FR", "Plan": "pro"})
         enabled = client.get_boolean_value("feature.dark-mode", False, context)
     finally:
-        api.clear_providers()
+        api.set_provider_and_wait(NoOpProvider(), domain="app")
 ```
 
 Registration completes without fetching or waiting for flag data. The
-application owns the Confeature client and closes it after OpenFeature
-evaluations finish. AutoPoll, LazyLoad and ManualPoll keep their SDK behavior.
+example resets only the `app` provider when evaluation finishes. The
+application owns the Confeature client and closes it at the end of the block.
+AutoPoll, LazyLoad and ManualPoll keep their SDK behavior.
 A cold cache with no data returns the caller's default with
 `PROVIDER_NOT_READY` until polling or a caller refresh loads a config. Async
 scalar evaluations run on a worker thread so a LazyLoad refresh leaves the
 event loop available.
+
+The OpenFeature 0.10.0 async client can raise `UnboundLocalError` if a task is
+cancelled during evaluation. If your application needs standard cancellation,
+use `await asyncio.to_thread(client.get_boolean_value, key, default, context)`
+with the synchronous OpenFeature client method. Started work can still finish
+after cancellation. Let it finish before closing the Confeature client.
 
 The provider maps the OpenFeature targeting key to the Confeature user
 identifier. Use `Email` and `Country` for the corresponding SDK attributes.

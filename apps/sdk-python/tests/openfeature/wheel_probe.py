@@ -58,6 +58,8 @@ def check_extra(client: ConfeatureClient) -> None:
 
 
 def main() -> None:
+    if not __debug__:
+        raise SystemExit("Run the wheel probe with Python assertions enabled.")
     if sys.argv[1:] not in (["base"], ["extra"]):
         raise SystemExit("Use the seeded runner with wheel_probe.py base or wheel_probe.py extra.")
     extra = sys.argv[1] == "extra"
