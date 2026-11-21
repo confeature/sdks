@@ -9,17 +9,19 @@ the browser, and iOS arm64 devices and simulators.
 ## Install
 
 Add the Confeature Maven repository and Maven Central to your Gradle settings.
-Gradle selects the platform artifact from the root dependency.
+Include Google's Maven repository for Android builds. Gradle selects the
+platform artifact from the root dependency.
 
 ```kotlin
 // settings.gradle.kts
 dependencyResolutionManagement {
     repositories {
-        mavenCentral()
-        maven {
-            url = uri("https://maven.confeature.io")
-            content { includeGroup("io.confeature") }
+        exclusiveContent {
+            forRepository { maven { url = uri("https://maven.confeature.io") } }
+            filter { includeGroup("io.confeature") }
         }
+        mavenCentral()
+        google()
     }
 }
 ```

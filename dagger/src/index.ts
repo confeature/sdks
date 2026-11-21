@@ -882,6 +882,7 @@ export class Confeature {
         "./gradlew",
         "--no-daemon",
         "--max-workers=2",
+        "-Pkotlin.compiler.execution.strategy=in-process",
         "jvmTest",
         "jsNodeTest",
         "jsBrowserTest",
