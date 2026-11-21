@@ -3,7 +3,7 @@
 use confeature::{Client, ClientBuilder, PollingMode};
 use reqwest::{redirect::Policy, Client as HttpClient, Proxy, Url};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const TARGETED: &str = "stringIsInDogDefaultCat";
@@ -13,6 +13,7 @@ pub struct Fixture {
     origin: String,
     proxy: String,
     canary: String,
+    cancellation: PathBuf,
     admin: HttpClient,
 }
 
@@ -28,6 +29,9 @@ impl Fixture {
             origin: bound_origin("LIVE_HARNESS_URL"),
             proxy: bound_origin("OPENFEATURE_RUST_PROXY"),
             canary: bound_origin("OPENFEATURE_RUST_CANARY"),
+            cancellation: std::env::var_os("OPENFEATURE_RUST_CANCEL_ACK")
+                .expect("a cancellation receipt path is required")
+                .into(),
             admin: http_builder().build().unwrap(),
         }
     }
@@ -80,6 +84,18 @@ impl Fixture {
         })
         .await
         .expect("the seeded request did not reach the fixture");
+    }
+
+    pub async fn wait_for_cancellation(&self) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !std::fs::read(&self.cancellation)
+                .is_ok_and(|receipt| receipt.as_slice() == b"closed\n")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("dropping the evaluation must close the delayed socket before the response");
     }
 
     pub async fn fault(&self, mode: &str) {

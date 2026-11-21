@@ -18,10 +18,15 @@ if grep -Fq '/tests/openfeature/' "$scratch/contents"; then
   printf '%s\n' 'The published crate must not include the OpenFeature fixture harness.' >&2
   exit 1
 fi
-wc -c "$archive"
-sha256sum "$archive"
+archive_bytes=$(wc -c < "$archive" | tr -d ' ')
+archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
 tar -xzf "$archive" -C "$scratch"
 packaged="$scratch/confeature-$version"
+contents_sha256=$(
+  cd "$packaged"
+  find . -type f ! -path './.cargo_vcs_info.json' -print0 | LC_ALL=C sort -z |
+    xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1
+)
 
 # Both projects resolve separately so feature unification cannot conceal a
 # dependency in the base graph. Cargo's fallback honors the crate's MSRV.
@@ -73,5 +78,16 @@ cp "$fixture_dir/consumer.rs" "$scratch/extra/src/main.rs"
 cp "$fixture_dir/fixture.rs" "$scratch/extra/src/fixture.rs"
 cargo build --manifest-path "$scratch/extra/Cargo.toml"
 cargo tree --manifest-path "$scratch/extra/Cargo.toml" -e normal --prefix none > "$scratch/extra-tree"
-grep -E '^(open-feature v0\.3\.0|time v0\.3\.)' "$scratch/extra-tree"
+grep -E '^open-feature v0\.3\.0( |$)' "$scratch/extra-tree"
+awk '
+  $1 == "time" {
+    split(substr($2, 2), version, ".")
+    found = 1
+    if (version[1] != 0 || version[2] != 3 || version[3] < 47) invalid = 1
+    print
+  }
+  END { if (!found || invalid) exit 1 }
+' "$scratch/extra-tree"
 node "$fixture_dir/run.mjs" -- "$target/debug/confeature-openfeature-smoke"
+printf 'Rust packed consumers passed: version=%s bytes=%s sha256=%s contents_sha256=%s\n' \
+  "$version" "$archive_bytes" "$archive_sha256" "$contents_sha256"

@@ -14,7 +14,7 @@ impl Client {
     /// envelope. Mirrors upstream `configcat::Client::get_value_details`
     /// 1:1 — same name, same async-ness, same field semantics.
     ///
-    /// Internally builds a [`Snapshot`] and delegates to
+    /// Internally builds a [`crate::Snapshot`] and delegates to
     /// [`crate::Snapshot::get_value_details`] so the async and sync paths
     /// share the resolution + error-code wiring. The async behaviour
     /// is preserved (LazyLoad refresh, closed-client check) on the

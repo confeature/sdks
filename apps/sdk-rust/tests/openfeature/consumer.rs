@@ -13,11 +13,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::runtime::{Builder, Handle};
 
 const DOMAIN: &str = "confeature-packed-fixture";
+const OTHER_DOMAIN: &str = "confeature-packed-other";
 
 fn main() {
     let fixture = Fixture::new();
@@ -65,7 +66,7 @@ async fn manual(fixture: &Fixture) {
             .build()
             .unwrap(),
     );
-    let official = register(&sdk).await;
+    let official = register(DOMAIN, &sdk).await;
     assert_eq!(evals.load(Ordering::Relaxed), 0);
     assert_eq!(
         official
@@ -82,6 +83,7 @@ async fn manual(fixture: &Fixture) {
     assert_targeting(&official).await;
     assert_types(&official).await;
     assert_eq!(evals.load(Ordering::Relaxed), 11);
+    measure_warm(&sdk, &official).await;
     sdk.offline();
     assert_targeting(&official).await;
     assert_eq!(fixture.served().await - before, 1);
@@ -98,7 +100,7 @@ async fn auto(fixture: &Fixture) {
             .build()
             .unwrap(),
     );
-    let official = register(&sdk).await;
+    let official = register(DOMAIN, &sdk).await;
     fixture.wait_for_requests(before + 1).await;
     assert_eq!(
         official
@@ -124,7 +126,7 @@ async fn lazy(fixture: &Fixture, through_provider: bool) {
             .build()
             .unwrap(),
     );
-    let official = register(&sdk).await;
+    let official = register(DOMAIN, &sdk).await;
     assert_eq!(fixture.served().await, before);
     tokio::time::timeout(Duration::from_secs(4), async {
         // The native builder registers LazyLoad's callback asynchronously.
@@ -158,7 +160,7 @@ async fn cancellation(fixture: &Fixture) {
     let before = fixture.served().await;
     let cache = tempfile::tempdir().unwrap();
     let sdk = Arc::new(fixture.delaying_client(cache.path()).build().unwrap());
-    let official = register(&sdk).await;
+    let official = register(DOMAIN, &sdk).await;
     let pending = tokio::spawn(async move {
         loop {
             match official.get_string_details(TARGETED, None, None).await {
@@ -172,6 +174,7 @@ async fn cancellation(fixture: &Fixture) {
     fixture.wait_for_requests(before + 1).await;
     pending.abort();
     assert!(pending.await.unwrap_err().is_cancelled());
+    fixture.wait_for_cancellation().await;
     assert_eq!(fixture.served().await - before, 1);
     let untouched = sdk
         .snapshot()
@@ -180,22 +183,31 @@ async fn cancellation(fixture: &Fixture) {
     close(sdk).await;
 }
 
-async fn register(sdk: &Arc<Client>) -> FeatureClient {
+async fn register(domain: &str, sdk: &Arc<Client>) -> FeatureClient {
     let mut api = OpenFeature::singleton_mut().await;
-    api.set_named_provider(DOMAIN, ConfeatureProvider::new(Arc::clone(sdk)).unwrap())
+    api.set_named_provider(domain, ConfeatureProvider::new(Arc::clone(sdk)).unwrap())
         .await;
-    api.create_named_client(DOMAIN)
+    api.create_named_client(domain)
 }
 
-async fn deregister() {
+async fn deregister(domain: &str) {
     OpenFeature::singleton_mut()
         .await
-        .set_named_provider(DOMAIN, NoOpProvider::default())
+        .set_named_provider(domain, NoOpProvider::default())
         .await;
 }
 
 async fn finish(sdk: Arc<Client>) {
-    deregister().await;
+    let other_client = register(OTHER_DOMAIN, &sdk).await;
+    deregister(DOMAIN).await;
+    assert_eq!(
+        other_client
+            .get_string_value(TARGETED, None, None)
+            .await
+            .unwrap(),
+        "Cat"
+    );
+    deregister(OTHER_DOMAIN).await;
     let user = User::new("fixture-reader").with_custom("Custom1", "admin");
     let details = sdk
         .get_value_details(TARGETED, String::new(), Some(&user))
@@ -208,7 +220,7 @@ async fn finish(sdk: Arc<Client>) {
 }
 
 async fn close(sdk: Arc<Client>) {
-    deregister().await;
+    deregister(DOMAIN).await;
     Arc::try_unwrap(sdk)
         .expect("the domain retained the SDK client")
         .close();
@@ -240,6 +252,34 @@ async fn assert_targeting(client: &FeatureClient) {
             .await
             .unwrap_or_else(|_| "unresolved".to_owned()),
         "Dog"
+    );
+}
+
+async fn measure_warm(sdk: &Client, client: &FeatureClient) {
+    const SAMPLES: u128 = 128;
+    let user = User::new("fixture-reader").with_custom("Custom1", "admin");
+    let context = EvaluationContext::default()
+        .with_targeting_key("fixture-reader")
+        .with_custom_field("Custom1", "admin");
+    let native = Instant::now();
+    for _ in 0..SAMPLES {
+        let details = sdk
+            .get_value_details(TARGETED, String::new(), Some(&user))
+            .await;
+        assert_eq!(std::hint::black_box(details.value), "Dog");
+    }
+    let native_ns = native.elapsed().as_nanos() / SAMPLES;
+    let provider = Instant::now();
+    for _ in 0..SAMPLES {
+        let details = client
+            .get_string_details(TARGETED, Some(&context), None)
+            .await
+            .unwrap();
+        assert_eq!(std::hint::black_box(details.value), "Dog");
+    }
+    println!(
+        "Rust warm fixture over {SAMPLES} calls: native prebuilt User {native_ns} ns/call, official OpenFeature {} ns/call",
+        provider.elapsed().as_nanos() / SAMPLES
     );
 }
 
