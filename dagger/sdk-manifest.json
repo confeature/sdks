@@ -394,6 +394,18 @@
       "after": []
     },
     {
+      "name": "openfeature-dotnet",
+      "gate": "dotnet",
+      "registry": "nuget",
+      "coordinates": "Confeature.OpenFeature",
+      "path": "apps/sdk-dotnet",
+      "versionSource": {
+        "file": "apps/sdk-dotnet/src/Confeature.OpenFeature/Confeature.OpenFeature.csproj",
+        "pattern": "^    <Version>([^<]+)</Version>$"
+      },
+      "after": ["dotnet"]
+    },
+    {
       "name": "dart",
       "gate": "dart",
       "registry": "pubdev",
