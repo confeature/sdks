@@ -30,10 +30,15 @@ const unpublished = async () => false;
 describe("the real publish table", () => {
   // A jsr entry rides along its unit's primary entry (#935, jsr-unit.test.mjs).
   const PRIMARIES = REAL.publish.filter((u) => u.registry !== "jsr");
-  it("has one primary unit per SDK plus the shared and Node provider units", () => {
+  it("has one primary unit per SDK plus shared and the OpenFeature companions", () => {
     const byName = (a, b) => a.localeCompare(b);
     const units = PRIMARIES.map((u) => u.name).sort(byName);
-    const expected = [...REAL.sdks.map((s) => s.name), "shared", "openfeature-node"].sort(byName);
+    const expected = [
+      ...REAL.sdks.map((s) => s.name),
+      "shared",
+      "openfeature-node",
+      "openfeature-browser",
+    ].sort(byName);
     expect(units).toEqual(expected);
   });
 

@@ -157,6 +157,7 @@ const CACHE_KEY_TAIL = /cache[_-]?key|(?<![a-z])tail\b|sha-?256|digest|hash/i;
 const URL_DELEGATES_TO_SDK = new Set([
   "apps/sdk-angular",
   "apps/sdk-browser-js",
+  "apps/sdk-browser-openfeature",
   "apps/sdk-bun",
   "apps/sdk-cloudflare-worker",
   "apps/sdk-deno",

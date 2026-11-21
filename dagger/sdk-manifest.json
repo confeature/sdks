@@ -264,6 +264,18 @@
       "after": ["shared"]
     },
     {
+      "name": "openfeature-browser",
+      "gate": "browser-js",
+      "registry": "npm",
+      "coordinates": "@confeature/openfeature-browser",
+      "path": "apps/sdk-browser-openfeature",
+      "versionSource": {
+        "file": "apps/sdk-browser-openfeature/package.json",
+        "pattern": "^  \"version\": \"([^\"]+)\",$"
+      },
+      "after": ["browser-js"]
+    },
+    {
       "name": "bun",
       "gate": "bun",
       "registry": "npm",

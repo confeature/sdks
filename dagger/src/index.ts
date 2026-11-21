@@ -29,6 +29,7 @@
  * Full design: spec 053 (the Dagger local runner).
  */
 import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
+import { runBrowserProviderSuites } from "./browser-provider-suites.js";
 import { runNodeSuites } from "./node-suites.js";
 
 // SC-001 + Principle VII line 168 — "≤ 5 minutes wall-clock"
@@ -576,11 +577,7 @@ export class Confeature {
    */
   @func()
   async browserTest(source: Directory): Promise<string> {
-    const result = await jsWorkspace(source)
-      .withExec(["pnpm", "--filter", JS_TESTED.browserJs, "test", "run"])
-      .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Phase 3 browserTest)`;
+    return runBrowserProviderSuites(jsWorkspace(source), JS_TESTED.browserJs, "browser");
   }
 
   // Tier-1 SDK gates (#355, epic #354). The five JS-family wrappers
@@ -618,21 +615,13 @@ export class Confeature {
   /** Run apps/sdk-angular's vitest suite (jsdom + @analogjs/vitest-angular). */
   @func()
   async angularTest(source: Directory): Promise<string> {
-    const result = await jsWorkspace(source)
-      .withExec(["pnpm", "--filter", JS_TESTED.angular, "test", "run"])
-      .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Tier 1 angularTest)`;
+    return runBrowserProviderSuites(jsWorkspace(source), JS_TESTED.angular, "angular");
   }
 
   /** Run apps/sdk-react's vitest suite inside the shared node container. */
   @func()
   async reactTest(source: Directory): Promise<string> {
-    const result = await jsWorkspace(source)
-      .withExec(["pnpm", "--filter", JS_TESTED.react, "test", "run"])
-      .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Tier 1 reactTest)`;
+    return runBrowserProviderSuites(jsWorkspace(source), JS_TESTED.react, "react");
   }
 
   /** Run apps/sdk-cloudflare-worker's vitest suite (in-memory KV mock, not workerd). */

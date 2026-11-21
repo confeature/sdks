@@ -39,7 +39,11 @@
     "@confeature/sdk-browser-js": "workspace:^"
   },
   "devDependencies": {
+    "@confeature/openfeature-browser": "workspace:*",
     "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@openfeature/core": "1.12.0",
+    "@openfeature/react-sdk": "1.4.1",
+    "@openfeature/web-sdk": "1.10.0",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

@@ -1,0 +1,58 @@
+{
+  "name": "@confeature/openfeature-browser",
+  "version": "0.1.0",
+  "description": "OpenFeature provider for the Confeature Browser JS SDK.",
+  "license": "MIT",
+  "author": "MakerLabs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confeature/sdks.git",
+    "directory": "apps/sdk-browser-openfeature"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "test": "node tests/run.mjs",
+    "check": "vp check src tests vite.config.ts"
+  },
+  "devDependencies": {
+    "@confeature/sdk-browser-js": "workspace:*",
+    "@confeature/test-fixtures-sdk-parity": "workspace:*",
+    "@confeature/test-harness-live-contract": "workspace:*",
+    "@openfeature/core": "1.12.0",
+    "@openfeature/web-sdk": "1.10.0",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:",
+    "typescript": "^6.0.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@confeature/sdk-browser-js": "workspace:^",
+    "@openfeature/web-sdk": "^1.10.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "confeature": {
+    "owner": "sdk-browser-js"
+  }
+}
