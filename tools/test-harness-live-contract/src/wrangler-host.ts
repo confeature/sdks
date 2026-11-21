@@ -28,6 +28,9 @@ import { join, dirname, delimiter } from "node:path";
 import { spawn } from "node:child_process";
 import type { SeededKey } from "./types.js";
 
+const LOCAL_NPM_REGISTRY = "http://127.0.0.1:1/";
+const LOCAL_NPM_RC = "local-npm.rc";
+
 /**
  * Resolve `npx` to an absolute path by scanning `PATH` once at startup,
  * instead of spawning the bare command name (#340, supply-chain hardening).
@@ -150,6 +153,13 @@ export class WranglerHost {
     console.warn(`[lc-harness] resolved npx → ${this.npxPath}`);
     this.kvArgs = kvNamespaceArgs(this.config.configPath);
     this.persistDir = await mkdtemp(join(tmpdir(), "lc-harness-"));
+    // Wrangler's diagnostic update check loads registry-url/rc even when
+    // its regular banner is disabled. An unscoped package asks for null:registry.
+    await writeFile(
+      join(this.persistDir, LOCAL_NPM_RC),
+      JSON.stringify({ "null:registry": LOCAL_NPM_REGISTRY }),
+      { mode: 0o600 },
+    );
     this.worker = await unstable_dev(this.config.scriptPath, {
       config: this.config.configPath,
       ip: "127.0.0.1",
@@ -301,6 +311,10 @@ export class WranglerHost {
           WRANGLER_SEND_METRICS: "false",
           WRANGLER_SEND_ERROR_REPORTS: "false",
           WRANGLER_HIDE_BANNER: "true",
+          npm_config_offline: "true",
+          npm_config_registry: LOCAL_NPM_REGISTRY,
+          npm_registry: LOCAL_NPM_REGISTRY,
+          npm_config: join(this.persistDir, LOCAL_NPM_RC),
         },
       });
       let stdout = "";

@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { resolveNpx, WranglerHost, wranglerKvArgv } from "../src/wrangler-host.js";
@@ -59,6 +60,10 @@ it("keeps local fixture KV commands independent of host telemetry and agent sett
   vi.stubEnv("WRANGLER_SEND_METRICS", "true");
   vi.stubEnv("WRANGLER_SEND_ERROR_REPORTS", "true");
   vi.stubEnv("WRANGLER_HIDE_BANNER", "false");
+  vi.stubEnv("npm_config_offline", "false");
+  vi.stubEnv("npm_config_registry", "https://registry.example.invalid/");
+  vi.stubEnv("npm_registry", "https://registry.example.invalid/");
+  vi.stubEnv("npm_config", "host-config-file");
   vi.stubEnv("CLAUDECODE", "1");
   vi.stubEnv("CLOUDFLARE_API_TOKEN", "synthetic-never-forwarded");
   const localKv = Object.assign(new EventEmitter(), {
@@ -83,6 +88,10 @@ it("keeps local fixture KV commands independent of host telemetry and agent sett
       WRANGLER_SEND_METRICS: "false",
       WRANGLER_SEND_ERROR_REPORTS: "false",
       WRANGLER_HIDE_BANNER: "true",
+      npm_config_offline: "true",
+      npm_config_registry: "http://127.0.0.1:1/",
+      npm_registry: "http://127.0.0.1:1/",
+      npm_config: join("/unused/kv", "local-npm.rc"),
     });
     expect(options?.env).not.toHaveProperty("CLAUDECODE");
     expect(options?.env).not.toHaveProperty("CLOUDFLARE_API_TOKEN");
