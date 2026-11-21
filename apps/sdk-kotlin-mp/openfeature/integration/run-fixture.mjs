@@ -145,7 +145,7 @@ function createFixtureServers(harness) {
       const body = Buffer.from(await upstream.arrayBuffer());
       if (updateSeed) await updateLazySeed(harness);
       seeded++;
-      const headers = { "content-type": "application/json" };
+      const headers = { "content-type": "application/json", "cache-control": "no-store" };
       const etag = upstream.headers.get("etag");
       if (etag) headers.etag = etag;
       response.writeHead(upstream.status, headers).end(body);

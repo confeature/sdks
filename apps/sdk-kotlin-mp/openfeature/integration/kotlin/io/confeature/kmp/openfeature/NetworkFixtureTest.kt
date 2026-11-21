@@ -138,6 +138,7 @@ class NetworkFixtureTest {
                 List(16) { async { client.getStringDetails("region", "fallback") } }.awaitAll()
             }
             assertTrue(stale.all { it.value == "stale" && it.variant == "stale" && it.errorCode == null })
+            assertFalse(freshConfig.isCompleted)
             releaseWrite.complete(Unit)
             while (!freshConfig.isCompleted) {
                 client.getStringDetails("region", "fallback")

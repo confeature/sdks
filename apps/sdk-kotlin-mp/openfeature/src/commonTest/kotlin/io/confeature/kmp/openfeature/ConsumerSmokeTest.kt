@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp.openfeature
 
-import dev.openfeature.kotlin.sdk.ImmutableContext
 import dev.openfeature.kotlin.sdk.FlagEvaluationDetails
 import dev.openfeature.kotlin.sdk.FlagEvaluationOptions
 import dev.openfeature.kotlin.sdk.Hook
 import dev.openfeature.kotlin.sdk.HookContext
+import dev.openfeature.kotlin.sdk.ImmutableContext
 import dev.openfeature.kotlin.sdk.Reason
 import dev.openfeature.kotlin.sdk.Value
 import dev.openfeature.kotlin.sdk.exceptions.ErrorCode
@@ -36,6 +36,7 @@ class ConsumerSmokeTest {
         val primary = createOpenFeatureAPIInstance()
         val anonymous = createOpenFeatureAPIInstance()
         val adapter = ConfeatureProvider(base)
+        assertTrue(adapter.hooks.isEmpty())
         try {
             primary.setProviderAndWait(adapter)
             anonymous.setProviderAndWait(ConfeatureProvider(base))
