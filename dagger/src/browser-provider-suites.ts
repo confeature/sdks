@@ -2,7 +2,7 @@
 
 import type { Container } from "@dagger.io/dagger";
 
-const BROWSER_PROVIDER = "@confeature/openfeature-browser";
+export const BROWSER_PROVIDER = "@confeature/openfeature-browser";
 const RUNNER = "/work/apps/sdk-browser-openfeature/tests/run.mjs";
 const SDK_LABELS = {
   browser: "Phase 3 browserTest",
@@ -17,8 +17,7 @@ export async function runBrowserProviderSuites(
   sdkPackage: string,
   suite: Suite,
 ): Promise<string> {
-  const provider = workspace.withExec(["pnpm", "--filter", BROWSER_PROVIDER, "run", "build"]);
-  const sdk = provider.withExec(["pnpm", "--filter", sdkPackage, "test", "run"]);
+  const sdk = workspace.withExec(["pnpm", "--filter", sdkPackage, "test", "run"]);
   // The runner itself requires a non-empty report with every selected test green.
   const integration =
     suite === "browser"

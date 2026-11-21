@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-import {
-  ConfigCatClient,
-  CONFEATURE_SDK_VERSION,
-  PollingMode,
-  type IOptions,
-} from "@confeature/sdk-browser-js";
+import { ConfigCatClient, CONFEATURE_SDK_VERSION, PollingMode } from "@confeature/sdk-browser-js";
 import { vi } from "vitest";
 
 import { createSeed, fixtureKey } from "./seed.mjs";
@@ -17,7 +12,8 @@ export const viewer = { targetingKey: "synthetic-viewer", Custom1: "viewer" };
 
 export const configPath = `/configuration-files/${fixtureKey}/config_v6.json?sdk=${CONFEATURE_SDK_VERSION}`;
 
-export function checkedFixtureOrigin(origin: string | undefined): string {
+/** @param {string | undefined} origin */
+export function checkedFixtureOrigin(origin) {
   if (
     !origin ||
     !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(origin) ||
@@ -28,8 +24,13 @@ export function checkedFixtureOrigin(origin: string | undefined): string {
   return origin;
 }
 
-/** Refuse other URLs before fetching and stop redirects at the first response. */
-export function guardedFetch(expected: string, transport: typeof fetch): typeof fetch {
+/**
+ * Refuse other URLs before fetching and stop redirects at the first response.
+ * @param {string} expected
+ * @param {typeof fetch} transport
+ * @returns {typeof fetch}
+ */
+export function guardedFetch(expected, transport) {
   return async (input, init) => {
     const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
     if (url !== expected) throw new Error("Unexpected fixture request URL.");
@@ -51,7 +52,11 @@ export function installFixtureTransport() {
 
   return {
     transport,
-    createClient: (mode: PollingMode = PollingMode.ManualPoll, options: IOptions = {}) =>
+    /**
+     * @param {import("@confeature/sdk-browser-js").PollingMode} [mode]
+     * @param {import("@confeature/sdk-browser-js").IOptions} [options]
+     */
+    createClient: (mode = PollingMode.ManualPoll, options = {}) =>
       new ConfigCatClient(fixtureKey, mode, { ...options, baseUrl }),
     async reseed(attribute = "viewer") {
       const response = await seed(`${baseUrl}/admin/seed`, {

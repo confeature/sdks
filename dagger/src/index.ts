@@ -29,7 +29,7 @@
  * Full design: spec 053 (the Dagger local runner).
  */
 import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
-import { runBrowserProviderSuites } from "./browser-provider-suites.js";
+import { BROWSER_PROVIDER, runBrowserProviderSuites } from "./browser-provider-suites.js";
 import { runNodeSuites } from "./node-suites.js";
 
 // SC-001 + Principle VII line 168 — "≤ 5 minutes wall-clock"
@@ -104,6 +104,7 @@ function nodeContainer(source: Directory, platform?: Platform): Container {
 const JS_TESTED = {
   node: "@confeature/sdk-node",
   browserJs: "@confeature/sdk-browser-js",
+  browserProvider: BROWSER_PROVIDER,
   deno: "@confeature/sdk-deno",
   bun: "@confeature/sdk-bun",
   angular: "@confeature/sdk-angular",
@@ -113,10 +114,9 @@ const JS_TESTED = {
 } as const;
 
 /**
- * `nodeContainer` plus ONE build exec over `JS_TESTED`. Identical in
- * every caller, so Dagger runs it once per session. The trade-off, accepted: a
- * failed dependency build reddens every JS-family function, under whichever
- * name rejects first — the build step's own error names the package.
+ * `nodeContainer` plus one build exec over `JS_TESTED`, shared by every caller.
+ * Dagger runs it once per session. A dependency build failure affects every
+ * JS-family function and names the package in the build error.
  */
 function jsWorkspace(source: Directory, platform?: Platform): Container {
   return nodeContainer(source, platform).withExec([

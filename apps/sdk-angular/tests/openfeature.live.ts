@@ -12,7 +12,7 @@ import {
   admin,
   installFixtureTransport,
   targetedFlag,
-} from "../../sdk-browser-openfeature/tests/fixture.js";
+} from "../../sdk-browser-openfeature/tests/fixture.mjs";
 
 const domain = "confeature-angular-fixture";
 const viewer = { targetingKey: "fixture-viewer", Custom1: "viewer" };

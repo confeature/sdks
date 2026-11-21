@@ -10,7 +10,6 @@ import { createSeed } from "./seed.mjs";
 
 const require = createRequire(import.meta.url);
 const harness = dirname(require.resolve("@confeature/test-harness-live-contract/package.json"));
-const vitePlus = dirname(require.resolve("vite-plus/package.json"));
 const directory = await mkdtemp(join(tmpdir(), "confeature-openfeature-browser-"));
 
 try {
@@ -23,8 +22,8 @@ try {
     seedPath,
     "--exec",
     "--",
-    process.execPath,
-    join(vitePlus, "bin/vp"),
+    // Use pnpm's shim so native bindings resolve from a relocated virtual store.
+    "vp",
     "test",
     "run",
     ...process.argv.slice(2),

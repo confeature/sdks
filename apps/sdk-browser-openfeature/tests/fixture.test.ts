@@ -2,7 +2,7 @@
 
 import { expect, it, vi } from "vitest";
 
-import { checkedFixtureOrigin, configPath, guardedFetch } from "./fixture.ts";
+import { checkedFixtureOrigin, configPath, guardedFetch } from "./fixture.mjs";
 
 const origin = "http://127.0.0.1:4133";
 const expected = `${origin}${configPath}`;

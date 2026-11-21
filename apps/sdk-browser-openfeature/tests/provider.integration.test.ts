@@ -11,7 +11,7 @@ import {
 } from "@openfeature/web-sdk";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { admin, configPath, installFixtureTransport, targetedFlag, viewer } from "./fixture.ts";
+import { admin, configPath, installFixtureTransport, targetedFlag, viewer } from "./fixture.mjs";
 
 let fixture: ReturnType<typeof installFixtureTransport>;
 let clients: ConfigCatClient[];

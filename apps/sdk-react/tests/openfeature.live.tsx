@@ -11,7 +11,7 @@ import {
   admin,
   installFixtureTransport,
   targetedFlag,
-} from "../../sdk-browser-openfeature/tests/fixture.ts";
+} from "../../sdk-browser-openfeature/tests/fixture.mjs";
 
 const domain = "confeature-react-fixture";
 const viewer = { targetingKey: "fixture-viewer", Custom1: "viewer" };

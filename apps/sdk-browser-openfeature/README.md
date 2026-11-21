@@ -10,21 +10,36 @@ later.
 npm install @confeature/openfeature-browser @confeature/sdk-browser-js @openfeature/web-sdk
 ```
 
+Save this setup as `flags.ts` to reuse the same client ownership and shutdown
+with React or Angular.
+
 ```ts
 import { ConfeatureProvider } from "@confeature/openfeature-browser";
-import { getClient, PollingMode } from "@confeature/sdk-browser-js";
-import { OpenFeature } from "@openfeature/web-sdk";
+import { ConfigCatClient, PollingMode } from "@confeature/sdk-browser-js";
+import { NOOP_PROVIDER, OpenFeature } from "@openfeature/web-sdk";
 
-export async function startFlags(sdkKey: string) {
+export function createFlagRegistration(sdkKey: string, domain: string) {
   const mode = PollingMode.AutoPoll;
-  const sdk = getClient(sdkKey, mode);
-  const domain = "storefront";
+  const sdk = new ConfigCatClient(sdkKey, mode);
   const provider = new ConfeatureProvider(sdk, mode);
 
-  const close = async () => {
-    await OpenFeature.clearProviders();
-    sdk.dispose();
+  return {
+    provider,
+    async close() {
+      try {
+        if (OpenFeature.getProvider(domain) === provider) {
+          await OpenFeature.setProviderAndWait(domain, NOOP_PROVIDER, {});
+        }
+      } finally {
+        sdk.dispose();
+      }
+    },
   };
+}
+
+export async function startFlags(sdkKey: string) {
+  const domain = "storefront";
+  const { provider, close } = createFlagRegistration(sdkKey, domain);
 
   try {
     await OpenFeature.setProviderAndWait(domain, provider, {
@@ -112,18 +127,17 @@ the provider when bootstrapping your application. Use the same domain when
 reading flags from `FeatureFlagService`.
 
 ```ts
-import { ConfeatureProvider } from "@confeature/openfeature-browser";
-import { getClient, PollingMode } from "@confeature/sdk-browser-js";
 import { provideOpenFeature } from "@openfeature/angular-sdk";
+import { createFlagRegistration } from "./flags";
 
 export function storefrontFlags(sdkKey: string) {
-  const mode = PollingMode.AutoPoll;
-  const sdk = getClient(sdkKey, mode);
+  const domain = "storefront";
+  const { provider, close } = createFlagRegistration(sdkKey, domain);
   return {
-    sdk,
+    close,
     providers: [
       provideOpenFeature({
-        domainBoundProviders: { storefront: new ConfeatureProvider(sdk, mode) },
+        domainBoundProviders: { [domain]: provider },
         context: { targetingKey: "account-123", plan: "pro" },
       }),
     ],
@@ -131,7 +145,8 @@ export function storefrontFlags(sdkKey: string) {
 }
 ```
 
-Include the returned providers in your application's configuration and keep
-`sdk` for shutdown. Inject `FeatureFlagService` and subscribe to its
+Include the returned providers in your application's configuration. Call
+`close()` when the app shuts down or if bootstrap fails. Inject
+`FeatureFlagService` and subscribe to its
 `getBooleanDetails("new-checkout", false, "storefront")` observable to receive
 flag changes.
