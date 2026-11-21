@@ -96,7 +96,15 @@ try {
     OPENFEATURE_RUST_CANCEL_ACK: cancellation,
   };
   const child = spawn(command, args, { env, stdio: "inherit" });
-  const [code] = await once(child, "exit");
+  const forward = (signal) => child.kill(signal);
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) process.on(signal, forward);
+  let code;
+  try {
+    [code] = await once(child, "exit");
+  } finally {
+    for (const signal of signals) process.off(signal, forward);
+  }
   if (code !== 0) throw new Error(`The Rust packed consumer exited with ${code}`);
   if (
     stats.canary !== 0 ||

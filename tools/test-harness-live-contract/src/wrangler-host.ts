@@ -283,7 +283,26 @@ export class WranglerHost {
     // wrangler kv key list already emits JSON by default; no extra flag needed.
     if (!this.npxPath) throw new Error("WranglerHost not started (npx unresolved)");
     return await new Promise<string | null>((resolve, reject) => {
-      const proc = spawn(this.npxPath, fullArgs, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+      const proc = spawn(this.npxPath, fullArgs, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        // Fixture KV commands use local persistence and must ignore host
+        // preferences for telemetry, error uploads and banner update checks.
+        env: {
+          PATH: process.env.PATH ?? process.env.Path,
+          PATHEXT: process.env.PATHEXT,
+          SystemRoot: process.env.SystemRoot,
+          HOME: process.env.HOME,
+          USERPROFILE: process.env.USERPROFILE,
+          TMPDIR: process.env.TMPDIR,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          CI: "true",
+          WRANGLER_SEND_METRICS: "false",
+          WRANGLER_SEND_ERROR_REPORTS: "false",
+          WRANGLER_HIDE_BANNER: "true",
+        },
+      });
       let stdout = "";
       let stderr = "";
       proc.stdout.on("data", (c: Buffer) => {

@@ -56,16 +56,15 @@ try {
     { env, stdio: "inherit" },
   );
   const forward = (signal) => child.kill(signal);
-  process.on("SIGINT", forward);
-  process.on("SIGTERM", forward);
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) process.on(signal, forward);
   try {
     process.exitCode = await new Promise((resolve, reject) => {
       child.once("error", reject);
       child.once("exit", (code) => resolve(code ?? 1));
     });
   } finally {
-    process.off("SIGINT", forward);
-    process.off("SIGTERM", forward);
+    for (const signal of signals) process.off(signal, forward);
   }
 } finally {
   await rm(directory, { force: true, recursive: true });

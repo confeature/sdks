@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-import { describe, expect, it } from "vitest";
-import { resolveNpx, wranglerKvArgv } from "../src/wrangler-host.js";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
+import { resolveNpx, WranglerHost, wranglerKvArgv } from "../src/wrangler-host.js";
+
+vi.mock("node:child_process", async (original) => ({
+  ...(await original<typeof import("node:child_process")>()),
+  spawn: vi.fn(),
+}));
 
 /**
  * #340 — supply-chain hardening. The harness must resolve `npx` to an
@@ -45,4 +53,41 @@ describe("wranglerKvArgv (#918)", () => {
       "--persist-to=/p",
     ]);
   });
+});
+
+it("keeps local fixture KV commands independent of host telemetry and agent settings", async () => {
+  vi.stubEnv("WRANGLER_SEND_METRICS", "true");
+  vi.stubEnv("WRANGLER_SEND_ERROR_REPORTS", "true");
+  vi.stubEnv("WRANGLER_HIDE_BANNER", "false");
+  vi.stubEnv("CLAUDECODE", "1");
+  vi.stubEnv("CLOUDFLARE_API_TOKEN", "synthetic-never-forwarded");
+  const localKv = Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  });
+  vi.mocked(spawn).mockReturnValueOnce(localKv as unknown as ReturnType<typeof spawn>);
+  const host = new WranglerHost({ scriptPath: "unused", configPath: "/unused/wrangler.toml" });
+  const internals = host as unknown as { persistDir: string; npxPath: string };
+  internals.persistDir = "/unused/kv";
+  internals.npxPath = "/unused/npx";
+  queueMicrotask(() => {
+    localKv.stdout.end("[]");
+    localKv.emit("close", 0);
+  });
+  try {
+    await expect(host.clear()).resolves.toBeUndefined();
+    expect(spawn).toHaveBeenCalledOnce();
+    const options = vi.mocked(spawn).mock.calls[0]?.[2];
+    expect(options?.env).toMatchObject({
+      CI: "true",
+      WRANGLER_SEND_METRICS: "false",
+      WRANGLER_SEND_ERROR_REPORTS: "false",
+      WRANGLER_HIDE_BANNER: "true",
+    });
+    expect(options?.env).not.toHaveProperty("CLAUDECODE");
+    expect(options?.env).not.toHaveProperty("CLOUDFLARE_API_TOKEN");
+  } finally {
+    vi.unstubAllEnvs();
+    vi.mocked(spawn).mockClear();
+  }
 });
