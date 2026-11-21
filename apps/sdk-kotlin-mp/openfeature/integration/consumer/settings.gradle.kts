@@ -8,8 +8,11 @@ pluginManagement {
     }
 }
 
-val releaseRepo = providers.gradleProperty("releaseRepo").orNull
+val releaseRepo = providers.gradleProperty("releaseRepo").map { java.io.File(it) }.orNull
     ?: error("Supply the companion's packed Maven repository with -PreleaseRepo.")
+require(releaseRepo.isAbsolute && releaseRepo.isDirectory) {
+    "The fixture consumer needs a local, absolute Maven directory."
+}
 
 dependencyResolutionManagement {
     repositories {
