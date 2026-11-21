@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 using System;
+using System.Diagnostics;
 using System.Threading;
 using Confeature.Client.Internal;
 
@@ -109,7 +110,7 @@ public sealed partial class ConfeatureClient
         }
     }
 
-    private void RaiseFlagEvaluated(object evaluationDetails)
+    private void RaiseFlagEvaluated(object evaluationDetails, bool sanitizeDiagnostics)
     {
         var handler = FlagEvaluated;
         if (handler is null)
@@ -126,10 +127,28 @@ public sealed partial class ConfeatureClient
             }
             catch (Exception ex)
             {
+                if (sanitizeDiagnostics)
+                {
+                    LogProviderHookFailure();
+                    continue;
+                }
+
                 _logger.Error(
                     "ConfeatureClient.FlagEvaluated handler raised. sdkKey=" + SdkKey.Redact(_sdkKey),
                     ex);
             }
+        }
+    }
+
+    private void LogProviderHookFailure()
+    {
+        try
+        {
+            _logger.Error("ConfeatureClient.FlagEvaluated handler failed during an OpenFeature evaluation.");
+        }
+        catch (Exception)
+        {
+            Trace.TraceWarning("ConfeatureClient could not log an OpenFeature evaluation hook failure.");
         }
     }
 

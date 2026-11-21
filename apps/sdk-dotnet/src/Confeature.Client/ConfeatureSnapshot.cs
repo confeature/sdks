@@ -131,7 +131,13 @@ public sealed class ConfeatureSnapshot
     /// <param name="defaultValue">Fallback returned on any failure path.</param>
     /// <param name="user">Targeting context, or null to use the snapshot's default user.</param>
     public EvaluationDetails<T> GetValueDetails<T>(string key, T defaultValue, User? user = null) =>
-        GetValueDetailsCore(key, defaultValue, user ?? _defaultUser, null, requireExactType: false).Details;
+        GetNativeValueDetails(key, defaultValue, user).Details;
+
+    internal (EvaluationDetails<T> Details, EvaluationError Error) GetNativeValueDetails<T>(
+        string key,
+        T defaultValue,
+        User? user) =>
+        GetValueDetailsCore(key, defaultValue, user ?? _defaultUser, null, requireExactType: false);
 
     internal (EvaluationDetails<T> Details, EvaluationError Error) GetProviderValueDetails<T>(
         string key,

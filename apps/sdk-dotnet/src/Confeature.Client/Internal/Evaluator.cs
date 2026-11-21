@@ -1095,4 +1095,10 @@ internal enum EvaluationError
     /// FR-007 / SC-004).
     /// </summary>
     EvalException = 6,
+
+    /// <summary>The client was closed before the evaluation started.</summary>
+    ClientClosed = 7,
+
+    /// <summary>The caller canceled a provider evaluation before it ran.</summary>
+    Cancelled = 8,
 }

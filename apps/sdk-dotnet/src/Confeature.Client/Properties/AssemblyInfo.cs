@@ -7,3 +7,4 @@ using System.Runtime.CompilerServices;
 // poll services). Granting it InternalsVisibleTo keeps the public surface
 // minimal while still allowing the parity gates to exercise the internals.
 [assembly: InternalsVisibleTo("Confeature.Client.Tests")]
+[assembly: InternalsVisibleTo("Confeature.OpenFeature")]

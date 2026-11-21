@@ -522,63 +522,6 @@ public sealed partial class ConfeatureClient : IDisposable
     }
 
     /// <summary>
-    /// Resolves <paramref name="key"/> and wraps the outcome in an
-    /// <see cref="EvaluationDetails{T}"/> envelope (spec 083 / #266).
-    /// </summary>
-    /// <remarks>
-    /// Mirrors upstream <c>ConfigCat.Client.ConfigCatClient.GetValueDetails&lt;T&gt;</c>
-    /// 1:1 — same name, arity, generic constraint, and closed-client semantics.
-    /// Synchronous wrapper around <see cref="GetValueDetailsAsync{T}(string, T, User?, CancellationToken)"/>.
-    /// Closed clients return <c>IsDefaultValue=true</c> + <c>ErrorMessage="CLIENT_CLOSED"</c>.
-    /// </remarks>
-    public EvaluationDetails<T> GetValueDetails<T>(string key, T defaultValue, User? user = null)
-    {
-        return GetValueDetailsAsync(key, defaultValue, user, CancellationToken.None)
-            .GetAwaiter()
-            .GetResult();
-    }
-
-    /// <summary>
-    /// Async variant of <see cref="GetValueDetails{T}(string, T, User?)"/>.
-    /// </summary>
-    /// <remarks>
-    /// Mirrors upstream <c>ConfigCat.Client.ConfigCatClient.GetValueDetailsAsync&lt;T&gt;</c>
-    /// 1:1. Triggers the LazyLoad staleness-driven fetch hook before delegating
-    /// to a fresh snapshot.
-    /// </remarks>
-    public async Task<EvaluationDetails<T>> GetValueDetailsAsync<T>(
-        string key,
-        T defaultValue,
-        User? user = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (Volatile.Read(ref _disposed) == 1)
-        {
-            return new EvaluationDetails<T>
-            {
-                Key = key,
-                Value = defaultValue,
-                User = user ?? _defaultUser,
-                IsDefaultValue = true,
-                ErrorMessage = "CLIENT_CLOSED",
-            };
-        }
-
-        try
-        {
-            await _pollService.MaybeFetchForGetValueAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Caller cancellation; carry on with whatever's cached.
-        }
-
-        var details = Snapshot().GetValueDetails(key, defaultValue, user);
-        RaiseFlagEvaluated(details);
-        return details;
-    }
-
-    /// <summary>
     /// Returns the resolved value of every known flag for
     /// <paramref name="user"/> (spec 083 / #266).
     /// </summary>
