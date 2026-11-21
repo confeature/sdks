@@ -108,6 +108,22 @@ it("keeps concurrent targeting isolated and accepts a result equal to the caller
   expect(fixture.transport).toHaveBeenCalledTimes(1);
 });
 
+it("preserves a numeric percentage option and its variation ID", async () => {
+  const sdk = borrowedClient();
+  await OpenFeature.setProviderAndWait(new ConfeatureProvider(sdk));
+  const result = await OpenFeature.getClient().getNumberDetails("decimal", -1, admin);
+  const direct = await sdk.getValueDetailsAsync("decimal", -1, new User(admin.targetingKey));
+  expect(direct.matchedPercentageOption).toBeDefined();
+  expect([1, 2]).toContain(result.value);
+  expect(result).toMatchObject({
+    value: direct.value,
+    variant: direct.variationId,
+    reason: StandardResolutionReasons.SPLIT,
+  });
+  expect(result.errorCode).toBeUndefined();
+  expect(fixture.transport).toHaveBeenCalledTimes(1);
+});
+
 it("keeps success diagnostics private and distinguishes fallback from an incompatible value", async () => {
   const sdk = borrowedClient();
   const evaluate = vi.spyOn(sdk, "getValueDetailsAsync");
@@ -141,18 +157,37 @@ it("keeps success diagnostics private and distinguishes fallback from an incompa
   expect(fixture.transport).toHaveBeenCalledTimes(1);
 });
 
-it("rejects a cold offline registration and leaves OpenFeature's default available", async () => {
+it("requires fresh provider registration when the SDK loads data after a failed initialization", async () => {
   const sdk = borrowedClient(true);
   const evaluate = vi.spyOn(sdk, "getValueDetailsAsync");
-  await expect(OpenFeature.setProviderAndWait(new ConfeatureProvider(sdk))).rejects.toMatchObject({
+  const provider = new ConfeatureProvider(sdk);
+  await expect(OpenFeature.setProviderAndWait(provider)).rejects.toMatchObject({
     code: ErrorCode.PROVIDER_NOT_READY,
   });
-  const details = await OpenFeature.getClient().getStringDetails(targetedFlag, "Fallback", admin);
-  expect(details).toMatchObject({
-    value: "Fallback",
-    errorCode: ErrorCode.GENERAL,
-    reason: StandardResolutionReasons.ERROR,
+  const flags = OpenFeature.getClient();
+  expect(fixture.transport).not.toHaveBeenCalled();
+
+  sdk.setOnline();
+  await vi.waitFor(() => expect(sdk.snapshot().getValue(targetedFlag, "Fallback")).toBe("Cat"));
+  expect(flags.providerStatus).toBe("ERROR");
+
+  const fallback = { active: false };
+  const blocked = [
+    await flags.getStringDetails(targetedFlag, "Fallback", admin),
+    await flags.getObjectDetails(targetedFlag, fallback),
+  ];
+  expect(blocked).toMatchObject([
+    { value: "Fallback", errorCode: ErrorCode.PROVIDER_NOT_READY },
+    { value: fallback, errorCode: ErrorCode.PROVIDER_NOT_READY },
+  ]);
+  expect(evaluate).not.toHaveBeenCalled();
+
+  await OpenFeature.setProviderAndWait(new ConfeatureProvider(sdk));
+  expect(flags.providerStatus).toBe("READY");
+  await expect(flags.getStringDetails(targetedFlag, "Fallback", admin)).resolves.toMatchObject({
+    value: "Dog",
+    variant: "5b64d9b4",
   });
   expect(evaluate).toHaveBeenCalledTimes(1);
-  expect(fixture.transport).not.toHaveBeenCalled();
+  expect(fixture.transport).toHaveBeenCalledTimes(1);
 });

@@ -15,6 +15,13 @@ describe("ConfeatureProvider", () => {
     provider = new ConfeatureProvider(sdk);
   });
 
+  function mockUsableCache() {
+    vi.spyOn(sdk, "snapshot").mockReturnValue({
+      ...sdk.snapshot(),
+      cacheState: ClientCacheState.HasUpToDateFlagData,
+    });
+  }
+
   afterEach(async () => {
     await OpenFeature.close();
     sdk.dispose();
@@ -63,10 +70,7 @@ describe("ConfeatureProvider", () => {
   });
 
   it("returns the original default and hides opaque fallback diagnostics", async () => {
-    vi.spyOn(sdk, "snapshot").mockReturnValue({
-      ...sdk.snapshot(),
-      cacheState: ClientCacheState.HasUpToDateFlagData,
-    });
+    mockUsableCache();
     const evaluate = vi.spyOn(sdk, "getValueDetailsAsync").mockResolvedValue({
       key: "flag",
       value: "discard",
@@ -91,6 +95,8 @@ describe("ConfeatureProvider", () => {
   });
 
   it("sanitizes exceptions thrown by a borrowed client", async () => {
+    mockUsableCache();
+    await provider.initialize();
     vi.spyOn(sdk, "getValueDetailsAsync").mockRejectedValue(new Error("secret-sdk-key"));
     await expect(provider.resolveStringEvaluation("flag", "fallback", {})).resolves.toEqual({
       value: "fallback",
@@ -100,7 +106,27 @@ describe("ConfeatureProvider", () => {
     });
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "rejects non-finite numeric evaluation %s",
+    async (value) => {
+      mockUsableCache();
+      await provider.initialize();
+      vi.spyOn(sdk, "getValueDetailsAsync").mockResolvedValue({
+        key: "numeric",
+        value,
+        isDefaultValue: false,
+      });
+      await expect(provider.resolveNumberEvaluation("numeric", -1, {})).resolves.toMatchObject({
+        value: -1,
+        errorCode: ErrorCode.TYPE_MISMATCH,
+        reason: StandardResolutionReasons.ERROR,
+      });
+    },
+  );
+
   it("copies typed attributes and skips nested and reserved fields", async () => {
+    mockUsableCache();
+    await provider.initialize();
     const evaluate = vi.spyOn(sdk, "getValueDetailsAsync").mockResolvedValue({
       key: "flag",
       value: true,

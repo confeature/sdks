@@ -45,8 +45,10 @@ including them in opt-in evaluation tracing.
 
 The provider uses the SDK cache and waits up to five seconds at registration for
 a cold, online client. With no available flag data, registration rejects with
-`PROVIDER_NOT_READY`. Register again after the SDK loads data if startup reaches
-that deadline. An offline client can register immediately with usable data.
+`PROVIDER_NOT_READY`. Evaluations return the supplied default while registration
+has failed. Once the SDK has loaded data, register a new
+`ConfeatureProvider(sdk)` instance. An offline client can register immediately
+with usable data.
 
 Boolean, string and number evaluations use Confeature's native values. OpenFeature
 exposes the variation ID as its variant when available. An incompatible value or

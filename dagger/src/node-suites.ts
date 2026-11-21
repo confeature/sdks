@@ -30,15 +30,8 @@ function providerTestCount(report: TestReport): number {
 /** Run the Node SDK and provider suites in the same built workspace. */
 export async function runNodeSuites(workspace: Container, nodePackage: string): Promise<string> {
   const sdk = workspace.withExec(["pnpm", "--filter", nodePackage, "test", "run"]);
+  // jsWorkspace builds the harness once for all JavaScript-family suites.
   const provider = sdk
-    .withExec([
-      "pnpm",
-      "--filter",
-      "@confeature/test-harness-live-contract...",
-      "--if-present",
-      "run",
-      "build",
-    ])
     .withExec(["pnpm", "--filter", NODE_PROVIDER, "run", "build"])
     .withExec([
       "pnpm",

@@ -21,23 +21,26 @@ type Primitive = boolean | number | string;
 export class ConfeatureProvider implements Provider {
   readonly runsOn = "server";
   readonly metadata = { name: "Confeature" } as const;
+  private ready = false;
 
   /** The borrowed client must remain free of a default user while the provider uses it. */
   constructor(private readonly client: IConfigCatClient) {}
 
   async initialize(): Promise<void> {
+    this.ready = false;
     try {
-      if (hasFlagData(this.client.snapshot().cacheState)) return;
+      let cacheState = this.client.snapshot().cacheState;
       // The Node SDK currently uses AutoPoll for all online polling options.
       // Check the live cache again because waitForReady remembers the first poll.
-      if (!this.client.isOffline) {
+      if (!hasFlagData(cacheState) && !this.client.isOffline) {
         await waitAtMostFiveSeconds(this.client.waitForReady());
-        if (hasFlagData(this.client.snapshot().cacheState)) return;
+        cacheState = this.client.snapshot().cacheState;
       }
+      this.ready = hasFlagData(cacheState);
     } catch {
       throw new ProviderNotReadyError(NO_FLAG_DATA);
     }
-    throw new ProviderNotReadyError(NO_FLAG_DATA);
+    if (!this.ready) throw new ProviderNotReadyError(NO_FLAG_DATA);
   }
 
   resolveBooleanEvaluation(key: string, defaultValue: boolean, context: EvaluationContext) {
@@ -56,6 +59,7 @@ export class ConfeatureProvider implements Provider {
     _key: string,
     defaultValue: T,
   ): Promise<ResolutionDetails<T>> {
+    if (!this.ready) return failure(defaultValue, ErrorCode.PROVIDER_NOT_READY, NO_FLAG_DATA);
     return failure(defaultValue, ErrorCode.TYPE_MISMATCH, "Confeature flags are scalar values.");
   }
 
@@ -64,6 +68,7 @@ export class ConfeatureProvider implements Provider {
     defaultValue: T,
     context: EvaluationContext,
   ): Promise<ResolutionDetails<T>> {
+    if (!this.ready) return failure(defaultValue, ErrorCode.PROVIDER_NOT_READY, NO_FLAG_DATA);
     try {
       // A null SDK default bypasses the SDK's type check. This lets the provider
       // classify a served value's type with one call and no SDK message parsing.
