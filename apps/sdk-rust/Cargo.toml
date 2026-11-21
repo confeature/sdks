@@ -12,7 +12,7 @@
 
 [package]
 name = "confeature"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.86"
 license = "MIT"
@@ -20,6 +20,7 @@ authors = ["MakerLabs"]
 description = "Confeature Rust SDK — drop-in compatible with the configcat crate"
 repository = "https://github.com/confeature/sdks"
 readme = "README.md"
+exclude = ["tests/openfeature/"]
 keywords = ["feature-flags", "configuration", "configcat", "rollout"]
 categories = ["config", "development-tools"]
 
@@ -27,6 +28,7 @@ categories = ["config", "development-tools"]
 default = ["tokio-runtime"]
 tokio-runtime = ["dep:tokio"]
 async-std-runtime = ["dep:async-std"]
+openfeature = ["tokio-runtime", "dep:open-feature", "dep:time"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
@@ -49,6 +51,11 @@ tokio = { version = "1", features = [
   "fs",
 ], optional = true }
 async-std = { version = "1", optional = true }
+# The 0.3.0 provider module re-exports its test-util type unconditionally.
+open-feature = { version = "=0.3.0", default-features = false, features = ["test-util"], optional = true }
+# OpenFeature's transitive time dependency needs a patched release, which
+# raises the opt-in Rust floor to 1.88. The base crate does not build it.
+time = { version = "0.3.47", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

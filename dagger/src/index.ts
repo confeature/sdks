@@ -740,32 +740,28 @@ export class Confeature {
     return `${lastLine} (Tier 2 rubyTest)`;
   }
 
-  /**
-   * Run apps/sdk-rust's MSRV guard + format check + tests (#363).
-   *
-   * Two rustc floors, because the dev-deps need a higher one than the library:
-   *  - LIBRARY MSRV = 1.86 — what a consumer needs; what Cargo.toml advertises.
-   *    The locked NON-dev tree needs ≥1.86 (icu_* 2.2, idna_adapter 1.2.2,
-   *    base16ct 0.3 edition2024). `cargo +1.86 build --lib` is the guard: it
-   *    compiles only the lib target (no dev-deps), so a green run proves the
-   *    advertised MSRV genuinely builds.
-   *  - TEST floor = 1.88 (the image default) — the `wiremock` 0.6.5 dev-dep uses
-   *    let-chains (stabilised in 1.88), so `cargo test` needs ≥1.88.
-   * If Cargo.toml's `rust-version` changes, bump the `+1.86` toolchain below in
-   * lockstep; if a dev-dep raises the test floor, bump the `rust:1.88` image.
-   */
+  /** Verify the Rust 1.86 base and the packed OpenFeature consumer on 1.88. */
   @func()
   async rustTest(source: Directory): Promise<string> {
-    // MSRV guard (cargo +1.86 build --lib, no dev-deps), then fmt, clippy
-    // with -D warnings (the SDK's declared merge bar, #793 FR-007) and the
-    // tests on the image's 1.88 default.
-    // rustfmt and clippy adds are idempotent.
-    const result = await rustToolchain(source)
+    const container = await liveContainer(source, "rust");
+    const result = await container
+      .withWorkdir("/work/apps/sdk-rust")
       .withExec([
         "bash",
         "-eu",
         "-c",
-        "rustup toolchain install 1.86 --profile minimal && cargo +1.86 build --lib && rustup component add rustfmt clippy && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
+        [
+          "rustup toolchain install 1.86 --profile minimal",
+          "cargo +1.86 build --lib",
+          "rustup component add rustfmt clippy",
+          "cargo fmt --check",
+          "rustfmt --edition 2021 --check tests/openfeature/consumer.rs",
+          "cargo clippy --all-targets -- -D warnings",
+          "cargo test",
+          "cargo clippy --all-targets --features openfeature -- -D warnings",
+          "cargo test --features openfeature --lib",
+          "bash tests/openfeature/packed-consumers.sh",
+        ].join(" && "),
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];

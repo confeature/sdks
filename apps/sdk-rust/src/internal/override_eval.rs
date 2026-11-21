@@ -67,168 +67,131 @@ pub(crate) fn evaluate_sync(
     key: &str,
     default: &Value,
 ) -> (bool, Option<Value>) {
-    // Branch 1.
-    let Some(o) = overrides else {
-        return (false, None);
-    };
-
-    // Branch 2.
-    if o.behaviour() != OverrideBehaviour::LocalOnly {
-        return (false, None);
+    match evaluate_flat_override(overrides, key, default, FlatOverrideMode::Legacy) {
+        FlatOverrideOutcome::FallThrough => (false, None),
+        FlatOverrideOutcome::Value(value) => (true, Some(value)),
+        _ => (true, Some(default.clone())),
     }
-
-    // Branch 3.
-    let Some(map) = o.get_overrides_sync() else {
-        return (false, None);
-    };
-
-    // From here we are committed to the LocalOnly contract — never
-    // fall through.
-
-    // Branch 4.
-    let Some(raw) = map.get(key) else {
-        return (true, Some(default.clone()));
-    };
-
-    // Branch 5.
-    if raw.is_null() {
-        return (true, Some(default.clone()));
-    }
-
-    // Branch 6 — type-mismatch check. A `Null` default bypasses the
-    // check (matches the TS `defaultValue !== null` semantics).
-    if !default.is_null() && !same_json_kind(raw, default) {
-        return (true, Some(default.clone()));
-    }
-
-    // Branch 7 — happy path.
-    (true, Some(raw.clone()))
 }
 
-/// Full-config override resolution — Rust port of the canonical TS
-/// `evaluateFullConfigOverrideSync` (spec 135 / #436, epic #382, US3),
-/// mirroring sdk-python's `evaluate_full_config_override_sync` and
-/// sdk-dart's `evaluateFullConfigOverrideSync`.
-///
-/// When the override source is a full-config source (its
-/// [`OverridesView::full_config`] returns `Some`), resolves `key` through
-/// the real Rust evaluator so targeting rules / segments / prerequisites /
-/// percentage options apply offline — the rule-bearing sibling of
-/// [`evaluate_sync`]'s flat lookup.
-///
-/// Returns:
-/// - `(false, None)` → overrides absent, behaviour non-LocalOnly, or the
-///   source is NOT a full-config source (caller falls through to the
-///   flat-map helper / normal eval).
-/// - `(true, Some(value))` → the rule-resolved value. LocalOnly contract:
-///   never fall through to the cache — the evaluator already returns the
-///   supplied `default` for any non-clean resolution, preserving the
-///   contract.
-///
-/// INV-4: the evaluator receives the FULL config blob (`{p, f, s}`) — salt
-/// (`p.s`) + segments (`s`), never just `f` (the spec-129 dropped-salt
-/// regression class). The evaluator never panics — any failure resolves to
-/// the caller's `default`.
-fn evaluate_full_config_sync(
+#[derive(Clone, Copy)]
+pub(crate) enum FlatOverrideMode {
+    Legacy,
+    #[cfg(feature = "openfeature")]
+    Strict,
+}
+
+enum FlatOverrideOutcome {
+    FallThrough,
+    Missing,
+    Null,
+    WrongKind,
+    Value(Value),
+}
+
+/// Keep the outcome of the single flat lookup so strict callers can
+/// distinguish a served value from a fallback, even when the two are equal.
+fn evaluate_flat_override(
     overrides: Option<&dyn OverridesView>,
     key: &str,
     default: &Value,
-    user: Option<&User>,
-) -> (bool, Option<Value>) {
+    mode: FlatOverrideMode,
+) -> FlatOverrideOutcome {
     let Some(o) = overrides else {
-        return (false, None);
+        return FlatOverrideOutcome::FallThrough;
     };
     if o.behaviour() != OverrideBehaviour::LocalOnly {
-        return (false, None);
+        return FlatOverrideOutcome::FallThrough;
     }
-    let Some(config) = o.full_config() else {
-        return (false, None);
+    let Some(mut map) = o.get_overrides_sync() else {
+        return FlatOverrideOutcome::FallThrough;
     };
-    // Pass the FULL config blob (salt + segments + f), never just `f`
-    // (INV-4).
-    let r = evaluator::evaluate(Some(config), key, default, user);
-    (true, Some(r.value))
+    let Some(raw) = map.remove(key) else {
+        return FlatOverrideOutcome::Missing;
+    };
+    if raw.is_null() {
+        return FlatOverrideOutcome::Null;
+    }
+    if mode.accepts(&raw, default) {
+        FlatOverrideOutcome::Value(raw)
+    } else {
+        FlatOverrideOutcome::WrongKind
+    }
 }
 
-/// Shared override router — Rust port of the canonical TS
-/// `evaluateOverride` (spec 135 / #436), mirroring sdk-python's
-/// `evaluate_override` and sdk-dart's `evaluateOverride`.
-///
-/// Dispatches between the flat-map path and the full-config path so the
-/// `get_value` call sites change minimally: a full-config source (one
-/// whose [`OverridesView::full_config`] returns `Some`) routes through the
-/// real evaluator with `user` threaded; every other source (map / custom)
-/// keeps the existing byte-identical flat-map resolution.
-///
-/// Returns the same `(bool, Option<Value>)` contract as [`evaluate_sync`]:
-/// - `(false, _)` → no override applies; caller falls through to the
-///   normal cache-driven eval.
-/// - `(true, Some(value))` → resolved override result.
-///
-/// Dispatch is on the source TYPE (full-config vs flat), NOT on the
-/// resolved value — a full-config source whose evaluator returns the
-/// default still stays on the rule path, never the flat path (which would
-/// mis-read rule-bearing settings as value-only).
+impl FlatOverrideMode {
+    fn accepts(self, raw: &Value, default: &Value) -> bool {
+        match self {
+            // Legacy overrides classify every number together and bypass the
+            // type check for a null default, matching the cross-SDK contract.
+            Self::Legacy => default.is_null() || same_json_kind(raw, default),
+            #[cfg(feature = "openfeature")]
+            Self::Strict if default.is_i64() => raw.is_i64(),
+            #[cfg(feature = "openfeature")]
+            Self::Strict if default.is_f64() => raw.is_f64(),
+            #[cfg(feature = "openfeature")]
+            Self::Strict => same_json_kind(raw, default),
+        }
+    }
+}
+
+fn local_full_config(overrides: Option<&dyn OverridesView>) -> Option<&Value> {
+    overrides
+        .filter(|view| view.behaviour() == OverrideBehaviour::LocalOnly)
+        .and_then(OverridesView::full_config)
+}
+
+/// Rule-bearing LocalOnly overrides resolve with the native evaluator.
+/// The other sources use the flat-map path.
 pub(crate) fn evaluate_override_routed(
     overrides: Option<&dyn OverridesView>,
     key: &str,
     default: &Value,
     user: Option<&User>,
 ) -> (bool, Option<Value>) {
-    // Full-config source → ALWAYS resolve through the evaluator.
-    if let Some(o) = overrides {
-        if o.behaviour() == OverrideBehaviour::LocalOnly && o.full_config().is_some() {
-            return evaluate_full_config_sync(overrides, key, default, user);
-        }
+    if let Some(config) = local_full_config(overrides) {
+        let result = evaluator::evaluate(Some(config), key, default, user);
+        return (true, Some(result.value));
     }
-    // Every other source (map / custom) keeps the byte-identical flat-map
-    // path.
     evaluate_sync(overrides, key, default)
 }
 
-/// Details-aware override router — the `get_value_details` sibling of
-/// [`evaluate_override_routed`] (spec 152 / #475, US2). Mirrors the
-/// canonical TS `evaluateOverrideDetails` (the sdk-shared #395 fix that
-/// stopped the override path dropping `variationId` /
-/// `matchedTargetingRule` / `matchedPercentageOption` for
-/// `getValueDetails`).
-///
-/// For a FULL-CONFIG LocalOnly source, resolves `key` through the real
-/// evaluator and returns the WHOLE [`EvalResult`] — so the caller can
-/// populate `variation_id` + matched rule / option on the
-/// `EvaluationDetails` envelope, rather than only the value (the gap the
-/// value-only [`evaluate_override_routed`] left behind).
-///
-/// Returns:
-/// - `(false, None)` → overrides absent, behaviour non-LocalOnly, or the
-///   source is NOT a full-config source (caller falls through to the
-///   flat-map / cache path; for a flat source it must call
-///   [`evaluate_override_routed`] for the value).
-/// - `(true, Some(result))` → the rule-resolved [`EvalResult`] (value +
-///   variation_id + matched rule / option). LocalOnly contract: never
-///   fall through.
+/// Preserve the evaluator's details for rule-bearing sources and classify
+/// flat sources using the same lookup as the value-only path.
 pub(crate) fn evaluate_override_routed_details(
     overrides: Option<&dyn OverridesView>,
     key: &str,
     default: &Value,
     user: Option<&User>,
-) -> (bool, Option<EvalResult>) {
-    let Some(o) = overrides else {
-        return (false, None);
-    };
-    if o.behaviour() != OverrideBehaviour::LocalOnly {
-        return (false, None);
+    mode: FlatOverrideMode,
+) -> Option<EvalResult> {
+    if let Some(config) = local_full_config(overrides) {
+        // Retain the salt and segments for the evaluator, as well as the
+        // variation ID and match markers it returns.
+        return Some(evaluator::evaluate(Some(config), key, default, user));
     }
-    let Some(config) = o.full_config() else {
-        // Flat / value-only source — no rule details to surface; the
-        // caller routes through the value-only path.
-        return (false, None);
+    let (value, error) = match (evaluate_flat_override(overrides, key, default, mode), mode) {
+        (FlatOverrideOutcome::FallThrough, _) => return None,
+        (FlatOverrideOutcome::Value(value), _) => (value, ""),
+        (_, FlatOverrideMode::Legacy) => (default.clone(), ""),
+        #[cfg(feature = "openfeature")]
+        (FlatOverrideOutcome::Missing, FlatOverrideMode::Strict) => {
+            (default.clone(), "KEY_NOT_FOUND")
+        }
+        #[cfg(feature = "openfeature")]
+        (FlatOverrideOutcome::Null, FlatOverrideMode::Strict) => (default.clone(), "NULL_OVERRIDE"),
+        #[cfg(feature = "openfeature")]
+        (FlatOverrideOutcome::WrongKind, FlatOverrideMode::Strict) => {
+            (default.clone(), "TYPE_MISMATCH")
+        }
     };
-    // Pass the FULL config blob (salt + segments + f), never just `f`
-    // (INV-4). Propagate the whole EvalResult so the details envelope
-    // keeps variation_id + matched rule / option (the #395 fix).
-    let r = evaluator::evaluate(Some(config), key, default, user);
-    (true, Some(r))
+    Some(EvalResult {
+        value,
+        error,
+        variation_id: String::new(),
+        matched_targeting_rule: false,
+        matched_percentage_option: false,
+    })
 }
 
 /// Reports whether two [`Value`]s share a kind for the override-eval

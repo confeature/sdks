@@ -7,10 +7,6 @@ feature-flag service. It is a drop-in replacement for the upstream
 [`configcat`](https://crates.io/crates/configcat) crate — migration is
 one line in `Cargo.toml` plus a rename of the `use` paths.
 
-> **Status**: pre-release (`0.1.1`). Boolean evaluation only in this
-> wave; string / int / double evaluators land before crates.io publish
-> (epic #29).
-
 ## Install
 
 ```bash
@@ -21,16 +17,12 @@ cargo add confeature
 
 ```toml
 [dependencies]
-confeature = "0.1"
+confeature = "0.2"
 ```
 
 Requires Rust 1.86+ (edition 2021). `tokio` is the default async runtime.
-To use `async-std` instead:
-
-```toml
-[dependencies]
-confeature = { version = "0.1", default-features = false, features = ["async-std-runtime"] }
-```
+The SDK's polling and HTTP code requires a Tokio runtime. An application
+using async-std can run SDK work on its own Tokio runtime and await the result.
 
 ## Quickstart
 
@@ -68,7 +60,7 @@ The SDK never panics from a public method.
 
 ```diff
 - configcat = "0.3"
-+ confeature = "0.1"
++ confeature = "0.2"
 ```
 
 ```diff
@@ -137,9 +129,82 @@ before any background poll has happened.
 | ------------------- | ------- | --------------------------------- |
 | `tokio-runtime`     | yes     | `tokio` (rt, time, fs, sync, ...) |
 | `async-std-runtime` | no      | `async-std`                       |
+| `openfeature`       | no      | Official `open-feature` Rust SDK  |
 
-The two runtime features are mutually exclusive. Opting into
-`async-std-runtime` requires `default-features = false`.
+The two runtime features are mutually exclusive. The `openfeature` feature
+enables `tokio-runtime`.
+
+## OpenFeature
+
+Enable the `openfeature` Cargo feature with Rust 1.88 or later and
+`open-feature` 0.3.0. Tokio runs the SDK's polling, HTTP requests and
+evaluation. An async-std application can await work dispatched to its own
+Tokio runtime.
+
+```toml
+[dependencies]
+confeature = { version = "0.2", features = ["openfeature"] }
+open-feature = "=0.3.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use std::sync::Arc;
+
+use confeature::{openfeature::ConfeatureProvider, Client, PollingMode};
+use open_feature::{provider::NoOpProvider, EvaluationContext, OpenFeature};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sdk = Arc::new(
+        Client::builder(std::env::var("CONFEATURE_SDK_KEY")?)
+            .polling_mode(PollingMode::ManualPoll)
+            .build()?,
+    );
+    sdk.force_refresh().await?;
+    let provider = ConfeatureProvider::new(Arc::clone(&sdk)).map_err(|error| error.code)?;
+    OpenFeature::singleton_mut()
+        .await
+        .set_named_provider("checkout", provider)
+        .await;
+
+    let client = OpenFeature::singleton().await.create_named_client("checkout");
+    let context = EvaluationContext::default().with_targeting_key("customer-123");
+    let dark_mode = client
+        .get_bool_value("feature.dark-mode", Some(&context), None)
+        .await
+        .unwrap_or(false);
+    println!("dark-mode = {dark_mode}");
+
+    OpenFeature::singleton_mut()
+        .await
+        .set_named_provider("checkout", NoOpProvider::default())
+        .await;
+    drop(sdk);
+    Ok(())
+}
+```
+
+Build the client without `default_user`. The provider uses the OpenFeature
+targeting key as Confeature's identifier and accepts string `Email` and
+`Country` fields. Custom targeting fields support strings, integers, finite
+decimals, booleans as strings, timestamps with fractional seconds, and
+`Vec<String>` wrapped in `EvaluationContextFieldValue::new_struct`.
+
+Registration is immediate. The SDK's polling mode still controls when data
+arrives. For example, call `force_refresh` on a cold `ManualPoll` client
+before expecting a flag value. OpenFeature 0.3.0 returns a `Result`. Use
+`unwrap_or` to supply your application's default or handle the error directly.
+An evaluation before configuration is available returns `PROVIDER_NOT_READY`.
+A missing flag returns `FLAG_NOT_FOUND`.
+
+The provider supports booleans, strings, `i64` and `f64`. A value with an
+incompatible type or a request for a structured flag returns `TYPE_MISMATCH`.
+
+The provider holds a shared `Arc<Client>`. Replacing the provider on its named
+domain with `NoOpProvider` releases that reference after in-flight evaluations
+finish. Your application owns its retained client reference and can keep
+using it after OpenFeature cleanup.
 
 ## Local development
 

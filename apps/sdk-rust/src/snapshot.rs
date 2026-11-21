@@ -10,7 +10,7 @@
 use crate::evaluation_details::{collect_all_values, EvaluationDetails, Value as PrimitiveValue};
 use crate::internal::evaluator;
 use crate::internal::override_eval::{
-    evaluate_override_routed, evaluate_override_routed_details, OverridesView,
+    evaluate_override_routed, evaluate_override_routed_details, FlatOverrideMode, OverridesView,
 };
 use crate::user::User;
 use serde::de::DeserializeOwned;
@@ -97,150 +97,59 @@ impl Snapshot {
     where
         T: serde::Serialize + DeserializeOwned + Clone,
     {
-        let user_clone = user.cloned().or_else(|| self.default_user.clone());
-        let default_value = match serde_json::to_value(&default) {
-            Ok(v) => v,
-            Err(_) => {
-                return EvaluationDetails::err(
-                    key,
-                    default,
-                    self.fetch_time_unix_millis,
-                    user_clone,
-                    "MALFORMED_DEFAULT",
-                );
-            }
-        };
+        self.get_value_details_with_mode(key, default, user, FlatOverrideMode::Legacy)
+    }
 
-        // Override path FIRST. The router (spec 135 / #436) threads the
-        // user so a full-config override source resolves targeting rules
-        // through the real evaluator; the flat-map source keeps the
-        // byte-identical value-only path.
-        let details_user = user.or(self.default_user.as_ref());
-        if let Some(view) = self.overrides.as_deref() {
-            // Full-config source → resolve through the DETAILS-aware router
-            // (spec 152 / #475, US2; mirrors the sdk-shared #395 fix) so
-            // `variation_id` + matched rule / option propagate through the
-            // override path instead of being dropped to the value alone.
-            let (details_handled, result) =
-                evaluate_override_routed_details(Some(view), key, &default_value, details_user);
-            if details_handled {
-                if let Some(r) = result {
-                    if r.error.is_empty() {
-                        let matched_rule = r.matched_targeting_rule;
-                        let matched_option = r.matched_percentage_option;
-                        let variation_id = r.variation_id;
-                        return match serde_json::from_value::<T>(r.value) {
-                            Ok(value) => {
-                                let mut details = EvaluationDetails::ok(
-                                    key,
-                                    value,
-                                    self.fetch_time_unix_millis,
-                                    user_clone,
-                                );
-                                if !variation_id.is_empty() {
-                                    details.variation_id = Some(variation_id);
-                                }
-                                if matched_rule {
-                                    details.matched_targeting_rule = Some(crate::TargetingRule);
-                                }
-                                if matched_option {
-                                    details.matched_percentage_option =
-                                        Some(crate::PercentageOption);
-                                }
-                                details
-                            }
-                            Err(_) => EvaluationDetails::err(
-                                key,
-                                default,
-                                self.fetch_time_unix_millis,
-                                user_clone,
-                                "TYPE_MISMATCH",
-                            ),
-                        };
-                    }
-                    return EvaluationDetails::err(
-                        key,
-                        default,
-                        self.fetch_time_unix_millis,
-                        user_clone,
-                        r.error,
-                    );
-                }
-            }
-
-            // Flat / value-only source → keep the byte-identical value-only
-            // routed path (no rule details to surface).
-            let (handled, v) =
-                evaluate_override_routed(Some(view), key, &default_value, details_user);
-            if handled {
-                let resolved_json = v.unwrap_or_else(|| default_value.clone());
-                // Branch 4-6 return the default verbatim; Branch 7
-                // returns the override candidate. We distinguish by
-                // direct map lookup: present + non-null + same kind →
-                // happy path; otherwise default-with-no-error (the
-                // LocalOnly contract is "fall back to default silently"
-                // on a missing / typed-mismatched override entry, so
-                // no error code surfaces).
-                match serde_json::from_value::<T>(resolved_json) {
-                    Ok(value) => {
-                        return EvaluationDetails::ok(
-                            key,
-                            value,
-                            self.fetch_time_unix_millis,
-                            user_clone,
-                        );
-                    }
-                    Err(_) => {
-                        return EvaluationDetails::err(
-                            key,
-                            default,
-                            self.fetch_time_unix_millis,
-                            user_clone,
-                            "TYPE_MISMATCH",
-                        );
-                    }
-                }
-            }
-        }
-
-        // Fall through to the evaluator.
-        let eval_user = user.or(self.default_user.as_ref());
-        let r = evaluator::evaluate(self.config.as_ref(), key, &default_value, eval_user);
-        if r.error.is_empty() {
-            let matched_rule = r.matched_targeting_rule;
-            let matched_option = r.matched_percentage_option;
-            match serde_json::from_value::<T>(r.value) {
-                Ok(value) => {
-                    let mut details =
-                        EvaluationDetails::ok(key, value, self.fetch_time_unix_millis, user_clone);
-                    if !r.variation_id.is_empty() {
-                        details.variation_id = Some(r.variation_id);
-                    }
-                    if matched_rule {
-                        details.matched_targeting_rule = Some(crate::TargetingRule);
-                    }
-                    if matched_option {
-                        details.matched_percentage_option = Some(crate::PercentageOption);
-                    }
-                    details
-                }
-                Err(_) => EvaluationDetails::err(
-                    key,
-                    default,
-                    self.fetch_time_unix_millis,
-                    user_clone,
-                    "TYPE_MISMATCH",
-                ),
-            }
-        } else {
+    pub(crate) fn get_value_details_with_mode<T>(
+        &self,
+        key: &str,
+        default: T,
+        user: Option<&User>,
+        mode: FlatOverrideMode,
+    ) -> EvaluationDetails<T>
+    where
+        T: serde::Serialize + DeserializeOwned,
+    {
+        let user = user.or(self.default_user.as_ref());
+        let default_value = serde_json::to_value(&default);
+        let fallback = |code| {
             EvaluationDetails::err(
                 key,
                 default,
                 self.fetch_time_unix_millis,
-                user_clone,
-                r.error,
+                user.cloned(),
+                code,
             )
+        };
+        let Ok(default_value) = default_value else {
+            return fallback("MALFORMED_DEFAULT");
+        };
+
+        let result = evaluate_override_routed_details(
+            self.overrides.as_deref(),
+            key,
+            &default_value,
+            user,
+            mode,
+        )
+        .unwrap_or_else(|| evaluator::evaluate(self.config.as_ref(), key, &default_value, user));
+
+        if !result.error.is_empty() {
+            return fallback(result.error);
         }
+        let Ok(value) = serde_json::from_value(result.value) else {
+            return fallback("TYPE_MISMATCH");
+        };
+        let mut details =
+            EvaluationDetails::ok(key, value, self.fetch_time_unix_millis, user.cloned());
+        details.variation_id = (!result.variation_id.is_empty()).then_some(result.variation_id);
+        details.matched_targeting_rule = result
+            .matched_targeting_rule
+            .then_some(crate::TargetingRule);
+        details.matched_percentage_option = result
+            .matched_percentage_option
+            .then_some(crate::PercentageOption);
+        details
     }
 
     /// Returns the aggregate `(key, value)` view over the snapshot's
