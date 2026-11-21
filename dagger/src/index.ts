@@ -29,6 +29,7 @@
  * Full design: spec 053 (the Dagger local runner).
  */
 import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
+import { runNodeSuites } from "./node-suites.js";
 
 // SC-001 + Principle VII line 168 — "≤ 5 minutes wall-clock"
 const BUDGET_MS = 300_000;
@@ -541,21 +542,10 @@ async function liveContainer(source: Directory, sdk: string): Promise<Container>
 
 @object()
 export class Confeature {
-  /**
-   * Run apps/sdk-node's vitest suite inside node:22.23.3-bookworm-slim.
-   *
-   * Behaviour preserved verbatim from Phase 2 — the suffix string still reads
-   * "(Phase 2 jsTest)" to make the contract diff obvious during review.
-   *
-   * @param source The workspace root (a local caller goes through tools/dagger-call; CI passes `--source=.` on a fresh checkout).
-   */
+  /** Run the Node SDK suite in the shared Node workspace. */
   @func()
   async jsTest(source: Directory): Promise<string> {
-    const result = await jsWorkspace(source)
-      .withExec(["pnpm", "--filter", JS_TESTED.node, "test", "run"])
-      .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Phase 2 jsTest)`;
+    return runNodeSuites(jsWorkspace(source), JS_TESTED.node);
   }
 
   /**
