@@ -223,9 +223,13 @@ internal const val FIXTURE_ORIGIN = "${origin}"
 internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
 `,
     );
-    const simulator =
+    // The cold iOS composite loads both SDK compiler versions in the same Gradle daemon.
+    const appleOptions =
       target === "apple"
-        ? [`-PfixtureSimulator=${process.env.CONFEATURE_KOTLIN_SIMULATOR ?? ""}`]
+        ? [
+            `-PfixtureSimulator=${process.env.CONFEATURE_KOTLIN_SIMULATOR ?? ""}`,
+            "-Dorg.gradle.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8",
+          ]
         : [];
     if (
       target === "apple" &&
@@ -245,7 +249,7 @@ internal const val FIXTURE_CANARY_ORIGIN = "${destination}"
         "--max-workers=2",
         "-Pkotlin.compiler.execution.strategy=in-process",
         `-PfixtureSources=${sources}`,
-        ...simulator,
+        ...appleOptions,
         ...runtimes[target],
         "--rerun",
       ],
