@@ -293,6 +293,25 @@ describe("Kotlin OpenFeature release inventory", () => {
       `${rootModule}: no reference to ${jvm} variant ${missing}`,
     );
   });
+
+  it("requires both the native platform type and its Apple target attribute", () => {
+    const path = `${pathFor(simulator)}.module`;
+    const files = tree();
+    const module = JSON.parse(files[path]);
+    const variants = references();
+    const redirect = variants.find((variant) => variant["available-at"].module === simulator);
+    for (const variant of [redirect, module.variants[0]]) {
+      variant.attributes["org.jetbrains.kotlin.platform.type"] = "ios_simulator_arm64";
+      delete variant.attributes["org.jetbrains.kotlin.native.target"];
+    }
+    Object.assign(
+      files,
+      withSums({ [rootModule]: root(variants), [path]: JSON.stringify(module) }),
+    );
+    expect(companionCheck(files)).toContain(
+      `${path}: invalid Kotlin variant file reference (${variantName(simulator, "kotlin-api")})`,
+    );
+  });
 });
 
 describe("releaseProblems", () => {

@@ -58,10 +58,17 @@ const KOTLIN_TARGETS = {
   android: { extension: "aar", platform: "androidJvm", usages: ["java-api", "java-runtime"] },
   jvm: { extension: "jar", platform: "jvm", usages: ["java-api", "java-runtime"] },
   js: { extension: "klib", platform: "js", usages: ["kotlin-api", "kotlin-runtime"] },
-  iosarm64: { extension: "klib", platform: "ios_arm64", usages: ["kotlin-api"], metadata: true },
+  iosarm64: {
+    extension: "klib",
+    platform: "native",
+    nativeTarget: "ios_arm64",
+    usages: ["kotlin-api"],
+    metadata: true,
+  },
   iossimulatorarm64: {
     extension: "klib",
-    platform: "ios_simulator_arm64",
+    platform: "native",
+    nativeTarget: "ios_simulator_arm64",
     usages: ["kotlin-api"],
     metadata: true,
   },
@@ -293,9 +300,12 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
   return problems;
 }
 
-function kotlinPlatform(variant) {
-  const type = variant?.attributes?.["org.jetbrains.kotlin.platform.type"];
-  return type === "native" ? variant.attributes["org.jetbrains.kotlin.native.target"] : type;
+function hasKotlinPlatform(variant, target) {
+  const attributes = variant?.attributes;
+  return (
+    attributes?.["org.jetbrains.kotlin.platform.type"] === target.platform &&
+    attributes?.["org.jetbrains.kotlin.native.target"] === target.nativeTarget
+  );
 }
 
 function kotlinModule(tree, path, expected, problems) {
@@ -350,7 +360,7 @@ function kotlinLocalVariants(tree, dir, stem, target, variants, problems) {
     const body =
       suffix && Object.hasOwn(tree, `${dir}/${name}`) ? tree[`${dir}/${name}`] : undefined;
     if (
-      kotlinPlatform(variant) !== target.platform ||
+      !hasKotlinPlatform(variant, target) ||
       label === null ||
       seen.has(label) ||
       Object.hasOwn(variant, "available-at") ||
@@ -371,7 +381,7 @@ function kotlinLocalVariants(tree, dir, stem, target, variants, problems) {
   for (const usage of target.usages) {
     if (!usages.has(usage)) {
       problems.push(
-        `${modulePath}: no valid ${target.platform} reference to ${stem}.${target.extension} (${usage})`,
+        `${modulePath}: no valid ${target.nativeTarget ?? target.platform} reference to ${stem}.${target.extension} (${usage})`,
       );
     }
   }
