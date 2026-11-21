@@ -33,6 +33,23 @@ for (const entry of [
   await cp(join(source, entry), join(destination, entry), { recursive: true, errorOnExist: true });
 }
 
+const hooksFile = join(destination, "src/commonMain/kotlin/io/confeature/kmp/ConfeatureHooks.kt");
+const hooks = await readFile(hooksFile, "utf8");
+const hooksAnchor = "    internal fun invokeOnClientReady(";
+if (hooks.split(hooksAnchor).length !== 2) {
+  throw new Error("Expected exactly one SDK hook boundary for the fixture.");
+}
+await writeFile(
+  hooksFile,
+  hooks.replace(
+    hooksAnchor,
+    `    public fun fixtureListenerCount(): Int =
+        onClientReady.size + onConfigChanged.size + onFlagEvaluated.size + onError.size
+
+${hooksAnchor}`,
+  ),
+);
+
 const platformDir = (name) =>
   join(destination, "src", name, "kotlin/io/confeature/kmp/internal/platform");
 const signature = "public actual fun createHttpClient(";

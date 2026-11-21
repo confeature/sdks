@@ -105,30 +105,57 @@ const P = `io/confeature/${ROOT_ID}/${VERSION}/${ROOT_ID}-${VERSION}`;
 
 describe("Kotlin OpenFeature release inventory", () => {
   const companion = "confeature-openfeature-kotlin";
+  const publish = {
+    [companion]: ["jar", "common"],
+    [`${companion}-android`]: ["aar", "androidJvm"],
+    [`${companion}-jvm`]: ["jar", "jvm"],
+    [`${companion}-js`]: ["klib", "js"],
+    [`${companion}-iosarm64`]: ["klib", "native", "ios_arm64"],
+    [`${companion}-iossimulatorarm64`]: ["klib", "native", "ios_simulator_arm64"],
+  };
   const pathFor = (aid) => `io/confeature/${aid}/${VERSION}/${aid}-${VERSION}`;
+  const moduleUrl = (aid) => `../../${aid}/${VERSION}/${aid}-${VERSION}.module`;
   const rootModule = `${pathFor(companion)}.module`;
-  const targets = ["android", "jvm", "js", "iosarm64", "iossimulatorarm64"].map(
-    (id) => `${companion}-${id}`,
-  );
+  const [android, jvm, js, , simulator] = Object.keys(publish).slice(1);
+  const attributes = (aid) => {
+    const [, type, target] = publish[aid];
+    return {
+      "org.jetbrains.kotlin.platform.type": type,
+      ...(target === undefined ? {} : { "org.jetbrains.kotlin.native.target": target }),
+    };
+  };
   const route = (aid) => ({
-    "available-at": {
-      group: GROUP,
-      module: aid,
-      version: VERSION,
-      url: `../../${aid}/${VERSION}/${aid}-${VERSION}.module`,
-    },
+    attributes: attributes(aid),
+    "available-at": { group: GROUP, module: aid, version: VERSION, url: moduleUrl(aid) },
   });
+  const identity = { group: GROUP, module: companion, version: VERSION };
+  const fileVariant = (aid) => ({
+    attributes: attributes(aid),
+    files: [
+      { url: `${aid}-${VERSION}.${publish[aid][0]}`, sha256: digest("sha256", `binary of ${aid}`) },
+    ],
+  });
+  const references = () => Object.keys(publish).slice(1).map(route);
   const root = (variants) =>
-    JSON.stringify({ component: { group: GROUP, module: companion, version: VERSION }, variants });
+    JSON.stringify({ component: identity, variants: [fileVariant(companion), ...variants] });
   const tree = () => ({
-    ...release([companion, ...targets]),
-    ...withSums({
-      [rootModule]: root(targets.map(route)),
-      [`${pathFor(targets[0])}.aar`]: "Android release",
-      [`${pathFor(targets[2])}.klib`]: "JS release",
-      [`${pathFor(targets[3])}.klib`]: "iOS device release",
-      [`${pathFor(targets[4])}.klib`]: "iOS simulator release",
-    }),
+    ...release(Object.keys(publish)),
+    ...withSums(
+      Object.fromEntries(
+        Object.entries(publish).flatMap(([aid, [extension]]) => [
+          [`${pathFor(aid)}.${extension}`, `binary of ${aid}`],
+          [
+            `${pathFor(aid)}.module`,
+            aid === companion
+              ? root(references())
+              : JSON.stringify({
+                  component: { ...identity, url: moduleUrl(companion) },
+                  variants: [fileVariant(aid)],
+                }),
+          ],
+        ]),
+      ),
+    ),
   });
   const companionCheck = (files) =>
     releaseProblems(files, `${GROUP}:${companion}`, VERSION, absent(files));
@@ -139,23 +166,42 @@ describe("Kotlin OpenFeature release inventory", () => {
 
   it("requires the artifact file for each target", () => {
     const files = tree();
-    delete files[`${pathFor(targets[4])}.klib`];
-    expect(companionCheck(files)).toContain(`missing ${pathFor(targets[4])}.klib`);
+    delete files[`${pathFor(simulator)}.klib`];
+    expect(companionCheck(files)).toContain(`missing ${pathFor(simulator)}.klib`);
   });
 
   it("rejects a root module that omits a target", () => {
-    const files = {
-      ...tree(),
-      ...withSums({ [rootModule]: root(targets.slice(0, -1).map(route)) }),
-    };
-    expect(companionCheck(files)).toContain(`${rootModule}: no reference to ${targets[4]}`);
+    const files = { ...tree(), ...withSums({ [rootModule]: root(references().slice(0, -1)) }) };
+    expect(companionCheck(files)).toContain(`${rootModule}: no reference to ${simulator}`);
   });
 
   it("rejects a root module with a different target URL", () => {
-    const variants = targets.map(route);
+    const variants = references();
     variants[0]["available-at"].url = "https://repo.invalid/redirect.module";
     const files = { ...tree(), ...withSums({ [rootModule]: root(variants) }) };
     expect(companionCheck(files)).toContain(`${rootModule}: invalid Kotlin target reference`);
+  });
+
+  it("rejects exchanging the JS and JVM routes without changing platform attributes", () => {
+    const variants = references();
+    variants.find((variant) => variant["available-at"].module === jvm)["available-at"] =
+      route(js)["available-at"];
+    variants.find((variant) => variant.attributes["org.jetbrains.kotlin.platform.type"] === "js")[
+      "available-at"
+    ] = route(jvm)["available-at"];
+    const files = { ...tree(), ...withSums({ [rootModule]: root(variants) }) };
+    expect(companionCheck(files)).toContain(`${rootModule}: invalid Kotlin target reference`);
+  });
+
+  it("rejects a checksummed target module that declares the wrong binary digest", () => {
+    const path = `${pathFor(android)}.module`;
+    const files = tree();
+    const module = JSON.parse(files[path]);
+    module.variants[0].files[0].sha256 = "0".repeat(64);
+    Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toContain(
+      `${path}: no valid androidJvm reference to ${android}-${VERSION}.aar`,
+    );
   });
 });
 

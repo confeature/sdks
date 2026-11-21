@@ -56,11 +56,14 @@ class NetworkFixtureTest {
             .build()
         val hooks = mutableListOf<TypedEvaluationDetails<*>>()
         sdk.getHooks().addOnFlagEvaluated { hooks.add(it) }
+        val listenerCount = sdk.getHooks().fixtureListenerCount()
+        assertEquals(1, listenerCount)
         val targetedApi = createOpenFeatureAPIInstance()
         val anonymousApi = createOpenFeatureAPIInstance()
         try {
             targetedApi.setProviderAndWait(ConfeatureProvider(sdk))
             anonymousApi.setProviderAndWait(ConfeatureProvider(sdk))
+            assertEquals(listenerCount, sdk.getHooks().fixtureListenerCount())
             val targeted = targetedApi.getClient()
             val anonymous = anonymousApi.getClient()
             val cold = targeted.getStringDetails("region", "fallback")
@@ -82,10 +85,13 @@ class NetworkFixtureTest {
             assertNull(unmatched.errorCode)
             assertEquals(3, hooks.size)
             assertTrue(hooks.all { it.user == null })
+            targetedApi.setProviderAndWait(ConfeatureProvider(sdk))
+            assertEquals(listenerCount, sdk.getHooks().fixtureListenerCount())
         } finally {
             try {
                 targetedApi.shutdown()
                 anonymousApi.shutdown()
+                assertEquals(listenerCount, sdk.getHooks().fixtureListenerCount())
             } finally {
                 sdk.close()
             }

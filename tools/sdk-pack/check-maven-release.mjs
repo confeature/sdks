@@ -54,11 +54,11 @@ const METADATA = "maven-metadata.xml";
 const MAIN = /\.(?:jar|aar|klib)$/;
 const KOTLIN_OPENFEATURE = "io.confeature:confeature-openfeature-kotlin";
 const KOTLIN_TARGETS = {
-  android: "aar",
-  jvm: "jar",
-  js: "klib",
-  iosarm64: "klib",
-  iossimulatorarm64: "klib",
+  android: { extension: "aar", platform: "androidJvm" },
+  jvm: { extension: "jar", platform: "jvm" },
+  js: { extension: "klib", platform: "js" },
+  iosarm64: { extension: "klib", platform: "ios_arm64" },
+  iossimulatorarm64: { extension: "klib", platform: "ios_simulator_arm64" },
 };
 
 const sumOf = (path) => SUMS.find((alg) => path.endsWith(`.${alg}`));
@@ -195,7 +195,7 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
   }
   if (!aids.has(rootId)) problems.push(`no ${coordinates} in the release`);
   if (coordinates === KOTLIN_OPENFEATURE) {
-    problems.push(...kotlinCompanionProblems(tree, base, rootId, version, aids));
+    problems.push(...kotlinCompanionProblems(tree, group, base, rootId, version, aids));
   }
 
   // Checksums, over the whole tree: present where clients need them, and true.
@@ -287,49 +287,82 @@ export function releaseProblems(tree, coordinates, version, live = {}) {
   return problems;
 }
 
-function kotlinCompanionProblems(tree, base, rootId, version, aids) {
-  const group = KOTLIN_OPENFEATURE.split(":")[0];
-  const expected = new Map([[rootId, "jar"]]);
-  for (const [target, extension] of Object.entries(KOTLIN_TARGETS)) {
-    expected.set(`${rootId}-${target}`, extension);
+function kotlinPlatform(variant) {
+  const type = variant?.attributes?.["org.jetbrains.kotlin.platform.type"];
+  return type === "native" ? variant.attributes["org.jetbrains.kotlin.native.target"] : type;
+}
+
+function kotlinModule(tree, path, expected, problems) {
+  if (!Object.hasOwn(tree, path)) return null;
+  let module;
+  try {
+    module = JSON.parse(text(tree[path]));
+  } catch (error) {
+    problems.push(`${path}: invalid Gradle metadata (${error.name})`);
+    return null;
+  }
+  if (
+    !Array.isArray(module?.variants) ||
+    Object.entries(expected).some(([key, value]) => module?.component?.[key] !== value)
+  ) {
+    problems.push(`${path}: unexpected Kotlin Gradle module identity or variants`);
+    return null;
+  }
+  return module.variants;
+}
+
+function kotlinCompanionProblems(tree, group, base, rootId, version, aids) {
+  const expected = new Map([[rootId, { extension: "jar", platform: "common" }]]);
+  for (const [target, attributes] of Object.entries(KOTLIN_TARGETS)) {
+    expected.set(`${rootId}-${target}`, attributes);
   }
   const problems = [];
+  const prefix = (aid) => `${aid}/${version}/${aid}-${version}`;
+  const modulePath = `${base}${prefix(rootId)}.module`;
+  const rootIdentity = { group, module: rootId, version };
+  const rootVariants = kotlinModule(tree, modulePath, rootIdentity, problems);
   for (const aid of aids.keys()) {
     if (!expected.has(aid)) problems.push(`${aid}: unexpected Kotlin OpenFeature artifact`);
   }
-  for (const [aid, extension] of expected) {
-    const path = `${base}${aid}/${version}/${aid}-${version}`;
+  for (const [aid, { extension, platform }] of expected) {
+    const path = `${base}${prefix(aid)}`;
     for (const suffix of [extension, "module"]) {
       if (!Object.hasOwn(tree, `${path}.${suffix}`)) problems.push(`missing ${path}.${suffix}`);
     }
+    const variants =
+      aid === rootId
+        ? rootVariants
+        : kotlinModule(
+            tree,
+            `${path}.module`,
+            { ...rootIdentity, url: `../../${prefix(rootId)}.module` },
+            problems,
+          );
+    const artifact = tree[`${path}.${extension}`];
+    if (!variants || artifact === undefined) continue;
+    const artifactName = `${aid}-${version}.${extension}`;
+    const checksum = createHash("sha256").update(artifact).digest("hex");
+    const references = variants
+      .filter((variant) => kotlinPlatform(variant) === platform && Array.isArray(variant.files))
+      .flatMap((variant) => variant.files)
+      .filter((file) => file?.url === artifactName);
+    if (references.length === 0 || references.some((file) => file.sha256 !== checksum)) {
+      problems.push(`${path}.module: no valid ${platform} reference to ${artifactName}`);
+    }
   }
-  const modulePath = `${base}${rootId}/${version}/${rootId}-${version}.module`;
-  if (!Object.hasOwn(tree, modulePath)) return problems;
-  let module;
-  try {
-    module = JSON.parse(text(tree[modulePath]));
-  } catch (error) {
-    return [...problems, `${modulePath}: invalid Gradle metadata (${error.name})`];
-  }
-  if (
-    module?.component?.group !== group ||
-    module?.component?.module !== rootId ||
-    module?.component?.version !== version ||
-    !Array.isArray(module?.variants)
-  ) {
-    return [...problems, `${modulePath}: does not describe ${KOTLIN_OPENFEATURE}:${version}`];
-  }
+  if (!rootVariants) return problems;
   expected.delete(rootId);
   const referenced = new Set();
-  for (const variant of module.variants) {
+  for (const variant of rootVariants) {
     if (!Object.hasOwn(variant ?? {}, "available-at")) continue;
     const route = variant["available-at"];
     const aid = route?.module;
     if (
       !expected.has(aid) ||
+      expected.get(aid).platform !== kotlinPlatform(variant) ||
       route.group !== group ||
       route.version !== version ||
-      route.url !== `../../${aid}/${version}/${aid}-${version}.module`
+      route.url !== `../../${prefix(aid)}.module`
     ) {
       problems.push(`${modulePath}: invalid Kotlin target reference`);
     } else {
