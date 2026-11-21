@@ -126,7 +126,8 @@ async function exercise(root, harness) {
       const etag = upstream.headers.get("etag");
       if (etag) headers.etag = etag;
       response.writeHead(upstream.status, headers).end(body);
-    } catch {
+    } catch (error) {
+      console.error("The local Kotlin fixture upstream failed.", error);
       response.writeHead(502).end();
     }
   });
