@@ -10,6 +10,8 @@ use Confeature\ConfeatureClient;
 use Confeature\EvaluationDetails;
 use Confeature\FlagOverrides;
 use Confeature\Internal\EvaluationFailure;
+use Confeature\Logger;
+use Confeature\MapOverrideDataSource;
 use Confeature\OverrideBehaviour;
 use Confeature\OverrideDataSource;
 use Confeature\SettingValue;
@@ -136,6 +138,37 @@ final class ProviderEvaluationDetailsTest extends TestCase
         self::assertSame([
             ['warning', 'ConfeatureClient: LocalOnly override presence check failed.', []],
         ], $logger->messages);
+    }
+
+    public function testProviderHooksKeepContextOutOfListenerFailureLogs(): void
+    {
+        $log = fopen('php://memory', 'w+');
+        self::assertNotFalse($log);
+        try {
+            $client = ConfeatureClient::create(WorkspaceRoot::SAMPLE_SDK_KEY, [
+                'flagOverrides' => new FlagOverrides(
+                    MapOverrideDataSource::ofMap(['flag' => true]),
+                    OverrideBehaviour::LOCAL_ONLY,
+                ),
+                'cache' => null,
+                'logger' => new Logger(stream: $log),
+            ]);
+            $client->hooks()->addOnFlagEvaluated(static function (EvaluationDetails $details): never {
+                throw new \RuntimeException($details->getUser()?->identifier ?? 'no context');
+            });
+            $seen = [];
+            $client->hooks()->addOnFlagEvaluated(static function (EvaluationDetails $details) use (&$seen): void {
+                $seen[] = $details->getUser()?->identifier;
+            });
+
+            $result = $client->getValueDetailsForProvider('flag', false, new User('synthetic-sensitive-identifier'));
+            self::assertTrue($result->details->getValue());
+            self::assertSame(['synthetic-sensitive-identifier'], $seen);
+            rewind($log);
+            self::assertSame("[ERROR] confeature: Hooks: onFlagEvaluated listener failed.\n", stream_get_contents($log));
+        } finally {
+            fclose($log);
+        }
     }
 
     private static function client(FlagOverrides $overrides, ?User $defaultUser = null): ConfeatureClient

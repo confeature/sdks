@@ -80,8 +80,8 @@ final class Hooks
         foreach ($this->onConfigChanged as $callback) {
             try {
                 $callback($settings);
-            } catch (Throwable $ex) {
-                $this->logException('onConfigChanged', $ex);
+            } catch (Throwable) {
+                $this->logException('onConfigChanged');
             }
         }
     }
@@ -94,8 +94,8 @@ final class Hooks
         foreach ($this->onFlagEvaluated as $callback) {
             try {
                 $callback($details);
-            } catch (Throwable $ex) {
-                $this->logException('onFlagEvaluated', $ex);
+            } catch (Throwable) {
+                $this->logException('onFlagEvaluated');
             }
         }
     }
@@ -108,21 +108,15 @@ final class Hooks
         foreach ($this->onError as $callback) {
             try {
                 $callback($message, $exception);
-            } catch (Throwable $ex) {
-                $this->logException('onError', $ex);
+            } catch (Throwable) {
+                $this->logException('onError');
             }
         }
     }
 
-    private function logException(string $hook, Throwable $ex): void
+    private function logException(string $hook): void
     {
-        if ($this->logger !== null) {
-            $this->logger->error(sprintf(
-                'Hooks: %s listener raised: %s: %s',
-                $hook,
-                get_class($ex),
-                $ex->getMessage(),
-            ));
-        }
+        // Application listeners can put targeting attributes in exceptions.
+        $this->logger?->error(sprintf('Hooks: %s listener failed.', $hook));
     }
 }
