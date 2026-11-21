@@ -91,6 +91,7 @@ internal class EvalScope(
     val user: Evaluator.UserView?,
     val log: EvalTraceLog,
     val logBuilder: EvalLog.EvaluateLogBuilder?,
+    val requireDefaultPercentageIdentifier: Boolean = false,
 ) {
     val visitedFlags: MutableList<String> = ArrayList()
 }
@@ -108,6 +109,7 @@ internal class EvalContext(
     val visitedFlags: MutableList<String> = scope.visitedFlags
     val log: EvalTraceLog = scope.log
     val logBuilder: EvalLog.EvaluateLogBuilder? = scope.logBuilder
+    val requireDefaultPercentageIdentifier: Boolean = scope.requireDefaultPercentageIdentifier
 
     var evalError: String? = null
     var missingUserLogged: Boolean = false

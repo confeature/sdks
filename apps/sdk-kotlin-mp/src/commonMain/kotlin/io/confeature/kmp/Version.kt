@@ -10,5 +10,5 @@ package io.confeature.kmp
  */
 public object Version {
     /** Current SDK version (matches `build.gradle.kts:version`). */
-    public const val SDK_VERSION: String = "0.1.1"
+    public const val SDK_VERSION: String = "0.2.0"
 }

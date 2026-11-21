@@ -3,6 +3,7 @@ package io.confeature.kmp
 
 import io.confeature.kmp.internal.Evaluator
 import io.confeature.kmp.internal.OverrideEval
+import io.confeature.kmp.internal.ProviderValueType
 
 /**
  * Immutable read-side view returned by `ConfeatureClient.snapshot()`.
@@ -76,92 +77,67 @@ public class Snapshot(
         user: User? = null,
     ): TypedEvaluationDetails<Any?> {
         val effectiveUser = user ?: defaultUser
-        val isLocalOnly = flagOverrides != null && flagOverrides.behaviour == OverrideBehaviour.LOCAL_ONLY
-
-        // Full-config override route (spec 135 / spec 152): when the LocalOnly source carries a
-        // complete `{p,f,s}` root (a ConfigOverrideDataSource), resolve through the real Evaluator —
-        // salt (`p.s`) + segments (`s`) + targeting rules intact — and PROPAGATE the matched
-        // variationId into the details envelope. The value-only LocalOnly map branch below cannot
-        // produce a variationId (it never runs the rule engine), so a full-config tuple MUST take
-        // this branch or `getValueDetails().variationId` is silently dropped (the #395 gap class).
-        if (isLocalOnly) {
-            val overrideConfigRoot = flagOverrides!!.dataSource.getConfigRootSync()
-            if (overrideConfigRoot != null) {
-                val result = Evaluator.evaluate(overrideConfigRoot, key, defaultValue, effectiveUser)
-                val errorCode = if (result.error == Evaluator.Error.NONE) null else result.error.name
-                return TypedEvaluationDetails(
-                    key = key,
-                    value = result.value,
-                    variationId = result.variationId,
-                    fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-                    user = effectiveUser,
-                    isDefaultValue = errorCode != null,
-                    error = errorCode,
-                )
-            }
-        }
-
-        if (isLocalOnly) {
-            // LocalOnly contract: distinguish "override hit" from "missing key returning
-            // default". We re-query the map to disambiguate — OverrideEval.evaluateSync
-            // returns the default on both KEY_NOT_FOUND and TYPE_MISMATCH branches,
-            // indistinguishable from a legitimate hit whose value equals the default.
-            val overridesMap = flagOverrides!!.dataSource.getOverridesSync()
-            val keyPresent = overridesMap != null && overridesMap.containsKey(key)
-            if (!keyPresent) {
-                return TypedEvaluationDetails(
-                    key = key,
-                    value = defaultValue,
-                    fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-                    user = effectiveUser,
-                    isDefaultValue = true,
-                    error = "KEY_NOT_FOUND",
-                )
-            }
-            val candidate = overridesMap!![key]
-            if (candidate == null) {
-                // Branch 5 — empty/null override slot returns default.
-                return TypedEvaluationDetails(
-                    key = key,
-                    value = defaultValue,
-                    fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-                    user = effectiveUser,
-                    isDefaultValue = true,
-                    error = "MALFORMED_VALUE",
-                )
-            }
-            if (defaultValue != null && candidate::class != defaultValue::class) {
-                // Branch 6 — TYPE_MISMATCH.
-                return TypedEvaluationDetails(
-                    key = key,
-                    value = defaultValue,
-                    fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-                    user = effectiveUser,
-                    isDefaultValue = true,
-                    error = "TYPE_MISMATCH",
-                )
-            }
-            // Branch 7 — happy path.
-            return TypedEvaluationDetails(
-                key = key,
-                value = candidate,
-                fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-                user = effectiveUser,
-                isDefaultValue = false,
-                error = null,
-            )
-        }
-
-        val result = Evaluator.evaluate(configRoot, key, defaultValue, effectiveUser)
-        val errorCode = if (result.error == Evaluator.Error.NONE) null else result.error.name
-        return TypedEvaluationDetails(
-            key = key,
-            value = result.value,
-            variationId = result.variationId,
-            fetchTimeUnixMilliseconds = fetchTimeUnixMillis,
-            user = effectiveUser,
-            isDefaultValue = errorCode != null,
-            error = errorCode,
+        val result = resolveCachedDetails(
+            configRoot, flagOverrides, key, defaultValue, Evaluator.fromPublicUser(effectiveUser),
         )
+        return result.toDetails(key, effectiveUser, fetchTimeUnixMillis)
     }
 }
+
+/** One resolver for the immutable snapshot and the synchronous companion bridge. */
+internal fun resolveCachedDetails(
+    configRoot: Map<String, Any?>?,
+    flagOverrides: FlagOverrides?,
+    key: String,
+    defaultValue: Any?,
+    user: Evaluator.UserView?,
+    providerType: ProviderValueType? = null,
+): Evaluator.Result {
+    val local = flagOverrides?.takeIf { it.behaviour == OverrideBehaviour.LOCAL_ONLY }
+    if (local != null) {
+        // Keep the full Config V2 root so salt, segments and variation IDs survive LocalOnly.
+        val root = local.dataSource.getConfigRootSync()
+        if (root == null) {
+            val values = local.dataSource.getOverridesSync()
+            if (values == null || !values.containsKey(key)) {
+                return Evaluator.Result(defaultValue, Evaluator.Error.KEY_NOT_FOUND)
+            }
+            val value = values[key] ?: return Evaluator.Result(defaultValue, Evaluator.Error.MALFORMED_VALUE)
+            val matches = providerType?.matchesLocalValue(value)
+                ?: (defaultValue == null || value::class == defaultValue::class)
+            return if (matches) {
+                Evaluator.Result(value, Evaluator.Error.NONE)
+            } else {
+                Evaluator.Result(defaultValue, Evaluator.Error.TYPE_MISMATCH)
+            }
+        }
+        return evaluateCachedRoot(root, key, defaultValue, user, providerType)
+    }
+    return evaluateCachedRoot(configRoot, key, defaultValue, user, providerType)
+}
+
+private fun evaluateCachedRoot(
+    root: Map<String, Any?>?,
+    key: String,
+    defaultValue: Any?,
+    user: Evaluator.UserView?,
+    providerType: ProviderValueType?,
+): Evaluator.Result = if (providerType == null) {
+    Evaluator.evaluateWith(root, key, defaultValue, user)
+} else {
+    Evaluator.evaluateForProvider(root, key, defaultValue, user, providerType)
+}
+
+internal fun Evaluator.Result.toDetails(
+    key: String,
+    user: User?,
+    fetchTime: Long,
+): TypedEvaluationDetails<Any?> = TypedEvaluationDetails(
+    key = key,
+    value = value,
+    variationId = variationId,
+    fetchTimeUnixMilliseconds = fetchTime,
+    user = user,
+    isDefaultValue = error != Evaluator.Error.NONE,
+    error = error.takeUnless { it == Evaluator.Error.NONE }?.name,
+)

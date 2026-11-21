@@ -132,9 +132,26 @@ public object Evaluator {
         defaultValue: Any?,
         user: UserView?,
         sink: EvalTraceLog.Sink?,
+    ): Result = resolve(config, key, defaultValue, user, sink, null)
+
+    internal fun evaluateForProvider(
+        config: Map<String, Any?>?,
+        key: String,
+        defaultValue: Any?,
+        user: UserView?,
+        type: ProviderValueType,
+    ): Result = resolve(config, key, defaultValue, user, null, type)
+
+    private fun resolve(
+        config: Map<String, Any?>?,
+        key: String,
+        defaultValue: Any?,
+        user: UserView?,
+        sink: EvalTraceLog.Sink?,
+        providerType: ProviderValueType?,
     ): Result {
         val log = EvalTraceLog(sink)
-        val located = locateSetting(config, key, defaultValue)
+        val located = locateSetting(config, key, defaultValue, providerType)
         if (located.error != Error.NONE) return Result(defaultValue, located.error)
 
         val preferences = asMap(config?.get("p"))
@@ -142,7 +159,10 @@ public object Evaluator {
         val segments = asList(config?.get("s")) ?: emptyList()
 
         val logBuilder = startTrace(log, key, user)
-        val scope = EvalScope(located.settings, segments, configSalt, user, log, logBuilder)
+        val scope = EvalScope(
+            located.settings, segments, configSalt, user, log, logBuilder,
+            requireDefaultPercentageIdentifier = providerType != null,
+        )
         val ctx = EvalContext(key, located.setting, scope)
 
         val sr = resolveFailClosed(ctx, defaultValue) ?: return Result(defaultValue, Error.MALFORMED_CONFIG)
@@ -179,7 +199,12 @@ public object Evaluator {
      * fail-closed order: no config, missing key, malformed setting, unsupported type, then the
      * tier-0 TYPE_MISMATCH guard (a null default bypasses it).
      */
-    private fun locateSetting(config: Map<String, Any?>?, key: String, defaultValue: Any?): LocatedSetting {
+    private fun locateSetting(
+        config: Map<String, Any?>?,
+        key: String,
+        defaultValue: Any?,
+        providerType: ProviderValueType?,
+    ): LocatedSetting {
         val settings = asMap(config?.get("f"))
         val settingAny = settings?.get(key)
         val setting = asMap(settingAny)
@@ -189,7 +214,7 @@ public object Evaluator {
                 config == null || settings == null -> Error.NO_CONFIG
                 settingAny == null -> Error.KEY_NOT_FOUND
                 setting == null || type == null -> Error.MALFORMED_CONFIG
-                else -> typeError(type, defaultValue)
+                else -> typeError(type, defaultValue, providerType)
             }
         return LocatedSetting(
             settings ?: emptyMap(),
@@ -199,12 +224,15 @@ public object Evaluator {
         )
     }
 
-    private fun typeError(settingType: Int, defaultValue: Any?): Error =
-        when {
-            settingType !in SettingType.BOOL..SettingType.DOUBLE -> Error.UNSUPPORTED_TYPE
-            defaultValue != null && !defaultMatchesType(defaultValue, settingType) -> Error.TYPE_MISMATCH
-            else -> Error.NONE
+    private fun typeError(settingType: Int, defaultValue: Any?, providerType: ProviderValueType?): Error {
+        if (settingType !in SettingType.BOOL..SettingType.DOUBLE) return Error.UNSUPPORTED_TYPE
+        val matches = if (providerType != null) {
+            settingType == providerType.settingType
+        } else {
+            defaultValue == null || defaultMatchesType(defaultValue, settingType)
         }
+        return if (matches) Error.NONE else Error.TYPE_MISMATCH
+    }
 
     /**
      * Evaluation-log trace (ADR 0003). Built lazily — only when the sink would emit at INFO. The

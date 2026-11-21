@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp
 
+import io.confeature.kmp.internal.platform.isFatalError
+
 /**
  * Subscribe to client lifecycle events. Mirrors `com.configcat.ConfigCatHooks` 1:1 at the public
  * API surface (constitution Principle II, epic #268).
@@ -41,43 +43,50 @@ public class ConfeatureHooks internal constructor(private val logger: Logger) {
         onError.add(listener)
     }
 
-    internal fun invokeOnClientReady() {
+    internal fun invokeOnClientReady(sanitizeFailure: Boolean = false) {
         for (listener in onClientReady.toList()) {
-            try {
-                listener()
-            } catch (ex: Exception) {
-                logger.error("ConfeatureHooks: onClientReady listener raised.", ex)
-            }
+            invokeListener("onClientReady", sanitizeFailure) { listener() }
         }
     }
 
-    internal fun invokeOnConfigChanged(settings: Map<String, Any?>) {
+    internal fun invokeOnConfigChanged(settings: Map<String, Any?>, sanitizeFailure: Boolean = false) {
         for (listener in onConfigChanged.toList()) {
-            try {
-                listener(settings)
-            } catch (ex: Exception) {
-                logger.error("ConfeatureHooks: onConfigChanged listener raised.", ex)
-            }
+            invokeListener("onConfigChanged", sanitizeFailure) { listener(settings) }
         }
     }
 
-    internal fun invokeOnFlagEvaluated(details: TypedEvaluationDetails<*>) {
+    internal fun invokeOnFlagEvaluated(details: TypedEvaluationDetails<*>, sanitizeFailure: Boolean = false) {
         for (listener in onFlagEvaluated.toList()) {
-            try {
-                listener(details)
-            } catch (ex: Exception) {
-                logger.error("ConfeatureHooks: onFlagEvaluated listener raised.", ex)
-            }
+            invokeListener("onFlagEvaluated", sanitizeFailure) { listener(details) }
         }
     }
 
-    internal fun invokeOnError(message: String) {
+    internal fun invokeOnError(message: String, sanitizeFailure: Boolean = false) {
         for (listener in onError.toList()) {
-            try {
-                listener(message)
-            } catch (ex: Exception) {
-                logger.error("ConfeatureHooks: onError listener raised.", ex)
+            invokeListener("onError", sanitizeFailure) { listener(message) }
+        }
+    }
+
+    private inline fun invokeListener(name: String, sanitizeFailure: Boolean, listener: () -> Unit) {
+        try {
+            listener()
+        } catch (failure: Throwable) {
+            if (sanitizeFailure) {
+                if (isFatalError(failure)) throw failure
+                logger.reportProviderFailure("ConfeatureHooks: $name listener raised.")
+            } else {
+                if (failure !is Exception) throw failure
+                logger.error("ConfeatureHooks: $name listener raised.", failure)
             }
         }
+    }
+}
+
+/** Protect companion evaluation and background refresh from consumer logger failures. */
+internal fun Logger.reportProviderFailure(message: String) {
+    try {
+        error(message)
+    } catch (failure: Throwable) {
+        if (isFatalError(failure)) throw failure
     }
 }

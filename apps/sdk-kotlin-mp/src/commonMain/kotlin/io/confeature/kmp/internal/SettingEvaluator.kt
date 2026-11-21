@@ -102,8 +102,11 @@ internal object SettingEvaluator {
 
         val explicitAttrName = ctx.setting["a"] as? String
         val attrName = explicitAttrName ?: "Identifier"
-        val attrValue: Any? =
-            if (explicitAttrName == null) user.identifier() ?: "" else user.attribute(explicitAttrName)
+        val attrValue = when {
+            explicitAttrName != null -> user.attribute(explicitAttrName)
+            ctx.requireDefaultPercentageIdentifier -> user.identifier()
+            else -> user.identifier() ?: ""
+        }
         if (attrValue == null) {
             ctx.recordError(missingUserAttributeError(attrName))
             ctx.log.userObjectAttributeIsMissingForPercentage(ctx.key, attrName)

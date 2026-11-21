@@ -5,14 +5,20 @@ import io.confeature.kmp.internal.ConfigFetcher
 import io.confeature.kmp.internal.Evaluator
 import io.confeature.kmp.internal.InMemoryCache
 import io.confeature.kmp.internal.OverrideEval
+import io.confeature.kmp.internal.ProviderResult
+import io.confeature.kmp.internal.ProviderValueType
 import io.confeature.kmp.internal.SdkKey
 import io.confeature.kmp.internal.platform.FilesystemCache
+import io.confeature.kmp.internal.platform.isFatalError
+import io.confeature.kmp.internal.toProviderResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -51,56 +57,33 @@ public class ConfeatureClient private constructor(b: Builder) {
     private val cache: ConfigCache
     private val pollingMode: PollingMode = b.pollingMode ?: PollingMode.autoPoll()
 
-    // `closedFlag` is read on the hot path (every getValue). A plain
-    // `Boolean` is safe enough in Kotlin Multiplatform: the only writer
-    // is the close() path (which uses `closeMutex` to enforce idempotency),
-    // and the only readers are best-effort short-circuit checks. Worst
-    // case the AutoPoll coroutine iterates once more before the cancel
-    // signal propagates — the Ktor client.close() in close() neutralises
-    // that final fetch attempt.
-    private var closedFlag: Boolean = false
+    // One immutable view for the synchronous bridge and native reads. The root retains the
+    // config salt and segments; settings keeps the original flag map for public snapshots.
+    private data class CachedState(
+        val settings: Map<String, JsonElement>? = null,
+        val configRoot: Map<String, Any?>? = null,
+        val fetchTimeMillis: Long = 0L,
+        val closed: Boolean = false,
+        val offline: Boolean = false,
+    )
 
-    // Spec 093 / #267 — mirrors `com.configcat.ConfigService` offline flag. Plain `Boolean` matches
-    // the `closedFlag` discipline: only the suspend setters write, the fetch-path readers do best-
-    // effort short-circuit reads. KMP-safe (no JVM `@Volatile` — the multiplatform discipline).
-    private var offlineFlag: Boolean = false
+    private val state = MutableStateFlow(CachedState())
+    private val closedFlag: Boolean get() = state.value.closed
+    private val offlineFlag: Boolean get() = state.value.offline
+    private val localOnly: Boolean = flagOverrides?.behaviour == OverrideBehaviour.LOCAL_ONLY
 
-    // Spec 105 / #268 — mirrors `com.configcat.ConfigCatHooks`. The four hook points
-    // (clientReady, configChanged, flagEvaluated, clientError) are wired below in
-    // fetchAndApply / getValueDetails. Plain Boolean flag for clientReady matches the
-    // `closedFlag` / `offlineFlag` discipline (best-effort single-fire short-circuit).
-    private val hooks: ConfeatureHooks = ConfeatureHooks(logger)
-    private var clientReadyFired: Boolean = false
-
+    private val hooks = ConfeatureHooks(logger)
+    private var clientReadyFired = false
     private val closeMutex = Mutex()
     private val stateMutex = Mutex()
-    private val scope: CoroutineScope?
+    private val providerRefreshMutex = Mutex()
+    private val scope = lazy { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
 
-    /**
-     * The AutoPoll coroutine; `null` outside AutoPoll. `internal` so tests can join it after
-     * [close] — a real "the poll loop has finished" signal instead of a sleep.
-     */
+    /** The AutoPoll coroutine, exposed internally for tests to join after [close]. */
     internal val autopollJob: Job?
 
-    // Mutable state — always read/written under stateMutex.
-    private var settings: Map<String, JsonElement>? = null
-
-    // The full parsed config root (`{p,f,s}`) the evaluator reads (salt + segments + settings). The
-    // `settings` field above stays the `f` map alone for the public Snapshot.settings surface +
-    // getAllKeys. Always read/written under stateMutex. Mirrors the Android twin (spec 128) so the
-    // SHA-256-salted sensitive comparators + segment conditions receive the real `p.s` salt and `s`
-    // segment list instead of fail-closed empties (spec-129 review).
-    private var configRoot: Map<String, Any?>? = null
+    // The ETag and config replacement are coordinated under stateMutex.
     private var etag: String = ""
-    private var lastFetchEpochSeconds: Long = 0L
-
-    /**
-     * Wall-clock epoch-millis of the active config's last successful fetch / cache restore.
-     * Surfaced via [TypedEvaluationDetails.fetchTimeUnixMilliseconds] (spec 082 / #266 slice 4/12).
-     * `0L` until a config has loaded. Lives under [stateMutex] alongside the other mutable
-     * config-state fields — `@Volatile` is JVM-only and we keep the multiplatform discipline.
-     */
-    private var fetchTimeUnixMillis: Long = 0L
 
     init {
         require(sdkKey.isNotEmpty()) { "sdkKey must be non-empty" }
@@ -116,11 +99,8 @@ public class ConfeatureClient private constructor(b: Builder) {
         cache = b.cache ?: buildDefaultCache(b.cacheDirectory, sdkKey, logger)
         fetcher = ConfigFetcher(b.baseUrl, sdkKey, b.httpTimeoutMillis, logger)
 
-        val localOnly =
-            flagOverrides != null && flagOverrides.behaviour == OverrideBehaviour.LOCAL_ONLY
         if (pollingMode.kind == PollingMode.Kind.AUTO_POLL && !localOnly) {
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            autopollJob = scope.launch {
+            autopollJob = scope.value.launch {
                 val initialDelay = pollingMode.maxInitWaitTime?.inWholeMilliseconds ?: 0L
                 val period = pollingMode.pollInterval?.inWholeMilliseconds ?: DEFAULT_POLL_PERIOD_MS
                 if (initialDelay > 0) delay(initialDelay)
@@ -143,7 +123,6 @@ public class ConfeatureClient private constructor(b: Builder) {
                 }
             }
         } else {
-            scope = null
             autopollJob = null
         }
     }
@@ -191,7 +170,7 @@ public class ConfeatureClient private constructor(b: Builder) {
 
         maybeLazyFetch()
 
-        val config = stateMutex.withLock { configRoot }
+        val config = state.value.configRoot
         val effectiveUser = user ?: defaultUser
         return Evaluator.evaluate(config, key, defaultValue, effectiveUser).value
     }
@@ -211,15 +190,9 @@ public class ConfeatureClient private constructor(b: Builder) {
 
     /** Returns an immutable snapshot of the current config + overrides. */
     public suspend fun snapshot(): Snapshot {
-        val current: Map<String, Any?>?
-        val currentRoot: Map<String, Any?>?
-        val capturedFetchTime: Long
-        stateMutex.withLock {
-            current = settings?.let { decodeSettingsMap(it) }
-            currentRoot = configRoot
-            capturedFetchTime = fetchTimeUnixMillis
-        }
-        return Snapshot(current, currentRoot, flagOverrides, defaultUser, capturedFetchTime)
+        val cached = state.value
+        val settings = cached.settings?.let { decodeSettingsMap(it) }
+        return Snapshot(settings, cached.configRoot, flagOverrides, defaultUser, cached.fetchTimeMillis)
     }
 
     /**
@@ -270,6 +243,42 @@ public class ConfeatureClient private constructor(b: Builder) {
         val details = snapshot().getValueDetails(key, defaultValue, user)
         hooks.invokeOnFlagEvaluated(details)
         return details
+    }
+
+    /**
+     * Synchronous details for the optional provider companion.
+     *
+     * A null user is anonymous. Cold or stale online LazyLoad can start a background refresh
+     * under the SDK's existing expiry policy. This call resolves only the captured configuration.
+     */
+    public fun getValueDetailsForProvider(
+        key: String,
+        defaultValue: Any?,
+        user: Evaluator.UserView?,
+        type: ProviderValueType,
+    ): ProviderResult {
+        val cached = state.value
+        if (cached.closed) {
+            return ProviderResult(defaultValue, null, ProviderResult.Status.NOT_READY, null)
+        }
+        if (!localOnly) scheduleLazyRefresh(cached)
+        val result = try {
+            resolveCachedDetails(cached.configRoot, flagOverrides, key, defaultValue, user, type)
+        } catch (failure: Throwable) {
+            if (isFatalError(failure)) throw failure
+            logger.reportProviderFailure("ConfeatureClient: provider evaluation failed.")
+            val details = TypedEvaluationDetails(
+                key = key,
+                value = defaultValue,
+                fetchTimeUnixMilliseconds = cached.fetchTimeMillis,
+                isDefaultValue = true,
+                error = "EVALUATION_ERROR",
+            )
+            hooks.invokeOnFlagEvaluated(details, sanitizeFailure = true)
+            return ProviderResult(defaultValue, null, ProviderResult.Status.GENERAL, null)
+        }
+        hooks.invokeOnFlagEvaluated(result.toDetails(key, null, cached.fetchTimeMillis), sanitizeFailure = true)
+        return result.toProviderResult()
     }
 
     /**
@@ -331,7 +340,7 @@ public class ConfeatureClient private constructor(b: Builder) {
             )
             return
         }
-        offlineFlag = false
+        state.update { it.copy(offline = false) }
     }
 
     /**
@@ -349,7 +358,7 @@ public class ConfeatureClient private constructor(b: Builder) {
         if (flagOverrides != null && flagOverrides.behaviour == OverrideBehaviour.LOCAL_ONLY) {
             return
         }
-        offlineFlag = true
+        state.update { it.copy(offline = true) }
     }
 
     /**
@@ -378,10 +387,10 @@ public class ConfeatureClient private constructor(b: Builder) {
             closeMutex.unlock()
             return
         }
-        closedFlag = true
+        state.update { it.copy(closed = true) }
         closeMutex.unlock()
         try {
-            scope?.cancel()
+            if (scope.isInitialized()) scope.value.cancel()
         } catch (ex: Exception) {
             logger.warning(
                 "ConfeatureClient: scope cancel raised. sdkKey=" +
@@ -400,16 +409,32 @@ public class ConfeatureClient private constructor(b: Builder) {
 
     // --- internals ---
 
-    private suspend fun maybeLazyFetch() {
-        if (pollingMode.kind != PollingMode.Kind.LAZY_LOAD) return
-        if (offlineFlag) return
-        val refreshSeconds = pollingMode.cacheRefreshInterval?.inWholeSeconds ?: return
-        val nowSeconds = currentEpochSeconds()
-        val stale = stateMutex.withLock { nowSeconds - lastFetchEpochSeconds >= refreshSeconds }
-        if (stale) fetchAndApply()
+    private fun shouldLazyFetch(cached: CachedState): Boolean {
+        if (cached.closed || cached.offline || pollingMode.kind != PollingMode.Kind.LAZY_LOAD) return false
+        val refreshSeconds = pollingMode.cacheRefreshInterval?.inWholeSeconds ?: return false
+        return currentEpochSeconds() - cached.fetchTimeMillis / 1000L >= refreshSeconds
     }
 
-    private suspend fun fetchAndApply(): Boolean {
+    private suspend fun maybeLazyFetch() {
+        if (shouldLazyFetch(state.value)) fetchAndApply()
+    }
+
+    private fun scheduleLazyRefresh(cached: CachedState) {
+        if (!shouldLazyFetch(cached) || !providerRefreshMutex.tryLock()) return
+        val clientScope = scope.value
+        // close() may have run before the first provider call initialized the lazy scope.
+        if (closedFlag) clientScope.cancel()
+        clientScope.launch {
+            try {
+                if (shouldLazyFetch(state.value)) fetchAndApply(providerRefresh = true)
+            } catch (failure: Throwable) {
+                if (failure is CancellationException || isFatalError(failure)) throw failure
+                logger.reportProviderFailure("ConfeatureClient: provider refresh failed.")
+            }
+        }.invokeOnCompletion { providerRefreshMutex.unlock() }
+    }
+
+    private suspend fun fetchAndApply(providerRefresh: Boolean = false): Boolean {
         if (offlineFlag) return false
         val previousEtag = stateMutex.withLock { etag }
         val result = fetcher.fetch(previousEtag)
@@ -420,44 +445,41 @@ public class ConfeatureClient private constructor(b: Builder) {
                 val nowMillis = currentEpochMillis()
                 val nowSeconds = nowMillis / 1000L
                 stateMutex.withLock {
-                    settings = parsedSettings
-                    configRoot = parsedRoot
                     etag = result.etag
-                    lastFetchEpochSeconds = nowSeconds
-                    // Stamp wall-clock millis for TypedEvaluationDetails (spec 082 / #266).
-                    fetchTimeUnixMillis = nowMillis
+                    state.update {
+                        it.copy(settings = parsedSettings, configRoot = parsedRoot, fetchTimeMillis = nowMillis)
+                    }
                 }
-                persistCache(result.rawBody, result.etag, nowSeconds)
-                // Hook bus (spec 105 / #268) — fire configChanged with the new settings,
-                // then clientReady on the first successful fetch.
-                hooks.invokeOnConfigChanged(parsedSettings?.let { decodeSettingsMap(it) } ?: emptyMap())
-                fireClientReadyOnce()
+                persistCache(result.rawBody, result.etag, nowSeconds, providerRefresh)
+                // Fire configChanged, then clientReady on the first successful fetch.
+                hooks.invokeOnConfigChanged(
+                    parsedSettings?.let { decodeSettingsMap(it) } ?: emptyMap(),
+                    sanitizeFailure = providerRefresh,
+                )
+                fireClientReadyOnce(providerRefresh)
                 true
             }
             ConfigFetcher.Status.NOT_MODIFIED -> {
                 val nowMillis = currentEpochMillis()
-                val nowSeconds = nowMillis / 1000L
                 stateMutex.withLock {
                     if (result.etag.isNotEmpty()) etag = result.etag
-                    lastFetchEpochSeconds = nowSeconds
-                    // `not_modified` still confirms freshness — update the stamp.
-                    fetchTimeUnixMillis = nowMillis
+                    state.update { it.copy(fetchTimeMillis = nowMillis) }
                 }
-                fireClientReadyOnce()
+                fireClientReadyOnce(providerRefresh)
                 true
             }
             ConfigFetcher.Status.FAILED -> {
                 // Hook bus (spec 105 / #268) — fire clientError on fetch failure.
-                hooks.invokeOnError("Config fetch failed.")
+                hooks.invokeOnError("Config fetch failed.", sanitizeFailure = providerRefresh)
                 false
             }
         }
     }
 
-    private fun fireClientReadyOnce() {
+    private fun fireClientReadyOnce(sanitizeFailure: Boolean) {
         if (!clientReadyFired) {
             clientReadyFired = true
-            hooks.invokeOnClientReady()
+            hooks.invokeOnClientReady(sanitizeFailure)
         }
     }
 
@@ -477,7 +499,12 @@ public class ConfeatureClient private constructor(b: Builder) {
         return body.mapValues { decodeJsonElement(it.value) }
     }
 
-    private suspend fun persistCache(rawBody: String?, etagValue: String, nowSeconds: Long) {
+    private suspend fun persistCache(
+        rawBody: String?,
+        etagValue: String,
+        nowSeconds: Long,
+        providerRefresh: Boolean,
+    ) {
         if (rawBody == null) return
         try {
             val envelope = JsonObject(
@@ -489,10 +516,15 @@ public class ConfeatureClient private constructor(b: Builder) {
             )
             cache.write(cacheKey, envelope.toString())
         } catch (ex: Exception) {
-            logger.warning(
-                "ConfeatureClient: failed to persist cache entry. sdkKey=" +
-                    "${SdkKey.redact(sdkKey)} reason=${ex.message}",
-            )
+            if (providerRefresh) {
+                if (ex is CancellationException) throw ex
+                logger.reportProviderFailure("ConfeatureClient: provider cache write failed.")
+            } else {
+                logger.warning(
+                    "ConfeatureClient: failed to persist cache entry. sdkKey=" +
+                        "${SdkKey.redact(sdkKey)} reason=${ex.message}",
+                )
+            }
         }
     }
 
