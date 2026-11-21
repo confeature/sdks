@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+import java.io.File
+
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -8,7 +10,7 @@ pluginManagement {
     }
 }
 
-val releaseRepo = providers.gradleProperty("releaseRepo").map { java.io.File(it) }.orNull
+val releaseRepo = providers.gradleProperty("releaseRepo").map { File(it) }.orNull
     ?: error("Supply the companion's packed Maven repository with -PreleaseRepo.")
 require(releaseRepo.isAbsolute && releaseRepo.isDirectory) {
     "The fixture consumer needs a local, absolute Maven directory."
@@ -17,7 +19,7 @@ val releaseVersion = providers.gradleProperty("releaseVersion").get()
 val companion = "confeature-openfeature-kotlin"
 require(
     Regex("""[0-9]+\.[0-9]+\.[0-9]+""").matches(releaseVersion) &&
-        java.io.File(releaseRepo, "io/confeature/$companion/$releaseVersion").isDirectory
+        File(releaseRepo, "io/confeature/$companion/$releaseVersion").isDirectory
 ) {
     "The fixture Maven directory must contain the selected companion version."
 }

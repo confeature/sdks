@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+import java.io.File
 import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsEnvSpec
@@ -9,7 +10,7 @@ import org.jetbrains.kotlin.konan.target.HostManager
 val enableAndroid = providers.gradleProperty("enableAndroid").map(String::toBoolean).getOrElse(false)
 val fixtureSources = providers.gradleProperty("fixtureSources").orNull
 val fixtureReleaseDirectory = providers.gradleProperty("fixtureReleaseDirectory").orNull?.let { path ->
-    java.io.File(path).also {
+    File(path).also {
         require(it.isAbsolute && it.isDirectory) { "The fixture release directory must be a local absolute directory." }
     }
 }
