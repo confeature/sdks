@@ -11,7 +11,7 @@
 
   <PropertyGroup Label="NuGet package metadata">
     <PackageId>Confeature.Client</PackageId>
-    <Version>0.1.1</Version>
+    <Version>0.2.0</Version>
     <Authors>MakerLabs</Authors>
     <Company>MakerLabs</Company>
     <Description>Confeature .NET SDK — drop-in compatible with ConfigCat.Client at the wire and API-surface levels. MIT.</Description>
