@@ -135,6 +135,14 @@
             <sha256 value="9a3b2b5afa458db15805d370ab0cb3722031cc128416cf061501d43a3328d788" />
          </artifact>
       </component>
+      <component group="com.android.tools.build" name="aapt2" version="8.10.1-12782657">
+         <artifact name="aapt2-8.10.1-12782657-linux.jar">
+            <sha256 value="52f864b7fd20a9ff09fc3db96162537a63c5b38ecc1c2549db4b491c6a517ff0" />
+         </artifact>
+         <artifact name="aapt2-8.10.1-12782657.pom">
+            <sha256 value="fdc420d641d2c24eb9f706b9a163aad962cc90fd33721508fd7cbbc5a39b9392" />
+         </artifact>
+      </component>
       <component group="com.android.tools.build" name="aapt2-proto" version="8.10.1-12782657">
          <artifact name="aapt2-proto-8.10.1-12782657.jar">
             <sha256 value="542852b381e0b6f7886e2de0baa3680ec60c6209c34e1cb90645a689b6122dd4" />
