@@ -2063,8 +2063,13 @@ describe("19 the SDK gates' own shape (#793)", () => {
     ],
     [
       "a Kotlin Apple check that can be skipped",
-      ({ jobs }) => void (jobs["kotlin-apple"].steps.at(-1).if = "false"),
+      ({ jobs }) => void (step(jobs["kotlin-apple"], "Exercise the iOS provider").if = "false"),
       /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
+    ],
+    [
+      "an Apple Maven link that can be skipped",
+      ({ jobs }) => void (step(jobs["kotlin-apple"], "Link the iOS Maven consumer").if = "false"),
+      /kotlin-apple: must link the iOS Maven consumer unconditionally/,
     ],
     [
       "the Kotlin Apple check on Ubuntu",

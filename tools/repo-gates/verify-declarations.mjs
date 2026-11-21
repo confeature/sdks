@@ -190,6 +190,26 @@ export const DECLARED_GATES = {
     script: "scripts/swift-precheck.sh",
     homes: [{ file: "package.json", script: "swift:check", direct: true }],
   },
+  "kotlin-apple-fixture": {
+    script: "apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh",
+    homes: [
+      {
+        file: ".github/workflows/sdk-gates.yml",
+        before: "Link the iOS Maven consumer",
+        direct: true,
+      },
+    ],
+  },
+  "kotlin-maven-consumer": {
+    script: "apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh",
+    homes: [
+      {
+        file: ".github/workflows/sdk-gates.yml",
+        before: "Record the Kotlin Apple checks",
+        direct: true,
+      },
+    ],
+  },
   "verify:fmt-lint": {
     script: "tools/repo-gates/verify-fmt-lint.mjs",
     homes: [{ file: "package.json", script: "verify" }],

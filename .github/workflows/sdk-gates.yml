@@ -320,8 +320,14 @@ jobs:
       - name: Build the live-contract harness
         run: pnpm --filter @confeature/test-harness-live-contract build
 
-      - name: Exercise the iOS provider and link the Maven consumer
+      - name: Exercise the iOS provider
         run: bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh
+
+      - name: Link the iOS Maven consumer
+        run: bash apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh apple
+
+      - name: Record the Kotlin Apple checks
+        run: printf '%s\n' 'Kotlin OpenFeature simulator tests and the iOS arm64 Maven link passed.' >> "$GITHUB_STEP_SUMMARY"
 
   # The one required check. It runs whatever happened above, and is green only
   # when every kind's result matches its selection (conclude-sdk-gates.mjs).

@@ -3532,6 +3532,8 @@ function nativeLegProblems(job) {
 }
 
 const KOTLIN_APPLE_RUN = "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh";
+const KOTLIN_APPLE_LINK =
+  "bash apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh apple";
 
 function kotlinAppleLegProblems(job) {
   const out = [];
@@ -3550,6 +3552,13 @@ function kotlinAppleLegProblems(job) {
     out.push(
       "must prepare pnpm, Node, the workspace and the harness in order before the Apple check",
     );
+  const links = steps.filter((step) => String(step?.run ?? "").trim() === KOTLIN_APPLE_LINK);
+  if (
+    links.length !== 1 ||
+    links[0].if !== undefined ||
+    steps.indexOf(links[0]) <= steps.indexOf(matches[0])
+  )
+    out.push("must link the iOS Maven consumer unconditionally after the simulator checks");
   return out;
 }
 

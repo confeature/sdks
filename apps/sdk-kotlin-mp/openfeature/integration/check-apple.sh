@@ -18,4 +18,6 @@ xcrun simctl boot "$device"
 xcrun simctl bootstatus "$device" -b
 export CONFEATURE_KOTLIN_SIMULATOR="$device"
 node "$integration/run-fixture.mjs" apple
-bash "$integration/check-maven-consumer.sh" apple
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  printf 'DEVELOPER_DIR=%s\n' "$DEVELOPER_DIR" >> "$GITHUB_ENV"
+fi
