@@ -3225,6 +3225,14 @@
             <sha256 value="4cb6bd5de8aed7293a8befae7a900c3c36ac927c4094cc7027f4ab58cd6b3c9d" />
          </artifact>
       </component>
+      <component group="org.jetbrains.kotlin" name="kotlin-native-prebuilt" version="2.0.21">
+         <artifact name="kotlin-native-prebuilt-2.0.21-macos-aarch64.tar.gz">
+            <sha256 value="c823759949725e7070f5dc20d3add822a322bc07a8d98d5449fbdbfc8d88b354" />
+         </artifact>
+         <artifact name="kotlin-native-prebuilt-2.0.21.pom">
+            <sha256 value="1afe30244e1947aed6cbed35041ad36c59f0ea764afdbc6fff9e9a818ee5a041" />
+         </artifact>
+      </component>
       <component group="org.jetbrains.kotlin" name="kotlin-native-prebuilt" version="2.2.21">
          <artifact name="kotlin-native-prebuilt-2.2.21-macos-aarch64.tar.gz">
             <sha256 value="4a82fc35ee2c14a2171033f574e215e04a89505d67f402a596a6bac9b5365467" />
