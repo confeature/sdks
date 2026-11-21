@@ -2,7 +2,6 @@
 package io.confeature.kmp.internal
 
 import io.confeature.kmp.User
-import io.confeature.kmp.internal.ConfigValues.asList
 import io.confeature.kmp.internal.ConfigValues.asMap
 import io.confeature.kmp.internal.ConfigValues.coerceTyped
 import io.confeature.kmp.internal.ConfigValues.defaultMatchesType

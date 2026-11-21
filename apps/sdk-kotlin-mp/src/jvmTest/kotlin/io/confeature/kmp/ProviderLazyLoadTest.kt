@@ -12,10 +12,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -177,6 +182,138 @@ class ProviderLazyLoadTest {
                 assertEquals(true, nestedRefresh)
                 assertEquals(2, fixture.requests.get())
                 assertEquals(Status.RESOLVED, client.providerDetails().status)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun cancellingTheNativeWriterPreservesItsCallerContextAndLeavesReadyAvailable() = runBlocking {
+        DelayedConfig().use { fixture ->
+            val marker = ThreadLocal<String>()
+            val started = CompletableDeferred<String?>()
+            val counter = AtomicInteger()
+            val cache = object : ConfigCache {
+                override suspend fun read(cacheKey: String): String? = null
+
+                override suspend fun write(cacheKey: String, value: String) {
+                    if (counter.incrementAndGet() == 1) {
+                        started.complete(marker.get())
+                        awaitCancellation()
+                    }
+                }
+            }
+            val client = fixture.client(customCache = cache)
+            val readyCalls = AtomicInteger()
+            client.getHooks().addOnClientReady { readyCalls.incrementAndGet() }
+            try {
+                fixture.firstRelease.countDown()
+                val first = async { withContext(marker.asContextElement("caller")) { client.forceRefresh() } }
+                assertEquals("caller", withTimeout(5_000) { started.await() })
+                first.cancelAndJoin()
+                assertEquals(0, readyCalls.get())
+                assertTrue(withTimeout(5_000) { client.forceRefresh() })
+                assertEquals(2, counter.get())
+                assertEquals(1, readyCalls.get())
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun providerCacheErrorsExposeOnlyFixedDiagnostics() = runBlocking {
+        DelayedConfig().use { fixture ->
+            val logger = CapturingLogger()
+            val cache = object : ConfigCache {
+                override suspend fun read(cacheKey: String): String? = null
+
+                override suspend fun write(cacheKey: String, value: String) {
+                    throw AssertionError("application cache sentinel")
+                }
+            }
+            val client = fixture.client(logger = logger, customCache = cache)
+            val ready = CountDownLatch(1)
+            client.getHooks().addOnClientReady { ready.countDown() }
+            try {
+                assertEquals(Status.NOT_READY, client.providerDetails().status)
+                fixture.firstRelease.countDown()
+                assertTrue(ready.await(5, TimeUnit.SECONDS))
+                assertTrue(logger.messages.contains("ERROR ConfeatureClient: provider cache write failed."))
+                assertTrue(logger.messages.none { it.contains("application cache sentinel") })
+                assertEquals(true, client.providerDetails().value)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun pendingProviderCacheWriteKeepsItsDiagnosticsWhenRecoveringFromANativeWriterError() = runBlocking {
+        DelayedConfig().use { fixture ->
+            val firstWrite = CompletableDeferred<Unit>()
+            val releaseFirstWrite = CompletableDeferred<Unit>()
+            val providerChanged = CompletableDeferred<Unit>()
+            val writes = AtomicInteger()
+            val logger = CapturingLogger()
+            val cache = object : ConfigCache {
+                override suspend fun read(cacheKey: String): String? = null
+
+                override suspend fun write(cacheKey: String, value: String) {
+                    if (writes.incrementAndGet() == 1) {
+                        firstWrite.complete(Unit)
+                        releaseFirstWrite.await()
+                        throw AssertionError("native cache sentinel")
+                    }
+                    throw AssertionError("pending provider cache sentinel")
+                }
+            }
+            val client = fixture.client(logger = logger, customCache = cache, polling = PollingMode.lazyLoad(25.milliseconds))
+            client.getHooks().addOnConfigChanged { providerChanged.complete(Unit) }
+            try {
+                fixture.firstRelease.countDown()
+                val native = async { runCatching { client.forceRefresh() }.exceptionOrNull() }
+                withTimeout(5_000) { firstWrite.await() }
+                delay(50)
+                assertEquals(true, client.providerDetails().value)
+                withTimeout(5_000) { providerChanged.await() }
+                assertEquals(1, writes.get())
+                releaseFirstWrite.complete(Unit)
+                assertEquals("native cache sentinel", native.await()?.message)
+                withTimeout(5_000) {
+                    while ("ERROR ConfeatureClient: provider cache write failed." !in logger.messages) delay(10)
+                }
+                assertEquals(2, writes.get())
+                assertTrue(logger.messages.none { it.contains("sentinel") })
+            } finally {
+                releaseFirstWrite.complete(Unit)
+                client.close()
+            }
+        }
+    }
+
+    @Test
+    fun closingFromTheProviderFailureDiagnosticPreventsTheErrorCallback() = runBlocking {
+        DelayedConfig(firstStatus = 503).use { fixture ->
+            lateinit var client: ConfeatureClient
+            val closedFromLogger = CountDownLatch(1)
+            val onError = CountDownLatch(1)
+            val logger = object : Logger by Logger.default() {
+                override fun error(message: String, throwable: Throwable?) {
+                    if (message == "ConfeatureClient: provider config fetch failed.") {
+                        client.close()
+                        closedFromLogger.countDown()
+                    }
+                }
+            }
+            client = fixture.client(logger = logger)
+            client.getHooks().addOnError { onError.countDown() }
+            try {
+                assertEquals(Status.NOT_READY, client.providerDetails().status)
+                fixture.firstRelease.countDown()
+                assertTrue(closedFromLogger.await(5, TimeUnit.SECONDS))
+                assertFalse(onError.await(200, TimeUnit.MILLISECONDS))
             } finally {
                 client.close()
             }

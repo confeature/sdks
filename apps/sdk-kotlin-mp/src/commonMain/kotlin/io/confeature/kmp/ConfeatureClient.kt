@@ -17,7 +17,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -72,6 +71,7 @@ public class ConfeatureClient private constructor(b: Builder) {
         val fetchTimeMillis: Long = 0L,
         val closed: Boolean = false,
         val offline: Boolean = false,
+        val readyNotified: Boolean = false,
     )
 
     private class CacheWrite(
@@ -81,7 +81,11 @@ public class ConfeatureClient private constructor(b: Builder) {
         val providerRefresh: Boolean,
     )
 
-    private data class CacheWriteQueue(val pending: CacheWrite? = null, val writing: Boolean = false)
+    private data class CacheWriteQueue(
+        val pending: CacheWrite? = null,
+        val writing: Boolean = false,
+        val closed: Boolean = false,
+    )
 
     private val state = MutableStateFlow(CachedState())
     private val cacheWriteQueue = MutableStateFlow(CacheWriteQueue())
@@ -90,7 +94,6 @@ public class ConfeatureClient private constructor(b: Builder) {
     private val localOnly: Boolean = flagOverrides?.behaviour == OverrideBehaviour.LOCAL_ONLY
 
     private val hooks = ConfeatureHooks(logger)
-    private var clientReadyFired = false
     private val closeMutex = Mutex()
     private val refreshMutex = Mutex()
     private val providerRefreshMutex = Mutex()
@@ -405,7 +408,7 @@ public class ConfeatureClient private constructor(b: Builder) {
             return
         }
         state.update { it.copy(closed = true) }
-        cacheWriteQueue.update { it.copy(pending = null) }
+        cacheWriteQueue.value = CacheWriteQueue(closed = true)
         closeMutex.unlock()
         try {
             if (scope.isInitialized()) scope.value.cancel()
@@ -457,7 +460,6 @@ public class ConfeatureClient private constructor(b: Builder) {
     private class RefreshOutcome(
         val status: ConfigFetcher.Status,
         val settings: Map<String, JsonElement>?,
-        val becameReady: Boolean,
     )
 
     private suspend fun fetchAndApply(lazyOnly: Boolean = false, providerRefresh: Boolean = false): Boolean {
@@ -486,11 +488,11 @@ public class ConfeatureClient private constructor(b: Builder) {
                 if (providerRefresh) {
                     logger.reportProviderFailure("ConfeatureClient: provider config fetch failed.")
                 }
-                hooks.invokeOnError("Config fetch failed.", sanitizeFailure = providerRefresh)
+                if (!closedFlag) hooks.invokeOnError("Config fetch failed.", sanitizeFailure = providerRefresh)
                 return false
             }
         }
-        if (outcome.becameReady && !closedFlag) hooks.invokeOnClientReady(sanitizeFailure = providerRefresh)
+        notifyReadyOnce(providerRefresh)
         return true
     }
 
@@ -505,7 +507,7 @@ public class ConfeatureClient private constructor(b: Builder) {
 
         val result = fetcher.fetch(etag, diagnostics)
         if (closedFlag) return null
-        if (result.status == ConfigFetcher.Status.FAILED) return RefreshOutcome(result.status, null, false)
+        if (result.status == ConfigFetcher.Status.FAILED) return RefreshOutcome(result.status, null)
 
         val fetched = result.status == ConfigFetcher.Status.FETCHED
         val nowMillis = currentEpochMillis()
@@ -515,15 +517,13 @@ public class ConfeatureClient private constructor(b: Builder) {
         if (fetched || result.etag.isNotEmpty()) etag = result.etag
         if (fetched) enqueueCacheWrite(result, nowMillis, providerRefresh)
 
-        val becameReady = !clientReadyFired
-        clientReadyFired = true
-        return RefreshOutcome(result.status, settings, becameReady)
+        return RefreshOutcome(result.status, settings)
     }
 
     private fun enqueueCacheWrite(result: ConfigFetcher.FetchResult, nowMillis: Long, providerRefresh: Boolean) {
         val rawBody = result.rawBody ?: return
         val write = CacheWrite(rawBody, result.etag, nowMillis / 1000L, providerRefresh)
-        cacheWriteQueue.update { if (closedFlag) it else it.copy(pending = write) }
+        cacheWriteQueue.update { if (it.closed) it else it.copy(pending = write) }
     }
 
     private fun publishRefresh(
@@ -537,6 +537,17 @@ public class ConfeatureClient private constructor(b: Builder) {
             if (current.closed || (providerRefresh && current.offline)) return false
             val next = current.copy(settings = settings, configRoot = root, fetchTimeMillis = fetchTimeMillis)
             if (state.compareAndSet(current, next)) return true
+        }
+    }
+
+    private fun notifyReadyOnce(providerRefresh: Boolean) {
+        while (true) {
+            val current = state.value
+            if (current.closed || current.readyNotified) return
+            if (state.compareAndSet(current, current.copy(readyNotified = true))) {
+                if (!closedFlag) hooks.invokeOnClientReady(sanitizeFailure = providerRefresh)
+                return
+            }
         }
     }
 
@@ -558,12 +569,6 @@ public class ConfeatureClient private constructor(b: Builder) {
 
     private suspend fun flushCacheWrites() {
         if (!claimCacheWriter()) return
-        val clientScope = scope.value
-        if (closedFlag) clientScope.cancel()
-        clientScope.async { drainCacheWrites() }.await()
-    }
-
-    private suspend fun drainCacheWrites() {
         try {
             while (true) {
                 val write = takeCacheWrite() ?: return
@@ -573,16 +578,31 @@ public class ConfeatureClient private constructor(b: Builder) {
         } catch (failure: Throwable) {
             val queue = cacheWriteQueue.updateAndGet { it.copy(writing = false) }
             if (queue.pending != null && !closedFlag && !isFatalError(failure)) {
-                scope.value.launch { flushCacheWrites() }
+                continuePendingCacheWrites()
             }
             throw failure
+        }
+    }
+
+    private fun continuePendingCacheWrites() {
+        val clientScope = scope.value
+        if (closedFlag) clientScope.cancel()
+        clientScope.launch {
+            try {
+                flushCacheWrites()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                if (isFatalError(failure)) throw failure
+                logger.reportProviderFailure("ConfeatureClient: pending cache write failed.")
+            }
         }
     }
 
     private fun claimCacheWriter(): Boolean {
         while (true) {
             val queue = cacheWriteQueue.value
-            if (queue.writing || queue.pending == null || closedFlag) return false
+            if (queue.writing || queue.pending == null || queue.closed) return false
             if (cacheWriteQueue.compareAndSet(queue, queue.copy(writing = true))) return true
         }
     }
@@ -591,7 +611,8 @@ public class ConfeatureClient private constructor(b: Builder) {
     private fun takeCacheWrite(): CacheWrite? {
         while (true) {
             val queue = cacheWriteQueue.value
-            val next = queue.pending.takeUnless { closedFlag }
+            if (queue.closed) return null
+            val next = queue.pending
             if (cacheWriteQueue.compareAndSet(queue, CacheWriteQueue(writing = next != null))) return next
         }
     }
@@ -615,6 +636,9 @@ public class ConfeatureClient private constructor(b: Builder) {
             reportCachePersistenceFailure(ex, write.providerRefresh)
         } catch (ex: Exception) {
             reportCachePersistenceFailure(ex, write.providerRefresh)
+        } catch (thrown: Throwable) {
+            if (!write.providerRefresh || isFatalError(thrown)) throw thrown
+            logger.reportProviderFailure("ConfeatureClient: provider cache write failed.")
         }
     }
 

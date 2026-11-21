@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 package io.confeature.kmp.internal
 
+import io.confeature.kmp.internal.ConfigValues.asList
+import io.confeature.kmp.internal.ConfigValues.asMap
+
 /**
  * The evaluator's internal model: the per-evaluation context, the condition outcome, the resolved
  * setting envelope and the two fail-closed exceptions. [Evaluator] is the public entrypoint; the
