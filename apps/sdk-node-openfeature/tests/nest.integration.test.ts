@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 import "reflect-metadata";
+import { ConfeatureProvider } from "@confeature/openfeature-node";
 import { Module, type INestApplicationContext } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { OpenFeatureModule, getOpenFeatureClientToken, type Client } from "@openfeature/nestjs-sdk";
 import { OpenFeature } from "@openfeature/server-sdk";
 import { expect, it, vi } from "vitest";
 
-import { ConfeatureProvider } from "../src/index.ts";
 import { admin, installFixtureTransport, targetedFlag } from "./fixture.ts";
 
 it("resolves a targeted flag through the official NestJS module's injected client", async () => {

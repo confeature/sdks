@@ -150,17 +150,18 @@ function builderLinesOf(text) {
 const CACHE_KEY_TAIL = /cache[_-]?key|(?<![a-z])tail\b|sha-?256|digest|hash/i;
 
 /**
- * The SDKs that build no URL of their own: they fetch through
- * `packages/sdk-shared`, which the scan covers. Every other SDK must show the
- * scan its URL builder.
+ * Packages that delegate URL construction to the shared SDK library or a base
+ * SDK. Their source is still checked for forbidden paths. Packages that build a
+ * URL directly must show the scan their URL builder.
  */
-const URL_FROM_SDK_SHARED = new Set([
+const URL_DELEGATES_TO_SDK = new Set([
   "apps/sdk-angular",
   "apps/sdk-browser-js",
   "apps/sdk-bun",
   "apps/sdk-cloudflare-worker",
   "apps/sdk-deno",
   "apps/sdk-node",
+  "apps/sdk-node-openfeature",
   "apps/sdk-react",
 ]);
 
@@ -201,14 +202,16 @@ test("FR-005: every SDK that builds its own URL shows the scan where", () => {
       .map((file) => file.path.split("/").slice(0, 2).join("/")),
   );
   const unseen = [...sdkDirs].filter(
-    (dir) => !URL_FROM_SDK_SHARED.has(dir) && !withBuilder.has(dir),
+    (dir) => !URL_DELEGATES_TO_SDK.has(dir) && !withBuilder.has(dir),
   );
   expect(
     unseen,
-    "no code line builds `…/configuration-files/…/config_v6.json`: declare it in URL_FROM_SDK_SHARED or build the path literally",
+    "no code line builds `…/configuration-files/…/config_v6.json`: declare it in URL_DELEGATES_TO_SDK or build the path literally",
   ).toEqual([]);
-  const stale = [...URL_FROM_SDK_SHARED].filter((dir) => !sdkDirs.has(dir) || withBuilder.has(dir));
-  expect(stale, "builds its own URL, or is gone: remove it from URL_FROM_SDK_SHARED").toEqual([]);
+  const stale = [...URL_DELEGATES_TO_SDK].filter(
+    (dir) => !sdkDirs.has(dir) || withBuilder.has(dir),
+  );
+  expect(stale, "builds its own URL, or is gone: remove it from URL_DELEGATES_TO_SDK").toEqual([]);
 });
 
 test("FR-005: no SDK source builds /v2/configuration-files or a cache-key-tail URL", () => {

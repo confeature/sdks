@@ -2,7 +2,8 @@
 
 # Confeature OpenFeature provider for Node.js
 
-Use the Confeature Node.js SDK through OpenFeature on Node.js 20 or later.
+Use the Confeature Node.js SDK through OpenFeature in an ES module application
+on Node.js 20 or later.
 
 ```sh
 npm install @confeature/openfeature-node @confeature/sdk-node @openfeature/server-sdk
@@ -55,7 +56,8 @@ because the Node SDK's evaluation details do not expose a stable error code.
 
 ## NestJS
 
-Use the official `@openfeature/nestjs-sdk` package and supply the provider to
+In an ESM NestJS application, use the official `@openfeature/nestjs-sdk` package
+and supply the provider to
 `OpenFeatureModule.forRoot({ defaultProvider: new ConfeatureProvider(sdk) })`.
 This registers asynchronously. Use the injected client's `providerStatus` and
 `ProviderEvents.Ready` to coordinate startup work that requires flags. The
