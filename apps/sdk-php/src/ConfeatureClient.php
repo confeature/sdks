@@ -177,7 +177,7 @@ final class ConfeatureClient
     /** Returns the native evaluation envelope using the client's default user when needed. */
     public function getValueDetails(string $key, mixed $default, ?User $user = null): EvaluationDetails
     {
-        return $this->evaluateDetails($key, $default, $user)->details;
+        return $this->evaluateDetails($key, $default, $user);
     }
 
     /**
@@ -191,20 +191,26 @@ final class ConfeatureClient
         return $this->evaluateDetails($key, $default, $user, forProvider: true);
     }
 
+    /** @return ($forProvider is true ? DetailsEvaluationResult : EvaluationDetails) */
     private function evaluateDetails(
         string $key,
         mixed $default,
         ?User $user,
         bool $forProvider = false,
-    ): DetailsEvaluationResult {
+    ): EvaluationDetails|DetailsEvaluationResult {
+        $failure = null;
         if ($this->closed) {
-            $outcome = new DetailsEvaluationResult(
-                EvaluationDetails::fromError($key, $default, $user, 'CLIENT_CLOSED'),
-                EvaluationFailure::NotReady,
-            );
+            $details = EvaluationDetails::fromError($key, $default, $user, 'CLIENT_CLOSED');
+            $failure = EvaluationFailure::NotReady;
+        } elseif (
+            !$forProvider
+            && $this->localOnly
+            && !($this->flagOverrides?->dataSource instanceof ConfigOverrideDataSource)
+        ) {
+            $details = $this->legacyFlatDetails($key, $default, $user ?? $this->defaultUser);
         } else {
             $effectiveUser = $forProvider ? $user : ($user ?? $this->defaultUser);
-            $result = $this->evaluateCurrentConfigForDetails($key, $default, $effectiveUser, $forProvider);
+            $result = $this->evaluateCurrentConfigForDetails($key, $default, $effectiveUser);
             $details = new EvaluationDetails(
                 $key,
                 $result->variationId,
@@ -217,22 +223,50 @@ final class ConfeatureClient
                 $result->matchedTargetingRule,
                 $result->matchedPercentageOption,
             );
-            $outcome = new DetailsEvaluationResult($details, $result->failure);
+            $failure = $result->failure;
         }
 
-        $this->hooks->fireOnFlagEvaluated($outcome->details);
+        $this->hooks->fireOnFlagEvaluated($details);
 
-        return $outcome;
+        return $forProvider ? new DetailsEvaluationResult($details, $failure) : $details;
+    }
+
+    private function legacyFlatDetails(string $key, mixed $default, ?User $user): EvaluationDetails
+    {
+        [$found, $value] = OverrideEval::evaluateSync($this->flagOverrides, $key, $default);
+        // The value-only result can be the default even when the key is present.
+        // Preserve the second read for legacy sources that can change between calls.
+        try {
+            $map = $this->flagOverrides?->dataSource->getOverridesSync();
+            $present = $map !== null && \array_key_exists($key, $map);
+        } catch (\Throwable) {
+            $this->logger->warning('ConfeatureClient: LocalOnly override presence check failed.');
+            $present = false;
+        }
+
+        $resolved = $found && $present;
+
+        return new EvaluationDetails(
+            $key,
+            null,
+            $resolved ? $value : $default,
+            $user,
+            !$resolved,
+            $resolved ? null : 'KEY_NOT_FOUND',
+            null,
+            $this->fetchTimeUnixMilliseconds(),
+            null,
+            null,
+        );
     }
 
     private function evaluateCurrentConfigForDetails(
         string $key,
         mixed $default,
         ?User $user,
-        bool $forProvider,
     ): EvaluationResult {
         if ($this->localOnly && $this->flagOverrides !== null) {
-            return OverrideEval::evaluateDetails($this->flagOverrides, $key, $default, $user, $forProvider, $this->logger);
+            return OverrideEval::evaluateDetails($this->flagOverrides, $key, $default, $user, $this->logger);
         }
 
         $this->maybeFetch();

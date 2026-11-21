@@ -142,38 +142,19 @@ final class OverrideEval
         return self::evaluateSync($flagOverrides, $key, $defaultValue);
     }
 
-    /** @internal Resolves LocalOnly details, preserving the native flat override contract. */
+    /** @internal Resolves LocalOnly details, with strict rules for provider flat overrides. */
     public static function evaluateDetails(
         FlagOverrides $overrides,
         string $key,
         mixed $default,
         ?User $user,
-        bool $strict,
         LoggerInterface $logger,
     ): EvaluationResult {
         if ($overrides->dataSource instanceof ConfigOverrideDataSource) {
             return Evaluator::evaluate($overrides->dataSource->config(), $key, $default, $user);
         }
 
-        if ($strict) {
-            return self::evaluateStrictDetails($overrides, $key, $default, $logger);
-        }
-
-        [$found, $value] = self::evaluateSync($overrides, $key, $default);
-        // Legacy details recheck presence because the value-only path returns
-        // the default both for a missing slot and for a mistyped value.
-        try {
-            $map = $overrides->dataSource->getOverridesSync();
-            $present = $map !== null && \array_key_exists($key, $map);
-        } catch (\Throwable) {
-            // The native details contract treats a failed presence recheck as a missing key.
-            $logger->warning('ConfeatureClient: LocalOnly override presence check failed.');
-            $present = false;
-        }
-
-        return $found && $present
-            ? new EvaluationResult($value)
-            : EvaluationResult::failed($default, 'KEY_NOT_FOUND', EvaluationFailure::FlagNotFound);
+        return self::evaluateStrictDetails($overrides, $key, $default, $logger);
     }
 
     private static function evaluateStrictDetails(
