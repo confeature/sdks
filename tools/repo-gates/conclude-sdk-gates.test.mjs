@@ -24,6 +24,7 @@ const outputs = ({
   known_red = [],
   swift = [],
   smoke = [],
+  kotlin_apple = [],
   gate_files = NONE,
   summary = "push: every SDK selected (21)",
 } = {}) => ({
@@ -31,6 +32,7 @@ const outputs = ({
   known_red: JSON.stringify(known_red),
   swift: JSON.stringify(swift),
   smoke: JSON.stringify(smoke),
+  kotlin_apple: JSON.stringify(kotlin_apple),
   gate_files: JSON.stringify(gate_files),
   summary,
 });
@@ -45,6 +47,7 @@ const NODE = { name: "node", daggerFn: "js-test", live: true };
 const RUST_RED = { name: "rust", daggerFn: "rust-test", live: false, ticket: "#806" };
 /** One selected SDK for each kind, the shape its output carries. */
 const SWIFT = { name: "swift", live: true };
+const KOTLIN = { name: "kotlin-mp", daggerFn: "kotlin-mp-test", live: true };
 const ONE = { gate: [NODE], known_red: [RUST_RED], swift: [SWIFT], smoke: ["unreal"] };
 
 describe("the pass rule, every result for every kind", () => {
@@ -57,8 +60,10 @@ describe("the pass rule, every result for every kind", () => {
   );
   it.each(cases)("%s %s, result %s", (job, selected, result) => {
     const kind = KINDS.find((k) => k.job === job);
-    const sel = selected === "selected" ? { [kind.output]: ONE[kind.output] } : {};
-    const n = needs(sel);
+    const n =
+      selected === "selected" && kind.supplemental
+        ? needs({ gate: [KOTLIN], kotlin_apple: ["kotlin-mp"] }, { gate: "success" })
+        : needs(selected === "selected" ? { [kind.output]: ONE[kind.output] } : {});
     if (result === "missing") delete n[job];
     else n[job].result = result;
     const got = conclude(n);
@@ -71,6 +76,17 @@ describe("the pass rule, every result for every kind", () => {
 });
 
 describe("the aggregate", () => {
+  it("rejects bypassing or duplicating the Kotlin Apple check when Kotlin is selected", () => {
+    for (const kotlin_apple of [[], ["kotlin-mp", "kotlin-mp"]]) {
+      const result = kotlin_apple.length === 0 ? "skipped" : "success";
+      const got = conclude(
+        needs({ gate: [KOTLIN], kotlin_apple }, { gate: "success", "kotlin-apple": result }),
+      );
+      expect(got.problems).toContain(
+        "kotlin-apple: expected one leg exactly when kotlin-mp is selected",
+      );
+    }
+  });
   it("is green on a full, passing selection", () => {
     const got = conclude(needs({ gate: [NODE] }, { gate: "success" }));
     expect(got.ok).toBe(true);

@@ -141,6 +141,15 @@ export function conclude(needs) {
     }
     const names = selected.map((x) => (typeof x === "string" ? x : x.name));
     rows.push({ job: kind.job, names, result, counted: kind.counted });
+    if (kind.supplemental !== undefined) {
+      const needsSupplement = [...(sel.gate ?? []), ...(sel.known_red ?? [])].some(
+        (leg) => leg.name === kind.supplemental,
+      );
+      if (names.length !== Number(needsSupplement))
+        problems.push(
+          `${kind.job}: expected one leg exactly when ${kind.supplemental} is selected`,
+        );
+    }
     if (names.length === 0) {
       if (result !== "skipped")
         problems.push(`${kind.job}: ${result}, but nothing was selected for it`);

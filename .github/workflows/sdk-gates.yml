@@ -25,6 +25,8 @@
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
 #                   whose toolchain is Apple's, on a macos-15 runner; then its
 #                   live wire-cases natively (run-live-suite.mjs, #924).
+#   kotlin-apple    Kotlin OpenFeature on an arm64 iOS simulator and a
+#                   separate Apple device binary linked from Maven artifacts.
 #   smoke           Unreal's source-quality smoke (ci.native: smoke), labelled
 #                   as such: no hosted runner has an Unreal Engine.
 #   sdk gates       the aggregate, and the one required check on main:
@@ -78,6 +80,7 @@ jobs:
       known_red: ${{ steps.select.outputs.known_red }}
       swift: ${{ steps.select.outputs.swift }}
       smoke: ${{ steps.select.outputs.smoke }}
+      kotlin_apple: ${{ steps.select.outputs.kotlin_apple }}
       gate_files: ${{ steps.select.outputs.gate_files }}
       summary: ${{ steps.select.outputs.summary }}
     steps:
@@ -286,11 +289,45 @@ jobs:
           SDK: ${{ matrix.sdk }}
         run: node "apps/sdk-${SDK}/scripts/source-smoke.mjs"
 
+  kotlin-apple:
+    name: ${{ matrix.sdk }} (iOS OpenFeature)
+    needs: select
+    if: needs.select.outputs.kotlin_apple != '[]'
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ${{ fromJSON(needs.select.outputs.kotlin_apple) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install the workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the live-contract harness
+        run: pnpm --filter @confeature/test-harness-live-contract build
+
+      - name: Exercise the iOS provider and link the Maven consumer
+        run: bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh
+
   # The one required check. It runs whatever happened above, and is green only
   # when every kind's result matches its selection (conclude-sdk-gates.mjs).
   sdk-gates:
     name: sdk gates
-    needs: [select, gate, gate-known-red, swift, smoke]
+    needs: [select, gate, gate-known-red, swift, smoke, kotlin-apple]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10

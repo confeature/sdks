@@ -2059,7 +2059,17 @@ describe("19 the SDK gates' own shape (#793)", () => {
     [
       "a select output not handed on",
       ({ jobs }) => void delete jobs.select.outputs.smoke,
-      /select: its outputs are not exactly gate, known_red, swift, smoke, gate_files, summary/,
+      /select: its outputs are not exactly gate, known_red, swift, smoke, kotlin_apple, gate_files, summary/,
+    ],
+    [
+      "a Kotlin Apple check that can be skipped",
+      ({ jobs }) => void (jobs["kotlin-apple"].steps.at(-1).if = "false"),
+      /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
+    ],
+    [
+      "the Kotlin Apple check on Ubuntu",
+      ({ jobs }) => void (jobs["kotlin-apple"]["runs-on"] = "ubuntu-24.04"),
+      /kotlin-apple: must run on the arm64 macos-15 runner/,
     ],
     [
       "an environment",
@@ -2456,8 +2466,8 @@ describe("19 the SDK gates' own shape (#793)", () => {
           "    timeout-minutes: *t\n",
         )(
           once(
-            "    runs-on: macos-15\n    timeout-minutes: 45\n",
-            "    runs-on: macos-15\n    timeout-minutes: &t 45\n",
+            "    if: needs.select.outputs.swift != '[]'\n    runs-on: macos-15\n    timeout-minutes: 45\n",
+            "    if: needs.select.outputs.swift != '[]'\n    runs-on: macos-15\n    timeout-minutes: &t 45\n",
           )(t),
         ),
       [
@@ -2501,7 +2511,10 @@ describe("19 the SDK gates' own shape (#793)", () => {
     [
       "an anchor name defined twice",
       G,
-      once("    runs-on: macos-15\n", "    runs-on: &dagger-leg macos-15\n"),
+      once(
+        "    if: needs.select.outputs.swift != '[]'\n    runs-on: macos-15\n",
+        "    if: needs.select.outputs.swift != '[]'\n    runs-on: &dagger-leg macos-15\n",
+      ),
       [/-: defines the anchor &dagger-leg 2 times/],
     ],
     [

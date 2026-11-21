@@ -505,6 +505,18 @@
       "after": []
     },
     {
+      "name": "openfeature-kotlin",
+      "gate": "kotlin-mp",
+      "registry": "maven",
+      "coordinates": "io.confeature:confeature-openfeature-kotlin",
+      "path": "apps/sdk-kotlin-mp/openfeature",
+      "versionSource": {
+        "file": "apps/sdk-kotlin-mp/openfeature/build.gradle.kts",
+        "pattern": "^version = \"([^\"]+)\"$"
+      },
+      "after": ["kotlin-mp"]
+    },
+    {
       "name": "cpp",
       "gate": "cpp",
       "registry": "none",

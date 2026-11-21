@@ -14,11 +14,28 @@ import io.confeature.kmp.User
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalIsolatedApi::class)
 class NetworkFixtureTest {
+    @Test
+    fun theFixtureTransportRejectsAnUnapprovedOriginAndDoesNotFollowRedirects() = runTest {
+        for (url in listOf(FIXTURE_CANARY_ORIGIN, "$FIXTURE_ORIGIN/fixture-redirect")) {
+            val sdk = ConfeatureClient.builder(FIXTURE_KEY)
+                .baseUrl(url)
+                .pollingMode(PollingMode.manualPoll())
+                .cacheDirectory(":memory:")
+                .build()
+            try {
+                assertFalse(sdk.forceRefresh(), "fixture request must fail closed")
+            } finally {
+                sdk.close()
+            }
+        }
+    }
+
     @Test
     fun registeredOpenFeatureClientUsesTheSeededConfigAndExplicitStaticContext() = runTest {
         val sdk = ConfeatureClient.builder(FIXTURE_KEY)

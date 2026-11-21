@@ -3,7 +3,7 @@
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-const [sourceArg, destinationArg, originArg] = process.argv.slice(2);
+const [sourceArg, destinationArg, originArg, runtime = "jvm"] = process.argv.slice(2);
 if (!sourceArg || !destinationArg || !originArg) {
   throw new Error("Usage: stage-sdk.mjs <base SDK> <new stage> <loopback origin>");
 }
@@ -36,6 +36,28 @@ for (const entry of [
 const platformDir = (name) =>
   join(destination, "src", name, "kotlin/io/confeature/kmp/internal/platform");
 const signature = "public actual fun createHttpClient(";
+const jsGuard =
+  runtime === "browser"
+    ? `
+    var client = globalThis;
+    if (client.location.origin !== expectedOrigin) throw new Error("Unexpected Karma origin.");
+    var original = client.fetch;
+    client.fetch = function(input, init) {
+        return original.call(client, input, guardedOptions(client.Headers, input, init, "browser"));
+    };
+`
+    : `
+    var Module = eval("require")("module");
+    var load = Module._load;
+    Module._load = function(name) {
+        var original = load.apply(this, arguments);
+        if (name !== "node-fetch") return original;
+        var guarded = function(input, init) {
+            return original(input, guardedOptions(original.Headers, input, init, "node"));
+        };
+        return Object.assign(guarded, original);
+    };
+`;
 for (const target of ["jvm", "android", "js", "ios"]) {
   const file = join(platformDir(`${target}Main`), `HttpEngine.${target}.kt`);
   const implementation = await readFile(file, "utf8");
@@ -58,6 +80,30 @@ for (const target of ["jvm", "android", "js", "ios"]) {
             }
         }`
       : "";
+  const guardJavaScript = target === "js" && (runtime === "browser" || runtime === "node");
+  const setup = guardJavaScript ? "    installJsFixtureGuard()\n" : "";
+  const jsSupport = guardJavaScript
+    ? `
+private val jsFixtureInstalled: Unit by lazy {
+    js("""
+        (function (expectedOrigin) {
+            function guardedOptions(Headers, input, init, runtime) {
+                var url = new URL(input);
+                if (url.origin !== expectedOrigin || url.username || url.password) {
+                    throw new Error("Kotlin fixture transport refused this origin.");
+                }
+                var headers = new Headers(init && init.headers);
+                headers.set("X-Kotlin-Fixture-Transport", runtime);
+                return Object.assign({}, init, { headers: headers, redirect: "error" });
+            }
+            ${jsGuard}
+        })(${JSON.stringify(origin.origin)});
+    """)
+}
+
+private fun installJsFixtureGuard() = jsFixtureInstalled
+`
+    : "";
   await writeFile(
     join(platformDir(`${target}Main`), `FixtureEngine.${target}.kt`),
     `// SPDX-License-Identifier: MIT
@@ -66,12 +112,14 @@ package io.confeature.kmp.internal.platform
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 ${androidImports}
-public actual fun createHttpClient(block: HttpClientConfig<*>.() -> Unit): HttpClient =
-    createFixtureEngine {
+public actual fun createHttpClient(block: HttpClientConfig<*>.() -> Unit): HttpClient {
+${setup}    return createFixtureEngine {
         block()
         followRedirects = false
         install(FixtureSendGuard)${androidNoProxy}
     }
+}
+${jsSupport}
 `,
   );
 }

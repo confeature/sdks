@@ -35,7 +35,8 @@ class ConsumerSmokeTest {
             anonymous.setProviderAndWait(ConfeatureProvider(base))
             primary.setEvaluationContextAndWait(ImmutableContext("targeted", mapOf("Identifier" to Value.String("bad"))))
 
-            val targeted = primary.getClient().getBooleanDetails("flag", true)
+            val client = primary.getClient()
+            val targeted = client.getBooleanDetails("flag", true)
             assertEquals(true, targeted.value)
             assertEquals("fixture-targeted", targeted.variant)
             assertEquals(Reason.TARGETING_MATCH.name, targeted.reason)
@@ -46,14 +47,30 @@ class ConsumerSmokeTest {
             assertEquals("fixture-default", default.variant)
             assertNull(default.errorCode)
 
-            val decimal = primary.getClient().getDoubleDetails("decimal", 0.0)
+            val decimal = client.getDoubleDetails("decimal", 0.0)
             assertEquals(1.0, decimal.value)
             assertNull(decimal.errorCode)
-            assertEquals(1L, primary.getClient().getLongDetails("integer", Long.MAX_VALUE).value)
-            val missing = primary.getClient().getLongDetails("missing", Long.MAX_VALUE)
+            assertEquals(1, client.getIntegerDetails("integer", 0).value)
+            assertEquals(1L, client.getLongDetails("integer", Long.MAX_VALUE).value)
+            val missing = client.getLongDetails("missing", Long.MAX_VALUE)
             assertEquals(Long.MAX_VALUE, missing.value)
             assertEquals(ErrorCode.FLAG_NOT_FOUND, missing.errorCode)
-            assertEquals(5, details.size)
+            val mistyped = client.getDoubleDetails("integer", 2.5)
+            assertEquals(2.5, mistyped.value)
+            assertEquals(ErrorCode.TYPE_MISMATCH, mistyped.errorCode)
+
+            val split = client.getBooleanDetails("rollout", false)
+            assertEquals(true, split.value)
+            assertEquals("fixture-split", split.variant)
+            assertEquals(Reason.SPLIT.name, split.reason)
+            assertNull(split.errorCode)
+            assertEquals(false, anonymous.getClient().getBooleanValue("rollout", true))
+
+            val fallback = Value.Structure(mapOf("note" to Value.String("fixture")))
+            val objectDetails = client.getObjectDetails("flag", fallback)
+            assertEquals(fallback, objectDetails.value)
+            assertEquals(ErrorCode.TYPE_MISMATCH, objectDetails.errorCode)
+            assertEquals(9, details.size)
             assertTrue(details.all { it.user == null })
 
             primary.setProviderAndWait(ConfeatureProvider(base))
@@ -81,6 +98,11 @@ class ConsumerSmokeTest {
             ),
             "decimal" to mapOf("t" to 3, "v" to mapOf("d" to 1.0)),
             "integer" to mapOf("t" to 2, "v" to mapOf("i" to 1)),
+            "rollout" to mapOf(
+                "t" to 0,
+                "v" to mapOf("b" to false),
+                "p" to listOf(mapOf("p" to 100, "v" to mapOf("b" to true), "i" to "fixture-split")),
+            ),
         ),
     )
 }

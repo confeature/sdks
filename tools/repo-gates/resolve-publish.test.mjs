@@ -107,6 +107,7 @@ describe("the real publish table", () => {
       "openfeature-node",
       "openfeature-browser",
       "openfeature-java",
+      "openfeature-kotlin",
     ].sort(byName);
     expect(units).toEqual(expected);
   });
@@ -172,6 +173,7 @@ describe("tagFormat", () => {
   it.each([
     ["sdk-node-v0.1.0", "node", "0.1.0"],
     ["sdk-kotlin-mp-v1.20.3", "kotlin-mp", "1.20.3"],
+    ["sdk-openfeature-kotlin-v0.1.0", "openfeature-kotlin", "0.1.0"],
     ["sdk-cloudflare-worker-v2.0.0-rc.1", "cloudflare-worker", "2.0.0-rc.1"],
   ])("accepts %s", (tag, name, version) => expect(re.exec(tag)?.groups).toEqual({ name, version }));
   it.each([

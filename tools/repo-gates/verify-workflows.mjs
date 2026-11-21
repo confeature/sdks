@@ -3531,6 +3531,28 @@ function nativeLegProblems(job) {
   return out;
 }
 
+const KOTLIN_APPLE_RUN = "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh";
+
+function kotlinAppleLegProblems(job) {
+  const out = [];
+  if (job["runs-on"] !== "macos-15") out.push("must run on the arm64 macos-15 runner");
+  const steps = stepsOf(job);
+  const matches = steps.filter((step) => String(step?.run ?? "").trim() === KOTLIN_APPLE_RUN);
+  if (matches.length !== 1 || matches[0].if !== undefined) {
+    out.push("must run exactly one unconditional Kotlin Apple check");
+    return out;
+  }
+  const before = steps.slice(0, steps.indexOf(matches[0]));
+  const indexes = NATIVE_LIVE_PREP.map(({ is }) =>
+    before.findIndex((step) => step.if === undefined && is(step)),
+  );
+  if (indexes.some((index, i) => index === -1 || (i > 0 && index < indexes[i - 1])))
+    out.push(
+      "must prepare pnpm, Node, the workspace and the harness in order before the Apple check",
+    );
+  return out;
+}
+
 /**
  * Rule 19 (#793, FR-001, FR-011): sdk-gates.yml's own shape, the required
  * checks, and the manifest's CI routing. What rules 2, 3 (caches) and 18
@@ -3643,7 +3665,10 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
       !EXPR(`fromJSON\\(${output.replace(/\./g, "\\.")}\\)`).test(String(m.sdk))
     )
       add(kind.job, `its matrix is not exactly sdk: \${{ fromJSON(${output}) }}`);
-    if (kind.native === undefined) for (const why of daggerLegProblems(job)) add(kind.job, why);
+    if (kind.supplemental === "kotlin-mp")
+      for (const why of kotlinAppleLegProblems(job)) add(kind.job, why);
+    else if (kind.native === undefined)
+      for (const why of daggerLegProblems(job)) add(kind.job, why);
     else if (kind.live) for (const why of nativeLegProblems(job)) add(kind.job, why);
   }
   // The select job: it runs the selector, and hands on every output it writes.

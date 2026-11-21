@@ -189,7 +189,7 @@ const route = (names, { event = "push", manifest = fixture(), base = manifest } 
   routeSelection({ event, names, manifest, baseManifest: base });
 
 describe("the routing into job kinds", () => {
-  it("each SDK lands in exactly one kind", () => {
+  it("routes SDKs without their own supplemental check", () => {
     expect(route(["a", "b", "mac", "ue"])).toEqual({
       gate: [
         { name: "a", daggerFn: "a-test", live: false },
@@ -198,7 +198,17 @@ describe("the routing into job kinds", () => {
       known_red: [],
       swift: [{ name: "mac", live: false }],
       smoke: ["ue"],
+      kotlin_apple: [],
     });
+  });
+
+  it("selects the Kotlin Apple check even when the Dagger leg has a waiver", () => {
+    const manifest = { sdks: [{ name: "kotlin-mp", daggerFn: "kotlin-mp-test" }] };
+    const base = { sdks: [{ ...manifest.sdks[0], ci: { knownRed: "#1" } }] };
+    const selected = route(["kotlin-mp"], { event: "pull_request", manifest, base });
+    expect(selected.gate).toEqual([]);
+    expect(selected.known_red).toHaveLength(1);
+    expect(selected.kotlin_apple).toEqual(["kotlin-mp"]);
   });
 
   // #924: the macOS job runs a swift SDK's liveSuite.runner natively, after
@@ -263,7 +273,13 @@ describe("the routing into job kinds", () => {
   });
 
   it("the kinds are the outputs the workflow's matrices read", () => {
-    expect(KINDS.map((k) => k.output)).toEqual(["gate", "known_red", "swift", "smoke"]);
+    expect(KINDS.map((k) => k.output)).toEqual([
+      "gate",
+      "known_red",
+      "swift",
+      "smoke",
+      "kotlin_apple",
+    ]);
     for (const k of KINDS) expect(OUTPUT_KEYS).toContain(k.output);
   });
 });

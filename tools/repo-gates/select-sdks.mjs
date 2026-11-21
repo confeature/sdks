@@ -77,7 +77,7 @@ const CI_KEYS = ["native", "knownRed"];
 
 /**
  * The job kinds of sdk-gates.yml: each matrix job's id, the output that feeds
- * it, the ci.native it runs (none for the Dagger legs), whether the
+ * it, the ci.native it runs or the SDK it supplements, whether the
  * aggregate counts its result, and whether its job runs an SDK's live suite
  * after its suite (`live`: the Dagger legs since #918, the macOS job since
  * #924; the smoke job never). verify-workflows.mjs rule 19 and
@@ -88,6 +88,13 @@ export const KINDS = [
   { job: "gate-known-red", output: "known_red", counted: false, live: true },
   { job: "swift", output: "swift", native: "macos", counted: true, live: true },
   { job: "smoke", output: "smoke", native: "smoke", counted: true, live: false },
+  {
+    job: "kotlin-apple",
+    output: "kotlin_apple",
+    supplemental: "kotlin-mp",
+    counted: true,
+    live: false,
+  },
 ];
 /** The select job's own id, whose outputs every other job reads. */
 export const SELECT_JOB = "select";
@@ -115,6 +122,7 @@ export const GATE_PREFIXES = [
   "tools/test-harness-live-contract/",
   "scripts/swift-precheck.sh",
   "apps/sdk-unreal/scripts/",
+  "apps/sdk-kotlin-mp/openfeature/integration/",
   // What `pnpm install` reads before any gate step runs (#793 re-review F7).
   "package.json",
   "pnpm-lock.yaml",
@@ -420,6 +428,7 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
  * nothing else, so a ticket on a counted leg would read as not counted.
  */
 export function legProblem(kind, x) {
+  if (kind.supplemental !== undefined) return x !== kind.supplemental;
   const leg =
     isObject(x) && typeof x.name === "string" && NAME.test(x.name) && typeof x.live === "boolean";
   if (!kind.live) return typeof x !== "string" || !NAME.test(x);
@@ -463,6 +472,7 @@ export function routeSelection({ event, names, manifest, baseManifest }) {
     const leg = { name, daggerFn: s.daggerFn, live: hasLiveSuite(s) };
     if (ticket === null) out.gate.push(leg);
     else out.known_red.push({ ...leg, ticket });
+    for (const kind of KINDS) if (kind.supplemental === name) out[kind.output].push(name);
   }
   return out;
 }

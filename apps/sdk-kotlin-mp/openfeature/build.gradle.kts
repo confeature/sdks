@@ -77,6 +77,9 @@ kotlin {
             implementation(kotlin("test-junit5"))
             runtimeOnly("org.junit.platform:junit-platform-launcher:1.10.3")
         }
+        if (enableAndroid) {
+            getByName("androidUnitTest").dependencies { implementation(kotlin("test-junit")) }
+        }
     }
 }
 

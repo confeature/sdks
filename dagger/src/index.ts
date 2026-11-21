@@ -869,12 +869,28 @@ export class Confeature {
     return `${lastLine} (Tier 3 androidTest)`;
   }
 
-  /** Run apps/sdk-kotlin-mp's `check`, its browser target included (#928). */
+  /** Check the base SDK and its OpenFeature companion on JVM, Android and JS. */
   @func()
   async kotlinMpTest(source: Directory): Promise<string> {
-    const result = await kotlinMpToolchain(source)
+    const container = await withNativeHarness(kotlinMpToolchain(source), source);
+    const result = await container
       .withWorkdir("/work/apps/sdk-kotlin-mp")
       .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
+      .withWorkdir("/work/apps/sdk-kotlin-mp/openfeature")
+      .withExec([
+        "sh",
+        "./gradlew",
+        "--no-daemon",
+        "--max-workers=2",
+        "jvmTest",
+        "jsNodeTest",
+        "jsBrowserTest",
+      ])
+      .withExec(["node", "integration/run-fixture.mjs", "jvm"])
+      .withExec(["node", "integration/run-fixture.mjs", "android"])
+      .withExec(["node", "integration/run-fixture.mjs", "node"])
+      .withExec(["node", "integration/run-fixture.mjs", "browser"])
+      .withExec(["bash", "integration/check-maven-consumer.sh", "android"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 kotlinMpTest)`;
