@@ -67,7 +67,7 @@ rust-version = "1.88"
 
 [dependencies]
 confeature = { path = "$packaged", features = ["openfeature"] }
-open-feature = { version = "=0.3.0", default-features = false }
+open-feature = "=0.3.0"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde_json = "1"
 tempfile = "3"

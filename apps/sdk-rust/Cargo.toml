@@ -51,8 +51,8 @@ tokio = { version = "1", features = [
   "fs",
 ], optional = true }
 async-std = { version = "1", optional = true }
-# The 0.3.0 provider module re-exports its test-util type unconditionally.
-open-feature = { version = "=0.3.0", default-features = false, features = ["test-util"], optional = true }
+# The 0.3.0 crate unconditionally uses symbols from both default features.
+open-feature = { version = "=0.3.0", optional = true }
 # OpenFeature's transitive time dependency needs a patched release, which
 # raises the opt-in Rust floor to 1.88. The base crate does not build it.
 time = { version = "0.3.47", optional = true }
