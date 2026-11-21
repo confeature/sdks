@@ -639,11 +639,17 @@ export class Confeature {
     // `sh ./gradlew` runs the wrapper regardless of the file's exec bit;
     // `--no-daemon` is mandatory in ephemeral containers (no reuse). `check`
     // is the SDK's declared bar: tests, Spotless, JaCoCo verify.
-    const result = await javaToolchain(source)
+    const base = javaToolchain(source);
+    const result = await base
       .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon check"])
       .stdout();
+    const proof = await (
+      await withNativeHarness(base, source)
+    )
+      .withExec(["node", "tools/sdk-java-openfeature/run.mjs"])
+      .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Tier 2 javaTest)`;
+    return `${lastLine} (Tier 2 javaTest)\n${proof.trim()}`;
   }
 
   /**

@@ -69,6 +69,55 @@ function own(pomText, element) {
   return m?.[1];
 }
 
+/** Read the direct identity fields of a Gradle-generated Maven POM. */
+function pomIdentity(pomText) {
+  const fields = new Set(["modelVersion", "groupId", "artifactId", "version"]);
+  const xml = pomText.replace(/^\s*(?:<\?xml[^?]*\?>)?/, "");
+  const tokens =
+    /<!--[\s\S]*?-->|<\/([A-Za-z_][\w.:-]*)\s*>|<([A-Za-z_][\w.:-]*)(?:\s+[A-Za-z_][\w.:-]*\s*=\s*(?:"[^"<]*"|'[^'<]*'))*\s*\/?>|[^<]+/gy;
+  const stack = [];
+  const values = new Map();
+  let seenProject = false;
+  let consumed = 0;
+  for (const [token, closing, opening] of xml.matchAll(tokens)) {
+    consumed += token.length;
+    if (token.startsWith("<!--")) continue;
+    if (closing) {
+      if (stack.pop() !== closing) return null;
+      continue;
+    }
+    const field = stack.length === 2 && fields.has(stack[1]) ? stack[1] : null;
+    if (!opening) {
+      if (field) values.set(field, values.get(field) + token);
+      if (stack.length === 0 && token.trim()) return null;
+      continue;
+    }
+    if (field) return null;
+    if (stack.length === 0) {
+      if (seenProject || opening !== "project") return null;
+      seenProject = true;
+    }
+    if (stack.length === 1 && fields.has(opening)) {
+      if (values.has(opening)) return null;
+      values.set(opening, "");
+    }
+    if (!token.endsWith("/>")) stack.push(opening);
+  }
+  if (!seenProject || stack.length > 0 || consumed !== xml.length) return null;
+  return values;
+}
+
+export function matchesPomCoordinates(pomText, coordinates, version) {
+  const [group, artifact] = coordinates.split(":");
+  const identity = pomIdentity(pomText);
+  return (
+    identity?.get("modelVersion")?.trim() === "4.0.0" &&
+    identity.get("groupId")?.trim() === group &&
+    identity.get("artifactId")?.trim() === artifact &&
+    identity.get("version")?.trim() === version
+  );
+}
+
 /** The POM's problems, `where` naming it. */
 function pomProblems(where, pomText, group, aid, version) {
   const problems = [];
@@ -78,12 +127,14 @@ function pomProblems(where, pomText, group, aid, version) {
     /<(licenses|developers|scm|organization|issueManagement|ciManagement|distributionManagement|mailingLists|contributors)>[\s\S]*?<\/\1>/g,
     "",
   );
+  const identity = pomIdentity(pomText);
   for (const [el, want] of [
+    ["modelVersion", "4.0.0"],
     ["groupId", group],
     ["artifactId", aid],
     ["version", version],
   ]) {
-    const got = own(flat, el);
+    const got = identity?.get(el)?.trim();
     if (got !== want) problems.push(`${where}: <${el}> is ${got ?? "absent"}, not ${want}`);
   }
   for (const el of ["name", "description", "url"])

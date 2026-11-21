@@ -15,8 +15,10 @@ import {
   MANIFEST,
   OUTPUT_KEYS,
   checkSafe,
+  httpExists,
   Refusal,
   parseArgs,
+  registryUrl,
   resolvePublish,
   tagRegex,
 } from "../sdk-pack/resolve-publish.mjs";
@@ -32,6 +34,67 @@ const published = async () => true;
 const MAIN = { mainRef: "origin/main", isOnMain: () => true };
 const unpublished = async () => false;
 
+describe("the Maven release prerequisite", () => {
+  const parent = {
+    registry: "maven",
+    coordinates: "io.confeature:confeature-java-client",
+    version: "0.2.0",
+  };
+  const url =
+    "https://maven.confeature.io/io/confeature/confeature-java-client/0.2.0/confeature-java-client-0.2.0.pom";
+  const identity =
+    "<modelVersion>4.0.0</modelVersion><groupId>io.confeature</groupId><artifactId>confeature-java-client</artifactId><version>0.2.0</version>";
+  const pom = `<project>${identity}</project>`;
+
+  it("checks only the exact first-party package and version", async () => {
+    expect(registryUrl(parent, parent.version)).toBe(url);
+    expect(
+      registryUrl({ ...parent, coordinates: "io.confeature:a/../b" }, parent.version),
+    ).toBeNull();
+    expect(registryUrl(parent, "0.2.0/../0.1.1")).toBeNull();
+    expect(registryUrl({ ...parent, coordinates: "external:client" }, parent.version)).toBeNull();
+    await expect(
+      httpExists(url, parent, async (target, options) => {
+        expect(target).toBe(url);
+        expect(options).toEqual({
+          method: "GET",
+          headers: { accept: "application/xml" },
+          redirect: "error",
+        });
+        return new Response(pom);
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("refuses missing, mismatched, redirected and unexpected registry responses", async () => {
+    await expect(
+      httpExists(url, parent, async () => new Response(null, { status: 404 })),
+    ).resolves.toBe(false);
+    for (const body of [
+      pom.replace("0.2.0", "0.1.1"),
+      `<project><parent>${identity}</parent></project>`,
+      `<project><properties>${identity}</properties></project>`,
+      `<project>${identity}<version>0.2.0</version></project>`,
+      `<project>${identity}<dependencies></project>`,
+      `<other>${pom}</other>`,
+      pom + pom,
+      "not XML",
+    ]) {
+      await expect(httpExists(url, parent, async () => new Response(body))).rejects.toThrow(
+        /expected Maven project/,
+      );
+    }
+    await expect(
+      httpExists(url, parent, async () => new Response(null, { status: 503 })),
+    ).rejects.toThrow(/503/);
+    await expect(
+      httpExists(url, parent, async () => {
+        throw new TypeError("redirect");
+      }),
+    ).rejects.toThrow(/cannot reach/);
+  });
+});
+
 describe("the real publish table", () => {
   // A jsr entry rides along its unit's primary entry (#935, jsr-unit.test.mjs).
   const PRIMARIES = REAL.publish.filter((u) => u.registry !== "jsr");
@@ -43,6 +106,7 @@ describe("the real publish table", () => {
       "shared",
       "openfeature-node",
       "openfeature-browser",
+      "openfeature-java",
     ].sort(byName);
     expect(units).toEqual(expected);
   });

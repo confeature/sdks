@@ -108,6 +108,16 @@ describe("releaseProblems", () => {
     expect(check(release())).toEqual([]);
   });
 
+  it("refuses a POM that only names its artifact inside properties", () => {
+    const body = pom(ROOT_ID).replace(
+      /(<groupId>[^<]+<\/groupId>\s*<artifactId>[^<]+<\/artifactId>\s*<version>[^<]+<\/version>)/,
+      "<properties>$1</properties>",
+    );
+    expect(check({ ...release(), ...withSums({ [`${P}.pom`]: body }) })).toEqual(
+      expect.arrayContaining([expect.stringContaining("<artifactId> is absent")]),
+    );
+  });
+
   it("accepts a multiplatform release: the root and its suffixed targets", () => {
     expect(check(release([ROOT_ID, `${ROOT_ID}-jvm`, `${ROOT_ID}-iosarm64`]))).toEqual([]);
   });

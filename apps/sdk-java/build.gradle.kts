@@ -80,7 +80,7 @@ tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
 
 spotless {
     java {
-        target("src/**/*.java")
+        target("src/**/*.java", "openfeature/src/**/*.java")
         // google-java-format 1.23+ ships with the JDK 21+ internal
         // javac module-open args the formatter needs to introspect
         // the AST on modern JDKs (OpenJDK 25 locally, Temurin 21 on CI).
@@ -92,7 +92,7 @@ spotless {
         endWithNewline()
     }
     kotlinGradle {
-        target("*.gradle.kts")
+        target("*.gradle.kts", "openfeature/*.gradle.kts")
         ktlint("1.3.1")
     }
 }

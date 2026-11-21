@@ -46,6 +46,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
+import { matchesPomCoordinates } from "./check-maven-release.mjs";
 import { JSR, jsrProblems } from "./jsr-unit.mjs";
 
 export const MANIFEST = "dagger/sdk-manifest.json";
@@ -140,22 +141,32 @@ export function gateOf(unit, roster) {
 export function registryUrl(unit, version) {
   if (unit.registry === "npm")
     return `https://registry.npmjs.org/${unit.coordinates.replace("/", "%2f")}/${encodeURIComponent(version)}`;
+  if (unit.registry === "maven") {
+    const artifact = /^io\.confeature:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/.exec(unit.coordinates)?.[1];
+    if (artifact && new RegExp(`^${SEMVER}$`).test(version)) {
+      return `https://maven.confeature.io/io/confeature/${artifact}/${version}/${artifact}-${version}.pom`;
+    }
+  }
   return null;
 }
 
-/** Default lookup: a read-only GET; true on 200, false on 404, a refusal on anything else. */
-export async function httpExists(url) {
+/** A read-only lookup that also validates the identity of a published Maven project. */
+export async function httpExists(url, maven, fetcher = fetch) {
   let res;
   try {
-    res = await fetch(url, {
+    res = await fetcher(url, {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: { accept: maven ? "application/xml" : "application/json" },
       redirect: "error",
     });
   } catch {
     throw new Refusal(`cannot reach ${url}`);
   }
-  if (res.status === 200) return true;
+  if (res.status === 200) {
+    if (maven && !matchesPomCoordinates(await res.text(), maven.coordinates, maven.version))
+      throw new Refusal(`${url} did not identify the expected Maven project`);
+    return true;
+  }
   if (res.status === 404) return false;
   throw new Refusal(`${url} answered ${res.status}`);
 }
@@ -272,7 +283,11 @@ export async function resolvePublish({
       const url = registryUrl(dep, depVersion);
       if (url === null)
         throw new Refusal(`unit "${name}": cannot check "${depName}" on registry ${dep.registry}`);
-      if (!(await exists(url)))
+      const maven =
+        dep.registry === "maven"
+          ? { coordinates: dep.coordinates, version: depVersion }
+          : undefined;
+      if (!(await exists(url, maven)))
         throw new Refusal(
           `unit "${name}" must follow ${dep.coordinates}@${depVersion}, which is not published yet`,
         );
