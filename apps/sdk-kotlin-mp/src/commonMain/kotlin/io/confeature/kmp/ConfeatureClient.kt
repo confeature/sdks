@@ -472,6 +472,10 @@ public class ConfeatureClient private constructor(b: Builder) {
         if (closedFlag) return false
         diagnostics?.replay(logger)
         if (closedFlag) return false
+        return notifyRefresh(outcome, providerRefresh)
+    }
+
+    private fun notifyRefresh(outcome: RefreshOutcome, providerRefresh: Boolean): Boolean {
         when (outcome.status) {
             ConfigFetcher.Status.FETCHED -> hooks.invokeOnConfigChanged(
                 outcome.settings?.let { decodeSettingsMap(it) } ?: emptyMap(),
@@ -509,16 +513,17 @@ public class ConfeatureClient private constructor(b: Builder) {
         val root = if (fetched) decodeConfigRoot(result.body) else cached.configRoot
         if (!publishRefresh(settings, root, nowMillis, providerRefresh)) return null
         if (fetched || result.etag.isNotEmpty()) etag = result.etag
-        if (fetched && !closedFlag) {
-            result.rawBody?.let { rawBody ->
-                val write = CacheWrite(rawBody, result.etag, nowMillis / 1000L, providerRefresh)
-                cacheWriteQueue.update { if (closedFlag) it else it.copy(pending = write) }
-            }
-        }
+        if (fetched) enqueueCacheWrite(result, nowMillis, providerRefresh)
 
         val becameReady = !clientReadyFired
         clientReadyFired = true
         return RefreshOutcome(result.status, settings, becameReady)
+    }
+
+    private fun enqueueCacheWrite(result: ConfigFetcher.FetchResult, nowMillis: Long, providerRefresh: Boolean) {
+        val rawBody = result.rawBody ?: return
+        val write = CacheWrite(rawBody, result.etag, nowMillis / 1000L, providerRefresh)
+        cacheWriteQueue.update { if (closedFlag) it else it.copy(pending = write) }
     }
 
     private fun publishRefresh(
