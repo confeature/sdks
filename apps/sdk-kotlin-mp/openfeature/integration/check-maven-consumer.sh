@@ -39,8 +39,12 @@ if [[ "$target" == android ]]; then
   unzip -p "$aar" AndroidManifest.xml | grep -E 'android:minSdkVersion="21"([[:space:]]|/|>)'
   for variant in release minified; do
     apk="integration/consumer/android/build/outputs/apk/$variant/android-$variant-unsigned.apk"
-    badging=$("${ANDROID_HOME:?Set ANDROID_HOME}/build-tools/35.0.0/aapt2" dump badging "$apk")
-    grep -Fx "sdkVersion:'21'" <<< "$badging"
+    minimum=$("${ANDROID_HOME:?Set ANDROID_HOME}/cmdline-tools/latest/bin/apkanalyzer" manifest min-sdk "$apk")
+    if [[ "$minimum" != 21 ]]; then
+      printf 'Expected API 21 in %s, found %s\n' "$apk" "$minimum" >&2
+      exit 1
+    fi
+    printf '%s APK minimum API %s\n' "$variant" "$minimum"
   done
 else
   sh ./gradlew "${consumer[@]}" :apple:linkDebugExecutableIosArm64
