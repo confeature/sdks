@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "confeature-client"
-version = "0.1.1"
+version = "0.2.0"
 description = "Python SDK for Confeature — drop-in compatible with ConfigCat's configcat-client."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,6 +26,7 @@ classifiers = [
 dependencies = ["httpx>=0.27", "platformdirs>=4"]
 
 [project.optional-dependencies]
+openfeature = ["openfeature-sdk==0.10.0"]
 dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",

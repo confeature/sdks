@@ -881,33 +881,43 @@ export class Confeature {
     return `${lastLine} (Tier 3 kotlinMpTest)`;
   }
 
-  /**
-   * Run apps/sdk-python's full `python:ready` chain inside python:3.13-bookworm-slim.
-   *
-   * Chain: `uv sync --frozen --extra dev && uv run ruff check && uv run ruff format
-   * --check && uv run mypy --strict src && uv run pytest && uv run pytest -m slow
-   * && uv build`. The `[dev]` extra pulls `configcat-client>=10.0,<11.0` for the
-   * API-surface conformance test (constitution Principle II); that test runs
-   * transitively under `uv run pytest`.
-   *
-   * uv install: pinned to a specific 0.4.x release via UV_INSTALL_VERSION. We use
-   * the official install script (R11). Switching to the `astral/uv:*` base image
-   * is left as a follow-on (research R11 alternatives).
-   *
-   * @param source The workspace root. Workdir is /work/apps/sdk-python.
-   */
+  /** Run the Python SDK suite and its OpenFeature extra on seeded loopback data. */
   @func()
   async pythonTest(source: Directory): Promise<string> {
-    const result = await pythonToolchain(source)
+    const container = await liveContainer(source, "python");
+    const sdk = container
+      .withWorkdir("/work/apps/sdk-python")
       .withExec([
         "bash",
         "-eu",
         "-c",
-        "uv sync --frozen --extra dev && uv run ruff check && uv run ruff format --check && uv run mypy --strict src && uv run pytest && uv run pytest -m slow && uv build",
+        [
+          "uv sync --frozen --extra dev --extra openfeature",
+          "uv run --no-sync ruff check",
+          "uv run --no-sync ruff format --check",
+          "uv run --no-sync mypy --strict src",
+          "uv run --no-sync pytest",
+          "uv run --no-sync pytest -m slow",
+          "uv build",
+        ].join(" && "),
+      ]);
+    const result = await sdk
+      .withWorkdir("/work")
+      .withExec([
+        "node",
+        "apps/sdk-python/tests/openfeature/run.mjs",
+        "--",
+        "uv",
+        "run",
+        "--directory",
+        "apps/sdk-python",
+        "--no-sync",
+        "python",
+        "tests/openfeature/check.py",
       ])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Phase 3 pythonTest)`;
+    return `${lastLine} (Phase 3 pythonTest with OpenFeature)`;
   }
 
   /**

@@ -6,7 +6,7 @@ the project constitution): a customer that already uses ConfigCat in
 Python can migrate by changing the import name and the SDK key value.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from .client import ConfeatureClient, ConfeatureSnapshot
 from .evaluation_details import EvaluationDetails

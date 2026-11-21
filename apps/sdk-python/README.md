@@ -31,6 +31,49 @@ with ConfeatureClient(sdk_key="configcat-sdk-1/...") as client:
     print(f"dark mode: {enabled}")
 ```
 
+## OpenFeature
+
+Install the extra on Python 3.10 or later.
+
+```bash
+pip install 'confeature-client[openfeature]'
+```
+
+Register the provider with the official OpenFeature SDK. Pass a Confeature
+client configured without a default user.
+
+```python
+from confeature_client import ConfeatureClient
+from confeature_client.openfeature import ConfeatureProvider
+from openfeature import api
+from openfeature.evaluation_context import EvaluationContext
+
+with ConfeatureClient(sdk_key="YOUR-CONFEATURE-KEY") as sdk:
+    api.set_provider_and_wait(ConfeatureProvider(sdk), domain="app")
+    try:
+        client = api.get_client(domain="app")
+        context = EvaluationContext("user-123", {"Country": "FR", "Plan": "pro"})
+        enabled = client.get_boolean_value("feature.dark-mode", False, context)
+    finally:
+        api.clear_providers()
+```
+
+Registration completes without fetching or waiting for flag data. The
+application owns the Confeature client and closes it after OpenFeature
+evaluations finish. AutoPoll, LazyLoad and ManualPoll keep their SDK behavior.
+A cold cache with no data returns the caller's default with
+`PROVIDER_NOT_READY` until polling or a caller refresh loads a config. Async
+scalar evaluations run on a worker thread so a LazyLoad refresh leaves the
+event loop available.
+
+The provider maps the OpenFeature targeting key to the Confeature user
+identifier. Use `Email` and `Country` for the corresponding SDK attributes.
+Other supported scalar, datetime and string-array attributes are copied into
+the user's custom attributes. Boolean, string, integer and finite float results
+use exact types and include the SDK variation ID when available. An unknown flag
+returns `FLAG_NOT_FOUND`. Incompatible types and object evaluations return
+`TYPE_MISMATCH`.
+
 ## Polling modes
 
 Mirrors `configcat-client`: pick one of `AutoPoll()` (default, daemon
