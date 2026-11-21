@@ -191,42 +191,6 @@ internal static class OverrideEval
     }
 
     /// <summary>
-    /// Full-config override resolution that preserves the FULL evaluation
-    /// envelope (value + VariationId + matched-rule / option + error) — the
-    /// details-producing sibling of <see cref="EvaluateFullConfigSync"/>
-    /// (spec 152 / #475, the #395 VariationId-through-override gap class).
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Returns <c>(false, null)</c> when overrides are absent, behaviour is
-    /// non-LocalOnly, or the source is NOT a full-config source (caller falls
-    /// through to the flat-map details path). Returns <c>(true, result)</c>
-    /// with the rule-resolved <see cref="EvaluationResult"/> otherwise — so a
-    /// <c>GetValueDetails</c> call through a <see cref="ConfigOverrideDataSource"/>
-    /// surfaces the matched VariationId, exactly as a CDN-served config would.
-    /// </para>
-    /// <para>
-    /// INV-4: the evaluator receives the parsed FULL config (salt + segments
-    /// stamped on each setting), never just <c>f</c>.
-    /// </para>
-    /// </remarks>
-    public static (bool Found, EvaluationResult? Result) EvaluateFullConfigDetails(
-        FlagOverrides? flagOverrides,
-        string key,
-        object? defaultValue,
-        User? user)
-    {
-        if (flagOverrides is null
-            || flagOverrides.OverrideBehaviour != OverrideBehaviour.LocalOnly
-            || flagOverrides.DataSource is not ConfigOverrideDataSource source)
-        {
-            return (false, null);
-        }
-
-        return (true, Evaluator.EvaluateDynamic(source.Settings, key, defaultValue, user));
-    }
-
-    /// <summary>
     /// Shared override router — port of the canonical TS <c>evaluateOverride</c>
     /// (spec 135 / #429). Dispatches between the flat-map path and the
     /// full-config path so the client call site changes minimally.

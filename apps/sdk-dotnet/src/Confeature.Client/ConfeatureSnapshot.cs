@@ -119,8 +119,8 @@ public sealed class ConfeatureSnapshot
     /// <c>ConfigCatClientSnapshot.GetValueDetails&lt;T&gt;</c> (spec 083 / #266).
     /// </summary>
     /// <remarks>
-    /// Honours overrides FIRST (spec-036 correctness), then falls
-    /// through to the v1 evaluator. <see cref="EvaluationDetails{T}.FetchTime"/>
+    /// Uses the local override data in LocalOnly mode and the cached
+    /// configuration otherwise. <see cref="EvaluationDetails{T}.FetchTime"/>
     /// is captured from the snapshot's construction time. Error codes
     /// match the parity corpus' tier-0 set (<c>KEY_NOT_FOUND</c>,
     /// <c>TYPE_MISMATCH</c>, <c>UNSUPPORTED_TYPE</c>, <c>NO_CONFIG</c>,
@@ -129,116 +129,92 @@ public sealed class ConfeatureSnapshot
     /// <typeparam name="T">Caller's expected value type.</typeparam>
     /// <param name="key">Flag key.</param>
     /// <param name="defaultValue">Fallback returned on any failure path.</param>
-    /// <param name="user">Targeting context. Accepted but unused in v1.</param>
-    public EvaluationDetails<T> GetValueDetails<T>(string key, T defaultValue, User? user = null)
+    /// <param name="user">Targeting context, or null to use the snapshot's default user.</param>
+    public EvaluationDetails<T> GetValueDetails<T>(string key, T defaultValue, User? user = null) =>
+        GetValueDetailsCore(key, defaultValue, user ?? _defaultUser, null).Details;
+
+    internal (EvaluationDetails<T> Details, EvaluationError Error) GetProviderValueDetails<T>(
+        string key,
+        T defaultValue,
+        IEvalUser? user) =>
+        GetValueDetailsCore(key, defaultValue, null, user);
+
+    private (EvaluationDetails<T> Details, EvaluationError Error) GetValueDetailsCore<T>(
+        string key,
+        T defaultValue,
+        User? nativeUser,
+        IEvalUser? providerUser)
     {
         if (key is null)
         {
             throw new ArgumentNullException(nameof(key));
         }
 
-        var effectiveUser = user ?? _defaultUser;
-
-        // Full-config override (ConfigOverrideDataSource) FIRST — route through
-        // the real evaluator so targeting rules / % options resolve offline AND
-        // the matched VariationId propagates onto the details envelope (spec 152
-        // / #475, the #395 gap class). The flat-map LocalOnly branch below only
-        // sees base values and would null the VariationId.
-        var (fullConfigFound, fullConfigResult) = OverrideEval.EvaluateFullConfigDetails(
-            _flagOverrides, key, defaultValue, effectiveUser);
-        if (fullConfigFound && fullConfigResult is not null)
+        var settings = _settings;
+        if (_flagOverrides?.OverrideBehaviour == OverrideBehaviour.LocalOnly)
         {
-            var isDefaultFc = fullConfigResult.Error != EvaluationError.None;
-            return new EvaluationDetails<T>
+            if (_flagOverrides.DataSource is not ConfigOverrideDataSource source)
             {
-                Key = key,
-                Value = isDefaultFc ? defaultValue : CoerceValue(fullConfigResult.Value, defaultValue),
-                VariationId = isDefaultFc ? null : fullConfigResult.VariationId,
-                IsDefaultValue = isDefaultFc,
-                ErrorMessage = MapEvaluationError(fullConfigResult.Error),
-                FetchTime = _fetchTime,
-                User = effectiveUser,
-                MatchedTargetingRule = !isDefaultFc && fullConfigResult.MatchedRule ? new TargetingRule() : null,
-                MatchedPercentageOption = !isDefaultFc && fullConfigResult.MatchedOption ? new PercentageOption() : null,
-            };
+                return GetFlatOverrideDetails(key, defaultValue, nativeUser, _flagOverrides.DataSource);
+            }
+
+            // Use the parsed full config so local rules retain their variation IDs.
+            settings = source.Settings;
         }
 
-        // LocalOnly overrides commit to the override map (never fall through
-        // to the cache). Distinguish KEY_NOT_FOUND vs override-hit vs
-        // TYPE_MISMATCH by inspecting the map directly — OverrideEval's
-        // `(found=true, value=defaultValue)` collapse hides those.
-        if (_flagOverrides is not null
-            && _flagOverrides.OverrideBehaviour == OverrideBehaviour.LocalOnly)
+        var attributes = nativeUser is null ? providerUser : new UserAttributes(nativeUser);
+        var result = Evaluator.EvaluateCore(settings, key, defaultValue, attributes);
+        var value = result.Error == EvaluationError.None ? CoerceValue(result.Value, defaultValue) : defaultValue;
+        return BuildDetails(key, value, nativeUser, result.Error, result);
+    }
+
+    private (EvaluationDetails<T> Details, EvaluationError Error) GetFlatOverrideDetails<T>(
+        string key,
+        T defaultValue,
+        User? user,
+        IOverrideDataSource source)
+    {
+        var map = source.GetOverridesSync();
+        if (map is null || !map.TryGetValue(key, out var setting) || setting is null)
         {
-            var overrideMap = _flagOverrides.DataSource.GetOverridesSync();
-            if (overrideMap is null || !overrideMap.TryGetValue(key, out var overrideSetting) || overrideSetting is null)
-            {
-                return new EvaluationDetails<T>
-                {
-                    Key = key,
-                    Value = defaultValue,
-                    IsDefaultValue = true,
-                    ErrorMessage = "KEY_NOT_FOUND",
-                    FetchTime = _fetchTime,
-                    User = effectiveUser,
-                };
-            }
-
-            var rawOverride = overrideSetting.GetRawValue();
-            if (rawOverride is null)
-            {
-                return new EvaluationDetails<T>
-                {
-                    Key = key,
-                    Value = defaultValue,
-                    IsDefaultValue = true,
-                    ErrorMessage = "MALFORMED_VALUE",
-                    FetchTime = _fetchTime,
-                    User = effectiveUser,
-                };
-            }
-
-            if (defaultValue is not null && rawOverride.GetType() != typeof(T))
-            {
-                return new EvaluationDetails<T>
-                {
-                    Key = key,
-                    Value = defaultValue,
-                    IsDefaultValue = true,
-                    ErrorMessage = "TYPE_MISMATCH",
-                    FetchTime = _fetchTime,
-                    User = effectiveUser,
-                };
-            }
-
-            return new EvaluationDetails<T>
-            {
-                Key = key,
-                Value = CoerceValue(rawOverride, defaultValue),
-                IsDefaultValue = false,
-                ErrorMessage = null,
-                FetchTime = _fetchTime,
-                User = effectiveUser,
-            };
+            return BuildDetails(key, defaultValue, user, EvaluationError.KeyNotFound);
         }
 
-        var result = Evaluator.Evaluate(_settings, key, defaultValue, effectiveUser);
-        var coercedFromCache = CoerceValue(result.Value, defaultValue);
-        var errorCode = MapEvaluationError(result.Error);
-        var isDefault = result.Error != EvaluationError.None;
+        var rawValue = setting.GetRawValue();
+        if (rawValue is null)
+        {
+            return BuildDetails(key, defaultValue, user, EvaluationError.MalformedValue);
+        }
 
-        return new EvaluationDetails<T>
+        if (defaultValue is not null && rawValue.GetType() != typeof(T))
+        {
+            return BuildDetails(key, defaultValue, user, EvaluationError.TypeMismatch);
+        }
+
+        return BuildDetails(key, CoerceValue(rawValue, defaultValue), user, EvaluationError.None);
+    }
+
+    private (EvaluationDetails<T> Details, EvaluationError Error) BuildDetails<T>(
+        string key,
+        T value,
+        User? user,
+        EvaluationError error,
+        EvaluationResult? result = null)
+    {
+        var isDefault = error != EvaluationError.None;
+        var details = new EvaluationDetails<T>
         {
             Key = key,
-            Value = isDefault ? defaultValue : coercedFromCache,
-            VariationId = isDefault ? null : result.VariationId,
+            Value = value,
+            VariationId = isDefault ? null : result?.VariationId,
             IsDefaultValue = isDefault,
-            ErrorMessage = errorCode,
+            ErrorMessage = MapEvaluationError(error),
             FetchTime = _fetchTime,
-            User = effectiveUser,
-            MatchedTargetingRule = !isDefault && result.MatchedRule ? new TargetingRule() : null,
-            MatchedPercentageOption = !isDefault && result.MatchedOption ? new PercentageOption() : null,
+            User = user,
+            MatchedTargetingRule = !isDefault && result?.MatchedRule == true ? new TargetingRule() : null,
+            MatchedPercentageOption = !isDefault && result?.MatchedOption == true ? new PercentageOption() : null,
         };
+        return (details, error);
     }
 
     /// <summary>

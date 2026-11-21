@@ -409,18 +409,8 @@ internal static class Evaluator
             return null;
         }
 
-        string attrName;
-        object? attrValue;
-        if (ctx.Setting.PercentageAttr is null)
-        {
-            attrName = IdentifierAttribute;
-            attrValue = ctx.User.Identifier;
-        }
-        else
-        {
-            attrName = ctx.Setting.PercentageAttr;
-            attrValue = ctx.User.GetAttribute(attrName);
-        }
+        var attrName = ctx.Setting.PercentageAttr ?? IdentifierAttribute;
+        var attrValue = ctx.User.GetAttribute(attrName);
 
         if (attrValue is null)
         {
