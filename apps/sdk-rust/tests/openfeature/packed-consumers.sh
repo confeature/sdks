@@ -6,10 +6,13 @@ fixture_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 cd "$fixture_dir/../.."
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
+# Cargo's locks end with each command. Keep the archive and consumer
+# binaries private across the separate package, build and run commands.
+target="$scratch/target"
+export CARGO_TARGET_DIR="$target"
 
 metadata=$(cargo metadata --no-deps --format-version 1)
 version=$(node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).packages[0].version' <<< "$metadata")
-target=$(node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).target_directory' <<< "$metadata")
 cargo package
 archive="$target/package/confeature-$version.crate"
 test -s "$archive"
@@ -30,7 +33,6 @@ contents_sha256=$(
 
 # Both projects resolve separately so feature unification cannot conceal a
 # dependency in the base graph. Cargo's fallback honors the crate's MSRV.
-export CARGO_TARGET_DIR="$target"
 export CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback
 mkdir -p "$scratch/base/src" "$scratch/extra/src"
 cat > "$scratch/base/Cargo.toml" <<EOF
