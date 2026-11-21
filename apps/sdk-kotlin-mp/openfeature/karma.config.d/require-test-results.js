@@ -23,6 +23,7 @@ if (process.env.CONFEATURE_KOTLIN_BROWSER_ORIGIN) {
   const configRoute = "/configuration-files/";
   const redirectRoute = "/fixture-redirect/configuration-files/";
   config.set({
+    client: { mocha: { timeout: 20_000 } },
     hostname: "127.0.0.1",
     listenAddress: "127.0.0.1",
     port: Number(origin.port),

@@ -117,27 +117,48 @@ describe("Kotlin OpenFeature release inventory", () => {
   const moduleUrl = (aid) => `../../${aid}/${VERSION}/${aid}-${VERSION}.module`;
   const rootModule = `${pathFor(companion)}.module`;
   const [android, jvm, js, , simulator] = Object.keys(publish).slice(1);
-  const attributes = (aid) => {
+  const usages = (aid) => {
+    if (aid === companion) return ["kotlin-metadata"];
+    if (aid === jvm || aid === android) return ["java-api", "java-runtime"];
+    if (aid === js) return ["kotlin-api", "kotlin-runtime"];
+    return ["kotlin-api"];
+  };
+  const attributes = (aid, usage) => {
     const [, type, target] = publish[aid];
     return {
+      "org.gradle.category": "library",
+      "org.gradle.usage": usage,
       "org.jetbrains.kotlin.platform.type": type,
       ...(target === undefined ? {} : { "org.jetbrains.kotlin.native.target": target }),
     };
   };
-  const route = (aid) => ({
-    attributes: attributes(aid),
+  const variantName = (aid, usage) => `${aid}-${usage}`;
+  const route = (aid, usage = usages(aid)[0]) => ({
+    name: variantName(aid, usage),
+    attributes: attributes(aid, usage),
     "available-at": { group: GROUP, module: aid, version: VERSION, url: moduleUrl(aid) },
   });
   const identity = { group: GROUP, module: companion, version: VERSION };
-  const fileVariant = (aid) => ({
-    attributes: attributes(aid),
+  const fileVariant = (aid, usage) => ({
+    name: variantName(aid, usage),
+    attributes: attributes(aid, usage),
     files: [
-      { url: `${aid}-${VERSION}.${publish[aid][0]}`, sha256: digest("sha256", `binary of ${aid}`) },
+      {
+        url: `${aid}-${VERSION}.${publish[aid][0]}`,
+        size: Buffer.byteLength(`binary of ${aid}`),
+        sha256: digest("sha256", `binary of ${aid}`),
+      },
     ],
   });
-  const references = () => Object.keys(publish).slice(1).map(route);
+  const references = () =>
+    Object.keys(publish)
+      .slice(1)
+      .flatMap((aid) => usages(aid).map((usage) => route(aid, usage)));
   const root = (variants) =>
-    JSON.stringify({ component: identity, variants: [fileVariant(companion), ...variants] });
+    JSON.stringify({
+      component: identity,
+      variants: [fileVariant(companion, "kotlin-metadata"), ...variants],
+    });
   const tree = () => ({
     ...release(Object.keys(publish)),
     ...withSums(
@@ -150,7 +171,7 @@ describe("Kotlin OpenFeature release inventory", () => {
               ? root(references())
               : JSON.stringify({
                   component: { ...identity, url: moduleUrl(companion) },
-                  variants: [fileVariant(aid)],
+                  variants: usages(aid).map((usage) => fileVariant(aid, usage)),
                 }),
           ],
         ]),
@@ -172,7 +193,9 @@ describe("Kotlin OpenFeature release inventory", () => {
 
   it("rejects a root module that omits a target", () => {
     const files = { ...tree(), ...withSums({ [rootModule]: root(references().slice(0, -1)) }) };
-    expect(companionCheck(files)).toContain(`${rootModule}: no reference to ${simulator}`);
+    expect(companionCheck(files)).toContain(
+      `${rootModule}: no reference to ${simulator} variant ${variantName(simulator, "kotlin-api")}`,
+    );
   });
 
   it("rejects a root module with a different target URL", () => {
@@ -200,7 +223,38 @@ describe("Kotlin OpenFeature release inventory", () => {
     module.variants[0].files[0].sha256 = "0".repeat(64);
     Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
     expect(companionCheck(files)).toContain(
-      `${path}: no valid androidJvm reference to ${android}-${VERSION}.aar`,
+      `${path}: no valid androidJvm reference to ${android}-${VERSION}.aar (java-api)`,
+    );
+  });
+
+  it("rejects a missing runtime artifact even when the API variant refers to the correct bytes", () => {
+    const path = `${pathFor(jvm)}.module`;
+    const files = tree();
+    const module = JSON.parse(files[path]);
+    module.variants[1].files[0].url = `${jvm}-${VERSION}-missing.jar`;
+    Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toContain(
+      `${path}: no valid jvm reference to ${jvm}-${VERSION}.jar (java-runtime)`,
+    );
+  });
+
+  it("rejects an additional file entry even when the primary artifact is correct", () => {
+    const path = `${pathFor(js)}.module`;
+    const files = tree();
+    const module = JSON.parse(files[path]);
+    module.variants[0].files.push({ url: "absent.klib" });
+    Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toContain(
+      `${path}: invalid Kotlin variant file reference (${variantName(js, "kotlin-api")})`,
+    );
+  });
+
+  it("requires the root module to publish the runtime route as well as the API route", () => {
+    const missing = variantName(jvm, "java-runtime");
+    const variants = references().filter((variant) => variant.name !== missing);
+    const files = { ...tree(), ...withSums({ [rootModule]: root(variants) }) };
+    expect(companionCheck(files)).toContain(
+      `${rootModule}: no reference to ${jvm} variant ${missing}`,
     );
   });
 });

@@ -30,7 +30,10 @@ kotlin {
         testRuns["test"].executionTask.configure { useJUnitPlatform() }
     }
     js(IR) {
-        nodejs()
+        nodejs {
+            // Let the fixture's 15-second bound identify a stalled transport.
+            testTask { useMocha { timeout = "20s" } }
+        }
         browser {
             testTask {
                 useKarma {
