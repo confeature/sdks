@@ -61,6 +61,7 @@ if [[ "$target" == android ]]; then
 else
   sh ./gradlew "${consumer[@]}" :apple:linkDebugExecutableIosArm64
   executable=integration/consumer/apple/build/bin/iosArm64/debugExecutable/apple.kexe
-  xcrun lipo -verify_arch arm64 "$executable"
+  # Xcode's lipo reads the remaining arguments to -verify_arch as architecture names.
+  xcrun lipo "$executable" -verify_arch arm64
 fi
 printf 'Verified Kotlin Maven consumer: %s at %s\n' "$target" "$version"
