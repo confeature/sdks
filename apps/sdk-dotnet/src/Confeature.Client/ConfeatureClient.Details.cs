@@ -36,7 +36,7 @@ public sealed partial class ConfeatureClient
         User? user = null,
         CancellationToken cancellationToken = default) =>
         GetValueDetailsCoreAsync<T, EvaluationDetails<T>>(
-            key, defaultValue, user, null, false, static (details, _) => details, cancellationToken);
+            key, defaultValue, user, null, false, static result => result.Details, cancellationToken);
 
     internal Task<(EvaluationDetails<T> Details, EvaluationError Error)> GetProviderValueDetailsAsync<T>(
         string key,
@@ -44,7 +44,7 @@ public sealed partial class ConfeatureClient
         IEvalUser? user,
         CancellationToken cancellationToken = default) =>
         GetValueDetailsCoreAsync<T, (EvaluationDetails<T>, EvaluationError)>(
-            key, defaultValue, null, user, true, static (details, error) => (details, error), cancellationToken);
+            key, defaultValue, null, user, true, static result => result, cancellationToken);
 
     private async Task<TResult> GetValueDetailsCoreAsync<T, TResult>(
         string key,
@@ -52,20 +52,19 @@ public sealed partial class ConfeatureClient
         User? nativeUser,
         IEvalUser? providerUser,
         bool useProviderContext,
-        Func<EvaluationDetails<T>, EvaluationError, TResult> selectOutcome,
+        Func<(EvaluationDetails<T> Details, EvaluationError Error), TResult> selectOutcome,
         CancellationToken cancellationToken)
     {
         if (useProviderContext && cancellationToken.IsCancellationRequested)
         {
-            return selectOutcome(
-                DefaultDetails(key, defaultValue, null, "CANCELLED"), EvaluationError.Cancelled);
+            return selectOutcome(CancelledDetails(key, defaultValue));
         }
 
         if (Volatile.Read(ref _disposed) == 1)
         {
             var user = useProviderContext ? null : nativeUser ?? _defaultUser;
-            return selectOutcome(
-                DefaultDetails(key, defaultValue, user, "CLIENT_CLOSED"), EvaluationError.ClientClosed);
+            return selectOutcome((
+                DefaultDetails(key, defaultValue, user, "CLIENT_CLOSED"), EvaluationError.ClientClosed));
         }
 
         try
@@ -79,17 +78,39 @@ public sealed partial class ConfeatureClient
 
         if (useProviderContext && cancellationToken.IsCancellationRequested)
         {
-            return selectOutcome(
-                DefaultDetails(key, defaultValue, null, "CANCELLED"), EvaluationError.Cancelled);
+            return selectOutcome(CancelledDetails(key, defaultValue));
         }
 
+        return selectOutcome(ReadAndNotifyDetails(
+            key, defaultValue, nativeUser, providerUser, useProviderContext, cancellationToken));
+    }
+
+    private (EvaluationDetails<T> Details, EvaluationError Error) ReadAndNotifyDetails<T>(
+        string key,
+        T defaultValue,
+        User? nativeUser,
+        IEvalUser? providerUser,
+        bool useProviderContext,
+        CancellationToken cancellationToken)
+    {
         var snapshot = Snapshot();
-        var (details, error) = useProviderContext
+        var result = useProviderContext
             ? snapshot.GetProviderValueDetails(key, defaultValue, providerUser)
             : snapshot.GetNativeValueDetails(key, defaultValue, nativeUser);
-        RaiseFlagEvaluated(details, sanitizeDiagnostics: useProviderContext);
-        return selectOutcome(details, error);
+
+        if (useProviderContext && cancellationToken.IsCancellationRequested)
+        {
+            return CancelledDetails(key, defaultValue);
+        }
+
+        RaiseFlagEvaluated(result.Details, sanitizeDiagnostics: useProviderContext);
+        return result;
     }
+
+    private static (EvaluationDetails<T> Details, EvaluationError Error) CancelledDetails<T>(
+        string key,
+        T defaultValue) =>
+        (DefaultDetails(key, defaultValue, null, "CANCELLED"), EvaluationError.Cancelled);
 
     private static EvaluationDetails<T> DefaultDetails<T>(
         string key,

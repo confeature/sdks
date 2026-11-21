@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,16 +20,30 @@ public class ProviderClientDetailsTests
     [Fact]
     public async Task Provider_client_hooks_omit_user_and_keep_sibling_handlers_after_a_failure()
     {
-        using var client = CreateLocalClient(new RejectingLogger());
+        var logger = new RejectingLogger();
+        using var client = CreateLocalClient(logger);
+        using var trace = new RejectingTraceListener();
         var evaluations = new List<EvaluationDetails<bool>>();
         client.FlagEvaluated += (_, _) => throw new InvalidOperationException("synthetic hook failure");
+        client.FlagEvaluated += (_, _) => throw new InvalidOperationException("synthetic sibling hook failure");
         client.FlagEvaluated += (_, args) => evaluations.Add((EvaluationDetails<bool>)args.EvaluationDetails);
 
-        var (details, status) = await client.GetProviderValueDetailsAsync("flag", false, null);
+        Trace.Listeners.Add(trace);
+        try
+        {
+            var (details, status) = await client.GetProviderValueDetailsAsync("flag", false, null);
 
-        status.Should().Be(EvaluationError.None);
-        details.Value.Should().BeTrue();
-        evaluations.Should().ContainSingle().Which.User.Should().BeNull();
+            status.Should().Be(EvaluationError.None);
+            details.Value.Should().BeTrue();
+            evaluations.Should().ContainSingle().Which.User.Should().BeNull();
+            logger.HookDiagnostic.Should().NotContain("synthetic hook failure");
+            logger.HookException.Should().BeNull();
+            logger.HookLogAttempts.Should().Be(1);
+        }
+        finally
+        {
+            Trace.Listeners.Remove(trace);
+        }
     }
 
     [Fact]
@@ -85,6 +100,26 @@ public class ProviderClientDetailsTests
         evaluations.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Provider_client_rechecks_cancellation_before_dispatching_hooks()
+    {
+        using var caller = new CancellationTokenSource();
+        using var client = new ConfeatureClient(TestSdkKey, options =>
+        {
+            options.FlagOverrides = new FlagOverrides(new CancellingOverrideSource(caller), OverrideBehaviour.LocalOnly);
+            options.PollingMode = PollingMode.ManualPoll();
+            options.CacheDirectory = ":memory:";
+        });
+        var evaluations = 0;
+        client.FlagEvaluated += (_, _) => evaluations++;
+
+        var result = await client.GetProviderValueDetailsAsync("flag", false, null, caller.Token);
+
+        result.Error.Should().Be(EvaluationError.Cancelled);
+        result.Details.Value.Should().BeFalse();
+        evaluations.Should().Be(0);
+    }
+
     private static ConfeatureClient CreateLocalClient(IConfeatureLogger? logger = null) =>
         new(TestSdkKey, options =>
         {
@@ -101,15 +136,42 @@ public class ProviderClientDetailsTests
     {
         public LogLevel LogLevel { get; set; }
 
+        public string? HookDiagnostic { get; private set; }
+
+        public Exception? HookException { get; private set; }
+
+        public int HookLogAttempts { get; private set; }
+
         public bool IsEnabled(LogLevel level) => true;
 
-        public void Error(string message, Exception? exception = null) => throw new InvalidOperationException(message);
+        public void Error(string message, Exception? exception = null)
+        {
+            HookDiagnostic = message;
+            HookException = exception;
+            HookLogAttempts++;
+            throw new InvalidOperationException("synthetic logger failure");
+        }
 
         public void Warning(string message) { }
 
         public void Info(string message) { }
 
         public void Debug(string message) { }
+    }
+
+    private sealed class RejectingTraceListener : TraceListener
+    {
+        public override void Write(string? message)
+        {
+            if (message?.Contains(
+                "ConfeatureClient could not log an OpenFeature evaluation hook failure.",
+                StringComparison.Ordinal) == true)
+            {
+                throw new InvalidOperationException("synthetic trace failure");
+            }
+        }
+
+        public override void WriteLine(string? message) => Write(message);
     }
 
     private sealed class PendingResponseHandler : HttpMessageHandler
@@ -129,5 +191,17 @@ public class ProviderClientDetailsTests
             Started.SetResult();
             return _response.Task.WaitAsync(cancellationToken);
         }
+    }
+
+    private sealed class CancellingOverrideSource(CancellationTokenSource caller) : IOverrideDataSource
+    {
+        public IReadOnlyDictionary<string, SettingValue> GetOverridesSync()
+        {
+            caller.Cancel();
+            return new Dictionary<string, SettingValue> { ["flag"] = SettingValue.Of(true) };
+        }
+
+        public Task<IReadOnlyDictionary<string, SettingValue>> GetOverridesAsync(
+            CancellationToken cancellationToken = default) => Task.FromResult(GetOverridesSync());
     }
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 
 using System;
-using System.Diagnostics;
 using System.Threading;
 using Confeature.Client.Internal;
 
@@ -119,6 +118,7 @@ public sealed partial class ConfeatureClient
         }
 
         var args = new FlagEvaluatedEventArgs(evaluationDetails);
+        var canLogProviderFailure = true;
         foreach (var del in handler.GetInvocationList())
         {
             try
@@ -129,7 +129,7 @@ public sealed partial class ConfeatureClient
             {
                 if (sanitizeDiagnostics)
                 {
-                    LogProviderHookFailure();
+                    canLogProviderFailure = canLogProviderFailure && TryLogProviderHookFailure();
                     continue;
                 }
 
@@ -140,15 +140,17 @@ public sealed partial class ConfeatureClient
         }
     }
 
-    private void LogProviderHookFailure()
+    private bool TryLogProviderHookFailure()
     {
         try
         {
             _logger.Error("ConfeatureClient.FlagEvaluated handler failed during an OpenFeature evaluation.");
+            return true;
         }
         catch (Exception)
         {
-            Trace.TraceWarning("ConfeatureClient could not log an OpenFeature evaluation hook failure.");
+            // The remaining subscribers still run even if their logger has failed.
+            return false;
         }
     }
 
