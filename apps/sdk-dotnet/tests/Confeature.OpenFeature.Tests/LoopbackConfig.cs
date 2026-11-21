@@ -26,11 +26,13 @@ internal sealed class LoopbackConfig : IAsyncDisposable
     private readonly OriginGuard _guard;
     private readonly HttpClient _transport;
     private readonly Uri _expected;
+    private readonly string? _refreshedConfig;
     private readonly Task _server;
     private int _requests;
 
-    public LoopbackConfig(bool delayResponse = false)
+    public LoopbackConfig(bool delayResponse = false, string? refreshedConfig = null)
     {
+        _refreshedConfig = refreshedConfig;
         _listener.Start();
         var port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _expected = new Uri(FormattableString.Invariant(
@@ -89,13 +91,14 @@ internal sealed class LoopbackConfig : IAsyncDisposable
         {
             using var connection = await _listener.AcceptTcpClientAsync(cancellationToken);
             await using var stream = connection.GetStream();
-            await ReceiveRequestAsync(stream, cancellationToken);
+            var requestNumber = await ReceiveRequestAsync(stream, cancellationToken);
             await _allowResponse.Task.WaitAsync(cancellationToken);
-            await WriteResponseAsync(stream, cancellationToken);
+            var config = requestNumber > 1 ? _refreshedConfig ?? ProviderConfig.Json : ProviderConfig.Json;
+            await WriteResponseAsync(stream, config, cancellationToken);
         }
     }
 
-    private async Task ReceiveRequestAsync(NetworkStream stream, CancellationToken cancellationToken)
+    private async Task<int> ReceiveRequestAsync(NetworkStream stream, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
         var request = await reader.ReadLineAsync(cancellationToken);
@@ -104,13 +107,15 @@ internal sealed class LoopbackConfig : IAsyncDisposable
         {
         }
 
-        Interlocked.Increment(ref _requests);
+        var requestNumber = Interlocked.Increment(ref _requests);
         _firstRequest.TrySetResult();
+        return requestNumber;
     }
 
-    private static async Task WriteResponseAsync(NetworkStream stream, CancellationToken cancellationToken)
+    private static async Task WriteResponseAsync(
+        NetworkStream stream, string config, CancellationToken cancellationToken)
     {
-        var body = Encoding.UTF8.GetBytes(ProviderConfig.Json);
+        var body = Encoding.UTF8.GetBytes(config);
         var size = body.Length.ToString(CultureInfo.InvariantCulture);
         var headers = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n");

@@ -16,6 +16,10 @@ internal static class ProviderConfig
           "rollout":{"t":0,"v":{"b":false},"i":"default","r":[
             {"c":[{"u":{"a":"plan","c":28,"s":"beta"}}],"p":[{"p":100,"v":{"b":true},"i":"split"}]}
           ]},
+          "rollout-all":{"t":0,"v":{"b":false},"i":"default",
+            "p":[{"p":100,"v":{"b":true},"i":"split-all"}]},
+          "rollout-custom":{"t":0,"v":{"b":false},"i":"default","a":"plan",
+            "p":[{"p":100,"v":{"b":true},"i":"split-custom"}]},
           "typed":{"t":0,"v":{"b":false},"i":"default","r":[
             {"c":[{"u":{"a":"score","c":14,"d":10}},{"u":{"a":"member","c":28,"s":"true"}},
                   {"u":{"a":"teams","c":34,"l":["blue"]}},{"u":{"a":"joined","c":19,"d":1700000000}}],
@@ -23,5 +27,9 @@ internal static class ProviderConfig
           ]},
           "malformed":{"t":0,"v":{"s":"invalid"},"i":"unused"}
         }}
+        """;
+
+    internal const string RefreshedJson = """
+        {"f":{"enabled":{"t":0,"v":{"b":false},"i":"refreshed"}}}
         """;
 }

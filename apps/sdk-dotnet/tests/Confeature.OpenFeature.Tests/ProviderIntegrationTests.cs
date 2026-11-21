@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,23 +93,73 @@ public sealed class ProviderIntegrationTests : IAsyncLifetime
         fixture.AssertTraffic(1);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Online_polling_is_owned_by_the_sdk_and_the_client_survives_provider_shutdown(bool auto)
+    [Fact]
+    public async Task A_missing_identifier_and_an_explicit_empty_identifier_stay_distinct()
     {
         await using var fixture = new LoopbackConfig();
-        var interval = TimeSpan.FromMinutes(5);
-        var mode = auto ? PollingMode.AutoPoll(interval) : PollingMode.LazyLoad(interval);
-        using var native = fixture.CreateClient(mode);
+        using var native = fixture.CreateClient(PollingMode.ManualPoll());
+        Assert.True((await native.ForceRefreshAsync(CancellationToken.None)).IsSuccess);
+        var open = await RegisterAsync(native);
+
+        Assert.True(native.GetValue("rollout-all", false));
+        var anonymous = await open.GetBooleanDetailsAsync("rollout-all", true);
+        Assert.False(anonymous.Value);
+        Assert.Equal("default", anonymous.Variant);
+        var empty = EvaluationContext.Builder().SetTargetingKey(string.Empty).Build();
+        var assigned = await open.GetBooleanDetailsAsync("rollout-all", false, empty);
+        Assert.True(assigned.Value);
+        Assert.Equal("split-all", assigned.Variant);
+
+        var custom = EvaluationContext.Builder().Set("plan", "beta").Build();
+        var explicitAttribute = await open.GetBooleanDetailsAsync("rollout-custom", false, custom);
+        Assert.True(explicitAttribute.Value);
+        Assert.Equal("split-custom", explicitAttribute.Variant);
+        Assert.False(await open.GetBooleanValueAsync("rollout-custom", true));
+        fixture.AssertTraffic(1);
+    }
+
+    [Fact]
+    public async Task Auto_polling_is_owned_by_the_sdk_and_the_client_survives_provider_shutdown()
+    {
+        await using var fixture = new LoopbackConfig();
+        using var native = fixture.CreateClient(PollingMode.AutoPoll(TimeSpan.FromMinutes(5)));
+        Assert.Equal(0, CountSdkEventSubscribers(native));
         var open = await RegisterAsync(native);
 
         Assert.True(await open.GetBooleanValueAsync("enabled", false));
         native.SetOffline();
         Assert.True(await open.GetBooleanValueAsync("enabled", false));
+        Assert.Equal(0, CountSdkEventSubscribers(native));
         await Api.Instance.ShutdownAsync();
         Assert.True((await native.GetValueDetailsAsync("enabled", false)).Value);
+        Assert.Equal(0, CountSdkEventSubscribers(native));
         fixture.AssertTraffic(1);
+    }
+
+    [Fact]
+    public async Task Lazy_load_uses_offline_cache_and_refreshes_the_expired_value_when_back_online()
+    {
+        await using var fixture = new LoopbackConfig(refreshedConfig: ProviderConfig.RefreshedJson);
+        var expiry = TimeSpan.FromMilliseconds(40);
+        using var native = fixture.CreateClient(PollingMode.LazyLoad(expiry));
+        native.SetOffline();
+        var open = await RegisterAsync(native);
+
+        AssertFailure(await open.GetBooleanDetailsAsync("enabled", false), false, ErrorType.ProviderNotReady);
+        fixture.AssertTraffic(0);
+        native.SetOnline();
+        Assert.True(await open.GetBooleanValueAsync("enabled", false));
+        fixture.AssertTraffic(1);
+        native.SetOffline();
+
+        await Task.Delay(expiry + expiry);
+        Assert.True(await open.GetBooleanValueAsync("enabled", false));
+        fixture.AssertTraffic(1);
+        native.SetOnline();
+        var refreshed = await open.GetBooleanDetailsAsync("enabled", true);
+        Assert.False(refreshed.Value);
+        Assert.Equal("refreshed", refreshed.Variant);
+        fixture.AssertTraffic(2);
     }
 
     [Fact]
@@ -168,6 +219,22 @@ public sealed class ProviderIntegrationTests : IAsyncLifetime
     {
         await Api.Instance.SetProviderAsync(new ConfeatureProvider(native));
         return Api.Instance.GetClient();
+    }
+
+    private static int CountSdkEventSubscribers(ConfeatureClient native)
+    {
+        var type = typeof(ConfeatureClient);
+        var events = type.GetEvents();
+        Assert.NotEmpty(events);
+        var subscribers = 0;
+        foreach (var eventInfo in events)
+        {
+            var field = type.GetField(eventInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            subscribers += (field.GetValue(native) as Delegate)?.GetInvocationList().Length ?? 0;
+        }
+
+        return subscribers;
     }
 
     private static void AssertFailure<T>(FlagEvaluationDetails<T> details, T fallback, ErrorType type)
