@@ -6,6 +6,10 @@ Use Kotlin 2.2.21 to build with this optional provider. Targets include JVM
 with Java 11 or later, Android API 21 or later, Kotlin/JS in Node.js 22 and in
 the browser, and iOS arm64 devices and simulators.
 
+Use Android Gradle Plugin 8.10 or later when packaging an Android app with the
+provider, so D8 and R8 can read its Kotlin 2.2 metadata. AGP 8.10 needs
+Gradle 8.11.1 or later and JDK 17 or later to build the app.
+
 ## Install
 
 Add the Confeature Maven repository and Maven Central to your Gradle settings.

@@ -891,6 +891,16 @@ export class Confeature {
       .withExec(["node", "integration/run-fixture.mjs", "android"])
       .withExec(["node", "integration/run-fixture.mjs", "node"])
       .withExec(["node", "integration/run-fixture.mjs", "browser"])
+      .withExec([
+        "bash",
+        "-eu",
+        "-c",
+        [
+          'if [ ! -x "$ANDROID_HOME/build-tools/35.0.0/aapt2" ]; then',
+          '  "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"',
+          "fi",
+        ].join("\n"),
+      ])
       .withExec(["bash", "integration/check-maven-consumer.sh", "android"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
