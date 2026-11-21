@@ -101,7 +101,7 @@ internal class EvalScope(
     val user: Evaluator.UserView?,
     val log: EvalTraceLog,
     val logBuilder: EvalLog.EvaluateLogBuilder?,
-    val requireDefaultPercentageIdentifier: Boolean = false,
+    val providerEvaluation: Boolean = false,
 ) {
     val segments: List<Any?> = asList(config?.get("s")) ?: emptyList()
     val configSalt: String = (asMap(config?.get("p"))?.get("s") as? String) ?: ""
@@ -121,7 +121,7 @@ internal class EvalContext(
     val visitedFlags: MutableList<String> = scope.visitedFlags
     val log: EvalTraceLog = scope.log
     val logBuilder: EvalLog.EvaluateLogBuilder? = scope.logBuilder
-    val requireDefaultPercentageIdentifier: Boolean = scope.requireDefaultPercentageIdentifier
+    val providerEvaluation: Boolean = scope.providerEvaluation
 
     var evalError: String? = null
     var missingUserLogged: Boolean = false

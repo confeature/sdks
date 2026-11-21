@@ -668,6 +668,7 @@ public class ConfeatureClient private constructor(b: Builder) {
 
     private fun decodePrimitive(p: kotlinx.serialization.json.JsonPrimitive): Any? {
         if (p is kotlinx.serialization.json.JsonNull) return null
+        if (p.isString) return p.content
         p.booleanOrNull?.let { return it }
         p.longOrNull?.let { return if (it in Int.MIN_VALUE..Int.MAX_VALUE) it.toInt() else it }
         p.intOrNull?.let { return it }

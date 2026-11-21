@@ -104,7 +104,7 @@ internal object SettingEvaluator {
         val attrName = explicitAttrName ?: "Identifier"
         val attrValue = when {
             explicitAttrName != null -> user.attribute(explicitAttrName)
-            ctx.requireDefaultPercentageIdentifier -> user.identifier()
+            ctx.providerEvaluation -> user.identifier()
             else -> user.identifier() ?: ""
         }
         if (attrValue == null) {

@@ -205,6 +205,35 @@ class ProviderLazyLoadTest {
     }
 
     @Test
+    fun fetchedStringsStayStringsAndQuotedIntegerConfigurationFailsClosed() = runBlocking {
+        val body = """
+            {"f": {
+              "digits":{"t":1,"v":{"s":"00123"}},
+              "word":{"t":1,"v":{"s":"true"}},
+              "quoted-type":{"t":"2","v":{"i":20}},
+              "quoted-value":{"t":2,"v":{"i":"20"}}
+            }}
+        """.trimIndent()
+        DelayedConfig(firstBody = body).use { fixture ->
+            val client = fixture.client()
+            try {
+                fixture.firstRelease.countDown()
+                assertTrue(client.forceRefresh())
+                assertEquals("00123", client.getValueDetails("digits", "").value)
+                assertEquals("true", client.providerDetails("word", "", ProviderValueType.STRING).value)
+                for (key in listOf("quoted-type", "quoted-value")) {
+                    val outcome = client.providerDetails(key, Long.MAX_VALUE, ProviderValueType.INTEGER)
+                    assertEquals(Status.PARSE_ERROR, outcome.status, key)
+                    assertEquals(Long.MAX_VALUE, outcome.value, key)
+                }
+                assertEquals(1, fixture.requests.get())
+            } finally {
+                client.close()
+            }
+        }
+    }
+
+    @Test
     fun cancellingTheNativeWriterPreservesItsCallerContextAndLeavesReadyAvailable() = runBlocking {
         DelayedConfig().use { fixture ->
             val marker = ThreadLocal<String>()
@@ -389,11 +418,15 @@ class ProviderLazyLoadTest {
         }
     }
 
-    private fun ConfeatureClient.providerDetails(): ProviderResult =
-        getValueDetailsForProvider("flag", false, null, ProviderValueType.BOOLEAN)
+    private fun ConfeatureClient.providerDetails(
+        key: String = "flag",
+        fallback: Any = false,
+        type: ProviderValueType = ProviderValueType.BOOLEAN,
+    ): ProviderResult = getValueDetailsForProvider(key, fallback, null, type)
 
     private class DelayedConfig(
         private val firstStatus: Int = 200,
+        private val firstBody: String? = null,
         private val secondBody: String? = null,
     ) : AutoCloseable {
         val requests = AtomicInteger()
@@ -417,8 +450,12 @@ class ProviderLazyLoadTest {
                         secondEtag.set(exchange.requestHeaders.getFirst("If-None-Match"))
                         secondEntered.countDown()
                     }
-                    val body = (secondBody?.takeIf { index == 2 }
-                        ?: """{"f":{"flag":{"t":0,"v":{"b":${index == 1}}}}}""").encodeToByteArray()
+                    val customBody = when (index) {
+                        1 -> firstBody
+                        2 -> secondBody
+                        else -> null
+                    }
+                    val body = (customBody ?: """{"f":{"flag":{"t":0,"v":{"b":${index == 1}}}}}""").encodeToByteArray()
                     exchange.responseHeaders.set("ETag", "\"fixture-$index\"")
                     exchange.sendResponseHeaders(if (index == 1) firstStatus else 200, body.size.toLong())
                     exchange.responseBody.use { it.write(body) }

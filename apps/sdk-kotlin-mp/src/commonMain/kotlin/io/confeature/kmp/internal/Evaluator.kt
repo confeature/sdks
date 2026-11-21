@@ -151,7 +151,7 @@ public object Evaluator {
         val logBuilder = startTrace(log, key, request.user)
         val scope = EvalScope(
             located.settings, config, request.user, log, logBuilder,
-            requireDefaultPercentageIdentifier = providerType != null,
+            providerEvaluation = providerType != null,
         )
         val ctx = EvalContext(key, located.setting, scope)
 

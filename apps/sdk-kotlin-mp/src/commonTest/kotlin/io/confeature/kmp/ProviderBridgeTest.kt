@@ -99,6 +99,38 @@ class ProviderBridgeTest {
     }
 
     @Test
+    fun cannotResolveAProviderRuleThroughAnInvalidIntegerPrerequisite() {
+        val settings = buildMap {
+            put("valid", prerequisite(2, 1, 1))
+            put("bad-type", prerequisite(2.5, 1, 1))
+            put("bad-value", prerequisite(2, 1.5, 1.5))
+            put("bad-comparison", prerequisite(2, 1, 1.5))
+        }
+        val flags = buildMap {
+            for ((key, pair) in settings) {
+                put(key, pair.first)
+                put("requires-$key", dependent(key, pair.second))
+            }
+        }
+        val client = clientWithOverrides(FlagOverrides.localConfig(mapOf("f" to flags)))
+        try {
+            val valid = client.getValueDetailsForProvider("requires-valid", false, null, ProviderValueType.BOOLEAN)
+            assertEquals(true, valid.value)
+            assertEquals(Status.RESOLVED, valid.status)
+            for (key in settings.keys - "valid") {
+                val outcome = client.getValueDetailsForProvider(
+                    "requires-$key", false, null, ProviderValueType.BOOLEAN,
+                )
+                assertEquals(Status.PARSE_ERROR, outcome.status, key)
+                assertEquals(false, outcome.value, key)
+                assertNull(outcome.variationId, key)
+            }
+        } finally {
+            client.close()
+        }
+    }
+
+    @Test
     fun doesNotChooseADefaultPercentageBucketWithoutAnIdentifier() {
         val client = clientWithOverrides(FlagOverrides.localConfig(config()))
         val context = object : Evaluator.UserView {
@@ -205,6 +237,20 @@ class ProviderBridgeTest {
                 "t" to 0,
                 "v" to mapOf("b" to false),
                 "p" to listOf(mapOf("p" to 100, "v" to mapOf("b" to true), "i" to "split-variant")),
+            ),
+        ),
+    )
+
+    private fun prerequisite(type: Number, value: Number, expected: Number) =
+        mapOf("t" to type, "v" to mapOf("i" to value)) to expected
+
+    private fun dependent(key: String, expected: Number): Map<String, Any?> = mapOf(
+        "t" to 0,
+        "v" to mapOf("b" to false),
+        "r" to listOf(
+            mapOf(
+                "c" to listOf(mapOf("p" to mapOf("f" to key, "c" to 0, "v" to mapOf("i" to expected)))),
+                "s" to mapOf("v" to mapOf("b" to true), "i" to "valid-rule"),
             ),
         ),
     )

@@ -97,9 +97,12 @@ internal object ConditionEvaluator {
         val prereqKey = readString(c["f"]).orMalformed("Prerequisite flag key is missing or invalid.")
         val prereqSetting =
             asMap(ctx.settings[prereqKey]).orMalformed("Prerequisite flag is missing or invalid.")
-        val declaredType = readInt(prereqSetting["t"]).orMalformed("Prerequisite flag is missing or invalid.")
+        val rawType = prereqSetting["t"]
+        val declaredType = (if (ctx.providerEvaluation) exactInt(rawType) else readInt(rawType))
+            .orMalformed("Prerequisite flag is missing or invalid.")
+        val providerType = prerequisiteProviderType(declaredType, ctx.providerEvaluation)
 
-        val comparisonValue = selectSettingValue(asMap(c["v"]), declaredType)
+        val comparisonValue = prerequisiteValue(asMap(c["v"]), declaredType, providerType)
 
         val lb = ctx.logBuilder
         val cmp = readInt(c["c"]).orMalformed(INVALID_OPERATOR)
@@ -125,7 +128,7 @@ internal object ConditionEvaluator {
         }
 
         val resolvedEnvelope = SettingEvaluator.evaluateSetting(childCtx)
-        val resolvedValue = selectSettingValue(resolvedEnvelope.value, declaredType)
+        val resolvedValue = prerequisiteValue(resolvedEnvelope.value, declaredType, providerType)
 
         if (lb != null) {
             lb.newLine("Returning '" + EvalLog.settingValueToLogString(resolvedValue) + "'.")
@@ -219,4 +222,19 @@ internal object ConditionEvaluator {
         }
         lb.append(".").decreaseIndent().newLine(")")
     }
+}
+
+private fun prerequisiteProviderType(declaredType: Int, strict: Boolean): ProviderValueType? =
+    if (!strict) null
+    else ProviderValueType.entries.find { it.settingType == declaredType }
+        .orMalformed("Prerequisite flag type is invalid.")
+
+private fun prerequisiteValue(
+    envelope: Map<String, Any?>?,
+    declaredType: Int,
+    providerType: ProviderValueType?,
+): Any? {
+    val raw = selectSettingValue(envelope, declaredType)
+    return if (providerType == null) raw
+    else providerType.readWireValue(raw).orMalformed("Prerequisite value is missing or invalid.")
 }
