@@ -134,6 +134,9 @@ describe("the NuGet release prerequisite", () => {
       `<package><metadata>${identity}<version>0.2.0</version></metadata></package>`,
       `<package><metadata>${identity}</metadata><metadata /></package>`,
       `<package><metadata>${identity}</package>`,
+      nuspec.replace("<metadata>", '<metadata name="a" name="b">'),
+      nuspec.replace('version="1.0"', "invalid"),
+      nuspec.replace("<metadata>", "<!-- invalid -- comment --><metadata>"),
       nuspec + nuspec,
     ]) {
       await expect(httpExists(url, parent, async () => new Response(body))).rejects.toThrow(
