@@ -18,15 +18,27 @@ case "$target" in
 esac
 
 # Use standalone Gradle builds: the consumer can only resolve the published artifacts.
-sh ./gradlew "${gradle[@]}" "${target_args[@]}" \
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/cf-kotlin-consumer.XXXXXX")
+trap 'rm -r -- "$scratch"' EXIT
+release_repo="$scratch/maven"
+mkdir "$release_repo"
+sh ./gradlew "${gradle[@]}" "${target_args[@]}" "-PfixtureReleaseDirectory=$release_repo" \
   publishKotlinMultiplatformPublicationToReleaseRepository \
   "publish${variant}PublicationToReleaseRepository"
+
+shopt -s nullglob
+versions=("$release_repo"/io/confeature/confeature-openfeature-kotlin/*/)
+if [[ ${#versions[@]} != 1 ]]; then
+  echo "Expected one companion version in the fresh Maven repository." >&2
+  exit 1
+fi
+version=$(basename "${versions[0]}")
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 consumer=("${gradle[@]}" --project-dir integration/consumer
-  "-PconsumerTarget=$target" "-PreleaseRepo=$PWD/build/release-repo")
+  "-PconsumerTarget=$target" "-PreleaseRepo=$release_repo" "-PreleaseVersion=$version")
 
 if [[ "$target" == android ]]; then
-  dex_log=$(mktemp)
-  trap 'rm -f "$dex_log"' EXIT
+  dex_log="$scratch/dex.log"
   sh integration/consumer/gradlew "${consumer[@]}" --console=plain \
     :android:assembleRelease :android:assembleMinified 2>&1 | tee "$dex_log"
   if grep -Ei 'warning: (d8|r8):|unexpected error during rewriting of Kotlin metadata' "$dex_log"; then
@@ -35,7 +47,7 @@ if [[ "$target" == android ]]; then
   fi
   test -s integration/consumer/android/build/outputs/mapping/minified/mapping.txt
   artifact=confeature-openfeature-kotlin-android
-  aar="build/release-repo/io/confeature/$artifact/0.1.0/$artifact-0.1.0.aar"
+  aar="$release_repo/io/confeature/$artifact/$version/$artifact-$version.aar"
   unzip -p "$aar" AndroidManifest.xml | grep -E 'android:minSdkVersion="21"([[:space:]]|/|>)'
   for variant in release minified; do
     apk="integration/consumer/android/build/outputs/apk/$variant/android-$variant-unsigned.apk"
@@ -51,4 +63,4 @@ else
   executable=integration/consumer/apple/build/bin/iosArm64/debugExecutable/apple.kexe
   xcrun lipo -verify_arch arm64 "$executable"
 fi
-printf 'Verified Kotlin Maven consumer: %s\n' "$target"
+printf 'Verified Kotlin Maven consumer: %s at %s\n' "$target" "$version"

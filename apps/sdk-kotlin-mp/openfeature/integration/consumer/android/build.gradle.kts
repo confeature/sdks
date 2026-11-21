@@ -35,5 +35,5 @@ kotlin {
 }
 
 dependencies {
-    implementation("io.confeature:confeature-openfeature-kotlin:0.1.0")
+    implementation("io.confeature:confeature-openfeature-kotlin:${providers.gradleProperty("releaseVersion").get()}")
 }

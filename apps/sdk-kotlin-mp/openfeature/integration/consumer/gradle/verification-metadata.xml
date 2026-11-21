@@ -4,9 +4,9 @@
       <verify-metadata>true</verify-metadata>
       <verify-signatures>false</verify-signatures>
       <trusted-artifacts>
-         <trust group="io.confeature" name="confeature-openfeature-kotlin" version="0.1.0" />
-         <trust group="io.confeature" name="confeature-openfeature-kotlin-android" version="0.1.0" />
-         <trust group="io.confeature" name="confeature-openfeature-kotlin-iosarm64" version="0.1.0" />
+         <trust group="io.confeature" name="confeature-openfeature-kotlin" />
+         <trust group="io.confeature" name="confeature-openfeature-kotlin-android" />
+         <trust group="io.confeature" name="confeature-openfeature-kotlin-iosarm64" />
       </trusted-artifacts>
    </configuration>
    <components>

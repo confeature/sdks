@@ -307,6 +307,10 @@ function kotlinModule(tree, path, expected, problems) {
     problems.push(`${path}: invalid Gradle metadata (${error.name})`);
     return null;
   }
+  if (module?.formatVersion !== "1.1" || Object.keys(module)[0] !== "formatVersion") {
+    problems.push(`${path}: Gradle metadata must start with formatVersion 1.1`);
+    return null;
+  }
   if (
     !Array.isArray(module?.variants) ||
     Object.entries(expected).some(([key, value]) => module?.component?.[key] !== value)
@@ -350,7 +354,8 @@ function kotlinLocalVariants(tree, dir, stem, target, variants, problems) {
       label === null ||
       seen.has(label) ||
       Object.hasOwn(variant, "available-at") ||
-      !file ||
+      typeof file?.name !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file.name) ||
       extra.length !== 0 ||
       file.url !== name ||
       body === undefined ||
@@ -383,7 +388,7 @@ function kotlinCompanionProblems(tree, group, base, rootId, version, aids) {
   const problems = [];
   const prefix = (aid) => `${aid}/${version}/${aid}-${version}`;
   const modulePath = `${base}${prefix(rootId)}.module`;
-  const rootIdentity = { group, module: rootId, version };
+  const rootIdentity = { group, module: rootId, version, url: undefined };
   const rootVariants = kotlinModule(tree, modulePath, rootIdentity, problems);
   for (const aid of aids.keys()) {
     if (!expected.has(aid)) problems.push(`${aid}: unexpected Kotlin OpenFeature artifact`);

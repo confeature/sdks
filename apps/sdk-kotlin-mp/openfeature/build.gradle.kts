@@ -8,6 +8,11 @@ import org.jetbrains.kotlin.konan.target.HostManager
 
 val enableAndroid = providers.gradleProperty("enableAndroid").map(String::toBoolean).getOrElse(false)
 val fixtureSources = providers.gradleProperty("fixtureSources").orNull
+val fixtureReleaseDirectory = providers.gradleProperty("fixtureReleaseDirectory").orNull?.let { path ->
+    java.io.File(path).also {
+        require(it.isAbsolute && it.isDirectory) { "The fixture release directory must be a local absolute directory." }
+    }
+}
 
 plugins {
     kotlin("multiplatform") version "2.2.21"
@@ -133,7 +138,7 @@ publishing {
     repositories {
         maven {
             name = "release"
-            url = uri(layout.buildDirectory.dir("release-repo"))
+            url = uri(fixtureReleaseDirectory ?: layout.buildDirectory.dir("release-repo").get().asFile)
         }
     }
 }

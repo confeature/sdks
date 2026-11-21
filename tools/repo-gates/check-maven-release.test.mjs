@@ -144,6 +144,7 @@ describe("Kotlin OpenFeature release inventory", () => {
     attributes: attributes(aid, usage),
     files: [
       {
+        name: `${aid}-${VERSION}.${publish[aid][0]}`,
         url: `${aid}-${VERSION}.${publish[aid][0]}`,
         size: Buffer.byteLength(`binary of ${aid}`),
         sha256: digest("sha256", `binary of ${aid}`),
@@ -156,6 +157,7 @@ describe("Kotlin OpenFeature release inventory", () => {
       .flatMap((aid) => usages(aid).map((usage) => route(aid, usage)));
   const root = (variants) =>
     JSON.stringify({
+      formatVersion: "1.1",
       component: identity,
       variants: [fileVariant(companion, "kotlin-metadata"), ...variants],
     });
@@ -170,6 +172,7 @@ describe("Kotlin OpenFeature release inventory", () => {
             aid === companion
               ? root(references())
               : JSON.stringify({
+                  formatVersion: "1.1",
                   component: { ...identity, url: moduleUrl(companion) },
                   variants: usages(aid).map((usage) => fileVariant(aid, usage)),
                 }),
@@ -183,6 +186,39 @@ describe("Kotlin OpenFeature release inventory", () => {
 
   it("accepts the root and five referenced targets", () => {
     expect(companionCheck(tree())).toEqual([]);
+  });
+
+  it.each([
+    [
+      "absent",
+      (module) => {
+        delete module.formatVersion;
+        return module;
+      },
+    ],
+    ["unsupported", (module) => ({ ...module, formatVersion: "0.1" })],
+    ["out of order", ({ formatVersion, ...module }) => ({ ...module, formatVersion })],
+  ])("rejects Gradle formatVersion %s", (_, change) => {
+    const files = tree();
+    const module = change(JSON.parse(files[rootModule]));
+    Object.assign(files, withSums({ [rootModule]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toContain(
+      `${rootModule}: Gradle metadata must start with formatVersion 1.1`,
+    );
+  });
+
+  it("requires a file name separately from its repository URL", () => {
+    const path = `${pathFor(android)}.module`;
+    const files = tree();
+    const module = JSON.parse(files[path]);
+    module.variants[0].files[0].name = "companion-release.aar";
+    Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toEqual([]);
+    delete module.variants[0].files[0].name;
+    Object.assign(files, withSums({ [path]: JSON.stringify(module) }));
+    expect(companionCheck(files)).toContain(
+      `${path}: invalid Kotlin variant file reference (${variantName(android, "java-api")})`,
+    );
   });
 
   it("requires the artifact file for each target", () => {

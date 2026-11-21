@@ -13,7 +13,7 @@ kotlin {
     sourceSets.commonMain {
         kotlin.srcDir(rootProject.file("src"))
         dependencies {
-            implementation("io.confeature:confeature-openfeature-kotlin:0.1.0")
+            implementation("io.confeature:confeature-openfeature-kotlin:${providers.gradleProperty("releaseVersion").get()}")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
         }
     }
