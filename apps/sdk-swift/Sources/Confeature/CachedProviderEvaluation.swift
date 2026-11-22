@@ -46,7 +46,7 @@ extension ConfeatureClient {
                 config = source.config
             } else {
                 switch OverrideEval.evaluateSyncDetails(
-                    overrides: overrides, key: key, defaultValue: defaultValue)
+                    overrides: overrides, key: key, defaultValue: nil)
                 {
                 case .unavailable:
                     return CachedFlagEvaluation(
@@ -82,7 +82,7 @@ private func providerUser(
 private func checkedValue<Value>(
     _ value: Any, defaultValue: Value, result: Evaluator.Result? = nil
 ) -> CachedFlagEvaluation<Value> {
-    guard let typed = value as? Value else {
+    guard matchesScalarKind(value, expected: Value.self), let typed = value as? Value else {
         return CachedFlagEvaluation(value: defaultValue, errorCode: .settingValueTypeMismatch)
     }
     if let double = typed as? Double, !double.isFinite {
@@ -98,4 +98,16 @@ private func checkedValue<Value>(
             value: typed, variationId: served?["i"] as? String, match: .targetingRule)
     }
     return CachedFlagEvaluation(value: typed, variationId: result?.variationId)
+}
+
+private func matchesScalarKind<Value>(_ value: Any, expected: Value.Type) -> Bool {
+    // Foundation can cast one NSNumber to Bool, Int and Double. Require the
+    // stored scalar kind so a successful cast cannot change the flag's type.
+    if type(of: value) == expected { return true }
+    guard let number = value as? NSNumber else { return true }
+    let boolean = CFGetTypeID(number) == CFBooleanGetTypeID()
+    if expected == Bool.self { return boolean }
+    if expected == Int.self { return !boolean && !CFNumberIsFloatType(number) }
+    if expected == Double.self { return !boolean && CFNumberIsFloatType(number) }
+    return true
 }
