@@ -46,12 +46,19 @@ func (c *Client) evaluateWithContext(
 		return c.resolveEvaluation(ctx, key, fallback, evaluationUser{user: user})
 	}
 
-	value, info = c.resolveEvaluation(ctx, key, fallback, evaluationUser{user, true, hasIdentifier})
+	return c.evaluateAsProvider(ctx, key, fallback, evaluationUser{user, true, hasIdentifier}, c.fireEvaluationHook)
+}
+
+func (c *Client) evaluateAsProvider(
+	ctx context.Context, key string, fallback any, user evaluationUser,
+	scheduleHook func(string, *User, any, evalInfo),
+) (any, evalInfo) {
+	value, info := c.resolveEvaluation(ctx, key, fallback, user)
 	if err := ctx.Err(); err != nil {
 		return fallback, cancelledProviderEvaluation(err)
 	}
 	info.OmitUser = true
-	c.fireEvaluationHook(key, user, value, info)
+	scheduleHook(key, user.user, value, info)
 	return value, info
 }
 
