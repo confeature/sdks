@@ -505,27 +505,6 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
     expect(existsSync(join(ws, "release/Confeature.Client.1.2.3.nupkg"))).toBe(true);
   });
 
-  it("the Go job asks the proxy for exactly the module's version info", () => {
-    const { r, argv } = upload({
-      jobId: "publish-go",
-      name: "Ask the Go proxy for the release",
-      ws: scratch(),
-      table: {
-        "needs.setup.outputs.releaseTag": "apps/sdk-go/v1.2.3",
-        "needs.setup.outputs.version": "1.2.3",
-        "secrets.GO_TAG_DEPLOY_KEY": "k",
-      },
-      test: {
-        CURL_ALLOW:
-          "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v1.2.3.info",
-      },
-    });
-    expect(r.status, r.stderr).toBe(0);
-    expect(argv).toEqual([
-      "curl -fsS --proto =https --retry 5 --retry-delay 15 --retry-all-errors https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v1.2.3.info",
-    ]);
-  });
-
   // The Maven tools maven-r2-upload.sh runs (its exception), and the aws stub's own.
   const MAVEN_TOOLS = [
     "bash",

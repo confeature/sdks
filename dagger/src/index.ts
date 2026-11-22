@@ -30,6 +30,7 @@
  */
 import { dag, Container, Directory, Platform, object, func } from "@dagger.io/dagger";
 import { BROWSER_PROVIDER, runBrowserProviderSuites } from "./browser-provider-suites.js";
+import { goToolchain, runGoSuites } from "./go-toolchain.js";
 import { runNodeSuites } from "./node-suites.js";
 import { phpConsumerToolchain, phpToolchain } from "./php-toolchains.js";
 
@@ -276,28 +277,6 @@ function rubyToolchain(source: Directory): Container {
     .withMountedCache("/cache/bundle", dag.cacheVolume("bundle-cache"))
     .withMountedDirectory("/work", source)
     .withWorkdir("/work/apps/sdk-ruby");
-}
-
-function goToolchain(source: Directory): Container {
-  return dag
-    .container()
-    .from("golang:1.23.12-bookworm")
-    .withEnvVariable("CI", "true")
-    .withEnvVariable("GOMODCACHE", "/cache/go-mod")
-    .withEnvVariable("GOCACHE", "/cache/go-build")
-    .withMountedCache("/cache/go-mod", dag.cacheVolume("go-mod-cache"))
-    .withMountedCache("/cache/go-build", dag.cacheVolume("go-build-cache"))
-    .withExec(["useradd", "-m", "-u", "1000", "runner"])
-    .withExec([
-      "bash",
-      "-eu",
-      "-c",
-      // Install staticcheck under root with GOBIN forced to /usr/local/bin so
-      // it resolves on PATH for the unprivileged runner user.
-      "GOBIN=/usr/local/bin go install honnef.co/go/tools/cmd/staticcheck@2024.1.1",
-    ])
-    .withMountedDirectory("/work", source)
-    .withWorkdir("/work/apps/sdk-go");
 }
 
 function rustToolchain(source: Directory): Container {
@@ -946,50 +925,10 @@ export class Confeature {
     return `${lastLine} (Phase 3 pythonTest with OpenFeature)`;
   }
 
-  /**
-   * Run apps/sdk-go's full `go:ready` chain inside golang:1.23-bookworm.
-   *
-   * Chain: `gofmt -l . | wc -l == 0 && go vet ./... && staticcheck ./... &&
-   * go test -cover ./... && go build ./...`. Module-declared Go version
-   * (apps/sdk-go/go.mod) is 1.23 — that's the source of truth, NOT ci.yml's
-   * 1.22 pin (skew tracked for Phase 4 / #203 per research R12).
-   *
-   * staticcheck is pinned to 2024.1.1 — NOT @latest (Principle VII cost
-   * discipline says toolchains are pinned, not floating).
-   *
-   * @param source The workspace root. Workdir is /work/apps/sdk-go.
-   */
+  /** Run the Go SDK and its OpenFeature consumer on the pinned Go toolchain. */
   @func()
   async goTest(source: Directory): Promise<string> {
-    // Run `go test` under a non-root user (`runner`, UID 1000). Reason:
-    // sdk-go's TestFileCache_FallbackOnUnwritableDir depends on POSIX DAC
-    // semantics — UID 0 bypasses chmod 0o555 read-only restrictions, so
-    // the test never triggers its "WARNING on unwritable dir" path when
-    // running as root inside the container. Running as non-root also
-    // reproduces the host workflow (operator runs as a normal user).
-    //
-    // Cache volume NAMES (`go-mod-cache`, `go-build-cache`) are preserved
-    // verbatim per contract pre-push-hook.md. The MOUNT PATHS shift one
-    // hop (from /go/pkg/mod + /root/.cache/go-build to /cache/go-mod +
-    // /cache/go-build) so the runner user can write to them; GOMODCACHE
-    // + GOCACHE env vars redirect Go's toolchain accordingly.
-    // `staticcheck` is installed under root (GOBIN=/usr/local/bin) so it
-    // resolves on PATH for the unprivileged runner user.
-    const result = await goToolchain(source)
-      .withExec([
-        "bash",
-        "-eu",
-        "-c",
-        // The chown runs in THIS exec, not the install one: that layer is
-        // cached, so a chown there is skipped while the cache volumes keep
-        // changing underneath it — and the runner then cannot write to
-        // /cache/go-build ("permission denied"). Here it runs every time.
-        "chown -R runner:runner /cache && runuser -u runner -- bash -eu -c " +
-          `'test -z "$(gofmt -l .)" && go vet ./... && staticcheck ./... && go test -cover ./... && go build ./...'`,
-      ])
-      .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Phase 3 goTest)`;
+    return runGoSuites(source);
   }
 
   /**

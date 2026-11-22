@@ -443,6 +443,19 @@
       "releaseTag": "apps/sdk-go/v{version}"
     },
     {
+      "name": "openfeature-go",
+      "gate": "go",
+      "registry": "go",
+      "coordinates": "github.com/confeature/sdks/apps/sdk-go/openfeature",
+      "path": "apps/sdk-go/openfeature",
+      "versionSource": {
+        "file": "apps/sdk-go/openfeature/version.go",
+        "pattern": "^const Version = \"([^\"]+)\"$"
+      },
+      "after": ["go"],
+      "releaseTag": "apps/sdk-go/openfeature/v{version}"
+    },
+    {
       "name": "php",
       "gate": "php",
       "registry": "packagist",

@@ -38,6 +38,47 @@ const published = async () => true;
 const MAIN = { mainRef: "origin/main", isOnMain: () => true };
 const unpublished = async () => false;
 
+describe("the Go release prerequisite", () => {
+  const coordinates = "github.com/confeature/sdks/apps/sdk-go";
+  const parent = { registry: "go", coordinates, version: "0.2.0" };
+  const url = `https://proxy.golang.org/${coordinates}/@v/v0.2.0.mod`;
+
+  it("reads the exact first-party module and version with redirects refused", async () => {
+    expect(registryUrl(parent, parent.version)).toBe(url);
+    expect(registryUrl(parent, "0.2.0/../0.1.1")).toBeNull();
+    expect(
+      registryUrl({ ...parent, coordinates: coordinates + "/openfeature" }, "0.2.0"),
+    ).toBeNull();
+    await expect(
+      httpExists(url, parent, async (target, options) => {
+        expect(target).toBe(url);
+        expect(options).toEqual({
+          method: "GET",
+          headers: { accept: "text/plain" },
+          redirect: "error",
+        });
+        return new Response(`module ${coordinates}\n\ngo 1.23\n`);
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("refuses a missing, mismatched or invalid module declaration", async () => {
+    await expect(
+      httpExists(url, parent, async () => new Response(null, { status: 404 })),
+    ).resolves.toBe(false);
+    for (const manifest of [
+      `module ${coordinates}/other\n`,
+      `module ${coordinates} extra\n`,
+      `module ${coordinates}\nmodule ${coordinates}\n`,
+      `// module ${coordinates}\n`,
+    ]) {
+      await expect(httpExists(url, parent, async () => new Response(manifest))).rejects.toThrow(
+        /expected Go module/,
+      );
+    }
+  });
+});
+
 describe("the Maven release prerequisite", () => {
   const parent = {
     registry: "maven",
@@ -162,6 +203,7 @@ describe("the real publish table", () => {
       "openfeature-node",
       "openfeature-browser",
       "openfeature-dotnet",
+      "openfeature-go",
       "openfeature-java",
       "openfeature-kotlin",
     ].sort(byName);
@@ -240,13 +282,13 @@ describe("the real publish table", () => {
       daggerFn: "dotnet-test",
     });
   });
+});
 
-  it("the mirror's tags are filled from its unit", async () => {
-    const php = await resolvePublish({ root: ROOT, tag: "sdk-php-v0.1.0", ...MAIN });
-    expect(php).toMatchObject({
-      mirrorRepository: "confeature/confeature-php-sdk",
-      mirrorTag: "v0.1.0",
-    });
+it("fills a mirror's tags from its unit", async () => {
+  const php = await resolvePublish({ root: ROOT, tag: "sdk-php-v0.1.0", ...MAIN });
+  expect(php).toMatchObject({
+    mirrorRepository: "confeature/confeature-php-sdk",
+    mirrorTag: "v0.1.0",
   });
 });
 
@@ -261,6 +303,39 @@ it("resolves the base Go release from its source declaration", async () => {
   const other = GO_VERSION === "0.0.0" ? "0.0.1" : "0.0.0";
   await expect(resolvePublish({ root: ROOT, tag: `sdk-go-v${other}`, ...MAIN })).rejects.toThrow(
     /tag version .* differs from the .* that go declares/,
+  );
+});
+
+it("resolves the nested Go module only after the pinned base release", async () => {
+  const [base, companion] = ["go", "openfeature-go"].map((name) =>
+    REAL.publish.find((unit) => unit.name === name),
+  );
+  const root = fixture([base, companion], [covered("go")], {
+    [base.versionSource.file]: 'const Version = "9.9.9"\n',
+    [companion.versionSource.file]: 'const Version = "0.1.0"\n',
+    [`${companion.path}/go.mod`]: `module ${companion.coordinates}\nrequire (\n\t${base.coordinates} v0.2.0\n)\n`,
+  });
+  const release = { root, tag: "sdk-openfeature-go-v0.1.0", ...MAIN };
+  const resolved = await resolvePublish({
+    ...release,
+    exists: async (url, dependency) => {
+      expect(url).toBe(`https://proxy.golang.org/${base.coordinates}/@v/v0.2.0.mod`);
+      expect(dependency).toEqual({
+        registry: "go",
+        coordinates: base.coordinates,
+        version: "0.2.0",
+      });
+      return true;
+    },
+  });
+  expect(resolved).toMatchObject({
+    coordinates: `${base.coordinates}/openfeature`,
+    gate: "test",
+    daggerFn: "go-test",
+    releaseTag: "apps/sdk-go/openfeature/v0.1.0",
+  });
+  await expect(resolvePublish({ ...release, exists: unpublished })).rejects.toThrow(
+    /not published yet/,
   );
 });
 

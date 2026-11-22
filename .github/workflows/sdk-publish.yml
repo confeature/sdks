@@ -1184,13 +1184,8 @@ jobs:
           curl -sS --fail-with-body --tlsv1.2 --proto =https --variable %HEX_API_KEY --expand-header 'authorization: {{HEX_API_KEY}}' --header 'content-type: application/octet-stream' --data-binary "@release/${ARTIFACT}" 'https://hex.pm/api/packages/confeature_client/releases?replace=false'
 
   # ----------------------------------------------------------------- go ----
-  # A Go module is published by its tag: proxy.golang.org builds the module zip
-  # from `apps/sdk-go/v<X.Y.Z>` on the first request, so nothing is uploaded
-  # and nothing is handed on. The pack job builds the zip the proxy would,
-  # with golang.org/x/mod/zip (tools/sdk-pack/gozip), and fails where the proxy
-  # would refuse it, before the tag exists. The publish job pushes the module
-  # tag at this run's commit with a deploy key that may create only those tags
-  # (the go module tags ruleset), then asks the proxy for the version.
+  # The Go deploy key only pushes the module tag. The companion receipt
+  # downloads the tagged module without access to that publishing environment.
 
   pack-go:
     name: pack ${{ needs.setup.outputs.coordinates }}
@@ -1204,6 +1199,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      sum: ${{ steps.module.outputs.sum }}
     env:
       UNIT_PATH: ${{ needs.setup.outputs.path }}
       UNIT_VERSION: ${{ needs.setup.outputs.version }}
@@ -1239,23 +1236,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
 
-      # `go mod verify` checks every dependency against go.sum; the zip is the
-      # one the proxy would build from the tag, checked as the proxy checks it.
       - name: Pack the release artifact
+        id: module
         run: |
-          grep -qxF "const Version = \"${UNIT_VERSION}\"" "$UNIT_PATH/version.go" ||
-            { echo "::error::$UNIT_PATH/version.go does not declare ${UNIT_VERSION}"; exit 1; }
-          go -C "$UNIT_PATH" mod verify
-          mkdir -p "$RUNNER_TEMP/release"
-          go -C tools/sdk-pack/gozip run . -dir "$GITHUB_WORKSPACE/$UNIT_PATH" -module "$UNIT_COORDINATES" -version "v${UNIT_VERSION}" -out "$RUNNER_TEMP/release/module.zip"
-
-      - name: Record the artifact digest
-        run: |
-          {
-            echo "### Go module ${UNIT_COORDINATES}@v${UNIT_VERSION}"
-            echo "- $(go version)"
-            echo "- module zip sha256: $(sha256sum -- "$RUNNER_TEMP/release/module.zip" | cut -d' ' -f1)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          sum=$(bash tools/sdk-pack/pack-go.sh)
+          printf 'sum=%s\n' "$sum" >> "$GITHUB_OUTPUT"
 
   publish-go:
     name: publish ${{ needs.setup.outputs.coordinates }}@v${{ needs.setup.outputs.version }}
@@ -1307,10 +1292,20 @@ jobs:
         if: always()
         run: rm -rf publish-tmp/ssh
 
-      # The first request makes the proxy fetch the tag; a version it cannot
-      # serve turns this run red instead of failing a user's `go get`.
       - name: Ask the Go proxy for the release
+        if: needs.setup.outputs.name == 'go'
         run: curl -fsS --proto '=https' --retry 5 --retry-delay 15 --retry-all-errors "https://proxy.golang.org/github.com/confeature/sdks/apps/sdk-go/@v/v${UNIT_VERSION}.info"
+
+  verify-go-module:
+    needs: [setup, pack-go, publish-go]
+    if: needs.setup.outputs.name == 'openfeature-go'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/go-module-receipt.yml
+    with:
+      coordinates: ${{ needs.setup.outputs.coordinates }}
+      version: ${{ needs.setup.outputs.version }}
+      checksum: ${{ needs.pack-go.outputs.sum }}
 
   # ---------------------------------------------------------- packagist ----
   # Packagist and SwiftPM read a whole repository, with its manifest at the
@@ -1851,6 +1846,7 @@ jobs:
       - publish-pubdev
       - pack-go
       - publish-go
+      - verify-go-module
       - pack-packagist
       - publish-packagist
       - pack-swiftpm
@@ -1878,6 +1874,7 @@ jobs:
             const reg = setup.outputs.registry;
             const regs = [reg, ...(setup.outputs.jsr ? ["jsr"] : [])];
             const want = regs.flatMap((r) => [`pack-${r}`, ...(process.env.EVENT === "push" ? [`publish-${r}`] : [])]);
+            if (setup.outputs.name === "openfeature-go" && process.env.EVENT === "push") want.push("verify-go-module");
             for (const job of want) {
               if (!(job in needs)) { console.error(`::error::this workflow has no ${job} job: registry ${reg} is not wired yet`); process.exit(1); }
               if (needs[job].result !== "success") { console.error(`::error::${job} ended ${needs[job].result}`); process.exit(1); }

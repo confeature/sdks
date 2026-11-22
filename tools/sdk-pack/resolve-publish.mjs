@@ -47,6 +47,12 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isEntry } from "../lib/is-entry.mjs";
 import { matchesPomCoordinates } from "./check-maven-release.mjs";
+import {
+  declaresGoModule,
+  GO_OPENFEATURE_DIR,
+  GO_SDK_MODULE,
+  requiredGoSdkVersion,
+} from "./go-module-release.mjs";
 import { JSR, jsrProblems } from "./jsr-unit.mjs";
 import { readXmlIdentity } from "./xml-identity.mjs";
 
@@ -158,16 +164,25 @@ export function registryUrl(unit, version) {
     const id = unit.coordinates.toLowerCase();
     return `https://api.nuget.org/v3-flatcontainer/${id}/${version.toLowerCase()}/${id}.nuspec`;
   }
+  if (
+    unit.registry === "go" &&
+    unit.coordinates === GO_SDK_MODULE &&
+    new RegExp(`^${SEMVER}$`).test(version)
+  ) {
+    return `https://proxy.golang.org/${unit.coordinates}/@v/v${version}.mod`;
+  }
   return null;
 }
 
-/** A read-only lookup with identity checks for the Maven and NuGet manifests. */
+/** A read-only lookup with identity checks when a dependency manifest is expected. */
 export async function httpExists(url, dependency, fetcher = fetch) {
   let res;
+  let accept = "application/json";
+  if (dependency) accept = dependency.registry === "go" ? "text/plain" : "application/xml";
   try {
     res = await fetcher(url, {
       method: "GET",
-      headers: { accept: dependency ? "application/xml" : "application/json" },
+      headers: { accept },
       redirect: "error",
     });
   } catch {
@@ -176,7 +191,10 @@ export async function httpExists(url, dependency, fetcher = fetch) {
   if (res.status === 200) {
     if (!dependency) return true;
     const manifest = await res.text();
-    if (dependency.registry === "nuget") {
+    if (dependency.registry === "go") {
+      if (!declaresGoModule(manifest, dependency.coordinates))
+        throw new Refusal(`${url} did not identify the expected Go module`);
+    } else if (dependency.registry === "nuget") {
       const identity = readXmlIdentity(
         manifest,
         ["package", "metadata"],
@@ -195,6 +213,44 @@ export async function httpExists(url, dependency, fetcher = fetch) {
   }
   if (res.status === 404) return false;
   throw new Refusal(`${url} answered ${res.status}`);
+}
+
+function prerequisiteVersion(unit, dependency, root) {
+  if (unit.path !== GO_OPENFEATURE_DIR || dependency.coordinates !== GO_SDK_MODULE)
+    return declaredVersion(dependency, root, undefined);
+  const path = `${GO_OPENFEATURE_DIR}/go.mod`;
+  let version;
+  try {
+    version = requiredGoSdkVersion(readFileSync(join(root, path), "utf8"));
+  } catch (e) {
+    throw new InputError(`unit "${unit.name}": cannot read ${path} (${e.code ?? e.message})`, {
+      cause: e,
+    });
+  }
+  if (!new RegExp(`^${SEMVER}$`).test(version ?? ""))
+    throw new Refusal(`unit "${unit.name}": ${path} must require one version of ${GO_SDK_MODULE}`);
+  return version;
+}
+
+async function verifyPrerequisites(unit, units, root, exists) {
+  for (const name of unit.after ?? []) {
+    const dependency = units.find((candidate) => candidate?.name === name);
+    if (!dependency)
+      throw new Refusal(`unit "${unit.name}": after names "${name}", which is not a unit`);
+    const version = prerequisiteVersion(unit, dependency, root);
+    const url = registryUrl(dependency, version);
+    if (url === null)
+      throw new Refusal(
+        `unit "${unit.name}": cannot check "${name}" on registry ${dependency.registry}`,
+      );
+    const identity = ["maven", "nuget", "go"].includes(dependency.registry)
+      ? { registry: dependency.registry, coordinates: dependency.coordinates, version }
+      : undefined;
+    if (!(await exists(url, identity)))
+      throw new Refusal(
+        `unit "${unit.name}" must follow ${dependency.coordinates}@${version}, which is not published yet`,
+      );
+  }
 }
 
 /** True when `commit` is an ancestor of `mainRef` in the repository at `root`. */
@@ -302,22 +358,7 @@ export async function resolvePublish({
     );
 
   if (tag !== undefined) {
-    for (const depName of unit.after ?? []) {
-      const dep = units.find((u) => u?.name === depName);
-      if (!dep) throw new Refusal(`unit "${name}": after names "${depName}", which is not a unit`);
-      const depVersion = declaredVersion(dep, root, undefined);
-      const url = registryUrl(dep, depVersion);
-      if (url === null)
-        throw new Refusal(`unit "${name}": cannot check "${depName}" on registry ${dep.registry}`);
-      const dependency =
-        dep.registry === "maven" || dep.registry === "nuget"
-          ? { registry: dep.registry, coordinates: dep.coordinates, version: depVersion }
-          : undefined;
-      if (!(await exists(url, dependency)))
-        throw new Refusal(
-          `unit "${name}" must follow ${dep.coordinates}@${depVersion}, which is not published yet`,
-        );
-    }
+    await verifyPrerequisites(unit, units, root, exists);
     if (mainRef === undefined)
       throw new Refusal("a release tag needs --main-ref: release tags are cut from main only");
     // Both are `git merge-base` arguments: one starting with `-` is an option.

@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: MIT
+
+name: Go module receipt
+
+on:
+  workflow_call:
+    inputs:
+      coordinates:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      checksum:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.2"
+
+jobs:
+  receipt:
+    name: Verify the distributed Go module
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      UNIT_COORDINATES: ${{ inputs.coordinates }}
+      UNIT_VERSION: ${{ inputs.version }}
+      EXPECTED_SUM: ${{ inputs.checksum }}
+      GOTOOLCHAIN: local
+      GOWORK: "off"
+      GOPROXY: https://proxy.golang.org
+      GOSUMDB: sum.golang.org
+      GONOPROXY: none
+      GONOSUMDB: none
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Match the Go proxy download to the packed module
+        run: |
+          [[ "$UNIT_COORDINATES" == 'github.com/confeature/sdks/apps/sdk-go/openfeature' ]]
+          [[ "$UNIT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
+          [[ "$EXPECTED_SUM" =~ ^h1:[A-Za-z0-9+/]{43}=$ ]]
+          GOMODCACHE="$(mktemp -d "$RUNNER_TEMP/go-mod.XXXXXX")"
+          export GOMODCACHE
+          download="$RUNNER_TEMP/go-module-download.json"
+          # A version requested before its tag can stay negatively cached for 30 minutes.
+          for attempt in {1..32}; do
+            if go mod download -json "$UNIT_COORDINATES@v$UNIT_VERSION" > "$download"; then
+              break
+            fi
+            if [[ "$attempt" == 32 ]] || ! jq -e '.Error | strings |
+              test("404 Not Found|429 Too Many Requests|500 Internal Server Error|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout")' "$download" > /dev/null; then
+              cat "$download"
+              exit 1
+            fi
+            sleep 60
+          done
+          jq -e --arg module "$UNIT_COORDINATES" --arg version "v$UNIT_VERSION" --arg sum "$EXPECTED_SUM" \
+            '.Path == $module and .Version == $version and .Sum == $sum and .Error == null' "$download"
+          printf '%s\n' "- Go proxy and checksum database verified: $EXPECTED_SUM" >> "$GITHUB_STEP_SUMMARY"

@@ -180,8 +180,17 @@ import {
   manifestProblems,
 } from "./select-sdks.mjs";
 
-export const SETTINGS = "tools/repo-gates/release-settings.json";
-export const MANIFEST = "dagger/sdk-manifest.json";
+import {
+  baseGoProxyCondition,
+  baseGoProxyPrefixes,
+  globMatches,
+  GO_RECEIPT_WORKFLOW,
+  MANIFEST,
+  mirrorRules,
+  SETTINGS,
+} from "./release-refs.mjs";
+
+export { globMatches, MANIFEST, SETTINGS };
 export const WORKFLOWS = ".github/workflows";
 export const PUBLISH_WORKFLOW = "sdk-publish.yml";
 export const CLI_WORKFLOW = "cli-release.yml";
@@ -212,17 +221,6 @@ const OTP_PIN = /^\d+\.\d+(?:\.\d+){0,2}$/;
 const exactPin = (name) => (name === "OTP_VERSION" ? OTP_PIN : EXACT);
 /** Code-unit order, the order `.sort()` gives strings, said explicitly. */
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-
-/** GitHub's filter-pattern semantics for the patterns used here: `*` matches anything but `/`. */
-export function globMatches(glob, ref) {
-  if (/[?[\]!+]/.test(glob)) throw new Error(`unsupported glob character in ${glob}`);
-  // `**` first, so its two stars are never read as two single ones.
-  const body = glob
-    .split("**")
-    .map((part) => part.replace(/[.^$()|\\{}]/g, "\\$&").replace(/\*/g, "[^/]*"))
-    .join(".*");
-  return new RegExp(`^${body}$`).test(ref);
-}
 
 const envName = (job) =>
   typeof job?.environment === "string" ? job.environment : job?.environment?.name;
@@ -627,6 +625,13 @@ export const ACTION_SURFACE = {
       step(PIN.setupGo, { with: { "go-version": "${{ env.GO_VERSION }}", cache: false } }),
     ],
     "publish-go": [shallowCheckout()],
+    "verify-go-module": [
+      call(`./.github/workflows/${GO_RECEIPT_WORKFLOW}`, {
+        coordinates: "${{ needs.setup.outputs.coordinates }}",
+        version: "${{ needs.setup.outputs.version }}",
+        checksum: "${{ needs.pack-go.outputs.sum }}",
+      }),
+    ],
     "pack-packagist": [
       fullCheckout(),
       step(PIN.pnpm),
@@ -656,6 +661,9 @@ export const ACTION_SURFACE = {
       step(PIN.attest, { with: { "subject-checksums": "publish-tmp/subjects.sha256" } }),
     ],
     conclude: [],
+  },
+  [GO_RECEIPT_WORKFLOW]: {
+    receipt: [step(PIN.setupGo, { with: { "go-version": "${{ env.GO_VERSION }}", cache: false } })],
   },
   [CLI_WORKFLOW]: {
     "workflow-rules": [shallowCheckout(), step(PIN.pnpm), setupNode()],
@@ -810,7 +818,12 @@ const canonical = (v) =>
           .join(",")}}`;
 
 /** The workflows rule 17 freezes, every job of each: the release workflows and release-gate. */
-export const SURFACE_WORKFLOWS = [PUBLISH_WORKFLOW, CLI_WORKFLOW, "release-gate.yml"];
+export const SURFACE_WORKFLOWS = [
+  PUBLISH_WORKFLOW,
+  CLI_WORKFLOW,
+  "release-gate.yml",
+  GO_RECEIPT_WORKFLOW,
+];
 
 /** Rule 17 over every job of SURFACE_WORKFLOWS (round 9: not only the credentialed ones). */
 export function surfaceFindings(workflows, surface = ACTION_SURFACE, actions = {}) {
@@ -892,7 +905,7 @@ export function surfaceFindings(workflows, surface = ACTION_SURFACE, actions = {
  * secret (checked), and its own jobs are held to every rule here.
  */
 export const RELEASE_CALLS = {
-  [PUBLISH_WORKFLOW]: [],
+  [PUBLISH_WORKFLOW]: [`./.github/workflows/${GO_RECEIPT_WORKFLOW}`],
   [CLI_WORKFLOW]: ["./.github/workflows/cli-windows-install-verify.yml"],
 };
 
@@ -1861,7 +1874,7 @@ function stepCredentialRules(file, jobId, job, add) {
       // continueOnErrorFindings refuses it, in every job of these workflows.
       if (k === "continue-on-error") continue;
       if (k === "if") {
-        if (!RECORDED_STEP_IFS.includes(String(v)))
+        if (!RECORDED_STEP_IFS.includes(String(v)) && !baseGoProxyCondition(file, jobId, where, v))
           add(
             file,
             jobId,
@@ -2464,65 +2477,9 @@ function shapeRules({ settings, manifest, workflows, envs, add }) {
   }
 }
 
-/** Rule 11, over the settings and the manifest: what the applier builds deploy keys from. */
-function mirrorRules({ settings, manifest, envs, add }) {
-  const units = (manifest.publish ?? []).filter((u) => u?.registry !== "none");
-  const mirrors = settings.mirrors ?? [];
-  const sample = (template) => `refs/tags/${String(template).replace("{version}", "1.0.0")}`;
-  for (const m of mirrors) {
-    const unit = units.find((u) => u.name === m.unit);
-    if (unit?.mirror?.repository !== m.repository)
-      add(
-        SETTINGS,
-        "-",
-        `mirror ${m.repository} names unit ${m.unit}, whose manifest mirror is ${String(unit?.mirror?.repository)}`,
-      );
-    const e = envs.get(m.environment);
-    if (e === undefined || unit === undefined || e.registry !== unit.registry)
-      add(
-        SETTINGS,
-        "-",
-        `mirror ${m.repository} names environment ${m.environment}, which is not unit ${m.unit}'s registry's`,
-      );
-    if (unit?.mirror !== undefined) {
-      const tag = sample(unit.mirror.releaseTag);
-      if (!(m.tags ?? []).some((g) => globMatches(g, tag)))
-        add(SETTINGS, "-", `mirror ${m.repository}'s tag patterns do not cover ${tag}`);
-    }
-  }
-  for (const u of units.filter((x) => x.mirror !== undefined))
-    if (!mirrors.some((m) => m.unit === u.name))
-      add(
-        SETTINGS,
-        "-",
-        `unit ${u.name} has a mirror (${u.mirror.repository}) that ${SETTINGS} does not declare`,
-      );
-  const goUnits = units.filter((u) => u.registry === "go");
-  const g = settings.goModuleTags;
-  if (goUnits.length === 0 && g === undefined) return;
-  if (envs.get(g?.environment)?.registry !== "go")
-    add(
-      SETTINGS,
-      "-",
-      `goModuleTags names environment ${String(g?.environment)}, which is not the go registry's`,
-    );
-  for (const u of goUnits) {
-    if (typeof u.releaseTag !== "string") {
-      add(MANIFEST, "-", `go unit ${u.name} has no releaseTag: its module tag would be empty`);
-      continue;
-    }
-    const ref = sample(u.releaseTag);
-    if (!(g?.include ?? []).some((p) => globMatches(p, ref)))
-      add(SETTINGS, "-", `goModuleTags does not cover unit ${u.name}'s module tag (${ref})`);
-  }
-}
-
 /** Every finding over parsed inputs. Pure: the tests feed it fixtures. */
 export function findings({ settings, manifest, workflows, commands = ENVIRONMENT_COMMANDS }) {
-  // The only URLs curl may name: each Go unit's module on the proxy, literal to /@v/.
-  const goProxyPrefixes = (manifest.publish ?? [])
-    .filter((u) => u?.registry === "go" && typeof u.coordinates === "string")
-    .map((u) => `https://proxy.golang.org/${u.coordinates}/@v/`);
+  const goProxyPrefixes = baseGoProxyPrefixes(manifest);
   const out = [];
   const add = (file, job, why) => out.push({ file, job, why });
   const envs = new Map((settings.environments ?? []).map((e) => [e.name, e]));
@@ -2831,7 +2788,7 @@ export function referenceFindings(workflows, scriptOutputs = {}, settings = null
   const out = [];
   const exprs = (v) => expressionBodies(v);
   const secretsOf = settings === null ? null : declaredSecrets(settings);
-  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW]) {
+  for (const file of [PUBLISH_WORKFLOW, CLI_WORKFLOW, GO_RECEIPT_WORKFLOW]) {
     const doc = workflows[file];
     // The workflow's own env values (round 6: they were never read).
     for (const v of Object.values(doc?.env ?? {}))

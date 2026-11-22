@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/mod/zip"
 )
 
@@ -58,24 +60,45 @@ func run(args []string) int {
 		return 1
 	}
 
-	f, err := os.Create(*out)
+	if err := writeModuleZip(release, *dir, *out); err != nil {
+		fmt.Fprintf(os.Stderr, "gozip: %v\n", err)
+		return 1
+	}
+	sum, err := publishedModuleSum(release, *out)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gozip: %v\n", err)
-		return 1
-	}
-	if err := zip.CreateFromDir(f, release, *dir); err != nil {
-		f.Close()
-		fmt.Fprintf(os.Stderr, "gozip: the proxy would refuse %s: %v\n", release, err)
-		return 1
-	}
-	if err := f.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "gozip: %v\n", err)
-		return 1
-	}
-	// Read back exactly as the proxy reads a zip it is handed.
-	if _, err := zip.CheckZip(release, *out); err != nil {
 		fmt.Fprintf(os.Stderr, "gozip: %s does not check: %v\n", *out, err)
 		return 1
 	}
+	fmt.Println(sum)
 	return 0
+}
+
+func writeModuleZip(release module.Version, dir, path string) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	zipErr := zip.CreateFromDir(file, release, dir)
+	closeErr := file.Close()
+	if zipErr != nil {
+		return fmt.Errorf("the proxy would refuse %s: %w", release, zipErr)
+	}
+	return closeErr
+}
+
+func publishedModuleSum(release module.Version, path string) (string, error) {
+	files, err := zip.CheckZip(release, path)
+	if err != nil {
+		return "", err
+	}
+	if release.Path == "github.com/confeature/sdks/apps/sdk-go/openfeature" {
+		prefix := release.Path + "@" + release.Version + "/"
+		for _, name := range files.Valid {
+			relative := strings.TrimPrefix(name, prefix)
+			if strings.HasPrefix(relative, "tests/") || strings.HasSuffix(relative, "_test.go") {
+				return "", fmt.Errorf("companion archive includes test file %q", name)
+			}
+		}
+	}
+	return dirhash.HashZip(path, dirhash.Hash1)
 }

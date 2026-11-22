@@ -87,7 +87,7 @@
         {
           "name": "GO_TAG_DEPLOY_KEY",
           "kind": "deploy-key",
-          "issuer": "SSH deploy key (write) on confeature/sdks, created by the operator's applier; it may only create apps/sdk-go/v* tags (go module tags ruleset)",
+          "issuer": "SSH deploy key (write) on confeature/sdks, created by the operator's applier; tag creation is limited to goModuleTags.include",
           "rotateBy": "2027-10-16"
         }
       ]
@@ -192,11 +192,16 @@
   },
   "releaseBranchNames": {
     "name": "release-shaped branch names",
-    "include": ["refs/heads/sdk-*", "refs/heads/cli-v*", "refs/heads/apps/sdk-go/*"]
+    "include": [
+      "refs/heads/sdk-*",
+      "refs/heads/cli-v*",
+      "refs/heads/apps/sdk-go/*",
+      "refs/heads/apps/sdk-go/openfeature/v*"
+    ]
   },
   "goModuleTags": {
     "name": "go module tags",
-    "include": ["refs/tags/apps/sdk-go/v*"],
+    "include": ["refs/tags/apps/sdk-go/v*", "refs/tags/apps/sdk-go/openfeature/v*"],
     "environment": "sdk-publish-go",
     "deployKeyTitle": "sdk-publish-go"
   },
