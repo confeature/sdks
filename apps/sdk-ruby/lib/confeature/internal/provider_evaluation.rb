@@ -50,7 +50,7 @@ module Confeature
         return result if found
 
         matched, value, error = OverrideEval.evaluate_sync_details(overrides, key, nil)
-        Evaluator::EvaluationResult.new(value: value, error: matched ? error : "KEY_NOT_FOUND")
+        Evaluator::EvaluationResult.new(value: value, error: matched ? error : "NO_CONFIG")
       end
 
       def type_error(value, flag_type)

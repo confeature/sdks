@@ -62,6 +62,13 @@ RSpec.describe Confeature::Internal::ProviderEvaluation do
     expect(source.reads).to eq(3)
   end
 
+  it "uses the fallback when the override source has no synchronous data" do
+    source.overrides = nil
+
+    expect(evaluate("flag", false, flag_type: :boolean)).to have_attributes(value: false, error: "NO_CONFIG")
+    expect(source.reads).to eq(1)
+  end
+
   it "preserves both numeric types and returns the caller's fallback for nonfinite numbers" do
     expect(evaluate("integer", 0.0, flag_type: :number)).to have_attributes(value: 2, error: nil)
     expect(evaluate("float", -1, flag_type: :number)).to have_attributes(value: 0.5, error: nil)
