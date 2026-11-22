@@ -4,7 +4,7 @@ import OpenFeature
 
 struct ContextAttributes {
     private static let reserved: Set<String> = [
-        "Identifier", "Email", "Country", "targetingKey", "targeting_key",
+        "Identifier", "Email", "Country", "targetingKey",
     ]
 
     let identifier: String?

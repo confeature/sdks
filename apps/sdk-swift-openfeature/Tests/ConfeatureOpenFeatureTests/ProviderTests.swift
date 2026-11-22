@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+import Combine
 import Confeature
 import ConfeatureOpenFeature
 import Foundation
@@ -21,6 +22,7 @@ final class ProviderTests: XCTestCase {
             "plan": .string("trial"),
             "Identifier": .string("shadow"),
             "targetingKey": .string("another-shadow"),
+            "targeting_key": .string("ordinary-custom-attribute"),
         ])
         await first.setProviderAndWait(provider: firstProvider, initialContext: context)
         await second.setProviderAndWait(
@@ -36,13 +38,23 @@ final class ProviderTests: XCTestCase {
         XCTAssertTrue(custom.value)
         XCTAssertEqual(custom.variant, "rollout")
         XCTAssertEqual(custom.reason, Reason.split.rawValue)
+        XCTAssertTrue(firstClient.getBooleanValue(key: "snakeCaseAttribute", defaultValue: false))
         let identified = secondClient.getBooleanDetails(key: "identity", defaultValue: false)
         XCTAssertTrue(identified.value)
         XCTAssertEqual(identified.variant, "rollout")
         XCTAssertFalse(firstClient.getBooleanValue(key: "identity", defaultValue: true))
 
+        await first.setEvaluationContextAndWait(
+            evaluationContext: ImmutableContext(targetingKey: "first-subject"))
+        XCTAssertTrue(firstClient.getBooleanValue(key: "identity", defaultValue: false))
+        await first.setEvaluationContextAndWait(evaluationContext: ImmutableContext())
+        XCTAssertFalse(firstClient.getBooleanValue(key: "identity", defaultValue: true))
+
         firstProvider.dispose()
         firstProvider.dispose()
+        let disposed = firstClient.getBooleanDetails(key: "identity", defaultValue: true)
+        XCTAssertTrue(disposed.value)
+        XCTAssertEqual(disposed.errorCode, .providerNotReady)
         await first.clearProviderAndWait()
         let nativeValue = await native.getValue(forKey: "identity", defaultValue: false)
         XCTAssertTrue(nativeValue)
@@ -134,11 +146,78 @@ final class ProviderTests: XCTestCase {
         }
     }
 
+    func testFoundationNumbersKeepTheirOverrideTypes() async throws {
+        let source = CountedOverrides([
+            "integer": NSNumber(value: 1),
+            "double": NSNumber(value: 7.0),
+            "boolean": NSNumber(value: false),
+        ])
+        let native = nativeClient(overrides: .localOnly(source))
+        defer { native.close() }
+        let api = OpenFeatureAPI()
+        await api.setProviderAndWait(provider: try ConfeatureProvider(client: native))
+        let flags = api.getClient()
+        XCTAssertEqual(
+            flags.getBooleanDetails(key: "integer", defaultValue: false).errorCode, .typeMismatch)
+        XCTAssertEqual(
+            flags.getDoubleDetails(key: "integer", defaultValue: 42.5).errorCode, .typeMismatch)
+        XCTAssertEqual(
+            flags.getIntegerDetails(key: "double", defaultValue: 42).errorCode, .typeMismatch)
+        XCTAssertEqual(flags.getIntegerDetails(key: "integer", defaultValue: 42).value, 1)
+        XCTAssertEqual(flags.getDoubleDetails(key: "double", defaultValue: 42.5).value, 7.0)
+        XCTAssertFalse(flags.getBooleanDetails(key: "boolean", defaultValue: true).value)
+        XCTAssertEqual(source.reads, 6)
+        await api.clearProviderAndWait()
+    }
+
+    func testProviderErrorsAndEventsDoNotExposeNativeDataOrContext() async throws {
+        let native = nativeClient(
+            overrides: .fromConfig([
+                "f": ["malformed": ["t": 1, "v": ["not-a-string-slot": "private-body-sentinel"]]]
+            ]))
+        defer { native.close() }
+        var nativeEvaluations = 0
+        native.hooks.onFlagEvaluated { _ in nativeEvaluations += 1 }
+        let api = OpenFeatureAPI()
+        let provider = try ConfeatureProvider(client: native)
+        let ready = expectation(description: "Provider publishes one sanitized ready event")
+        let subscription = provider.observe().sink { event in
+            if case .ready(let details) = event {
+                XCTAssertNil(details)
+                ready.fulfill()
+            }
+        }
+        defer { subscription.cancel() }
+        let context = ImmutableContext(
+            targetingKey: "private-user-sentinel",
+            structure:
+                ImmutableStructure(attributes: ["private": .string("private-context-sentinel")]))
+        await api.setProviderAndWait(provider: provider, initialContext: context)
+        await fulfillment(of: [ready], timeout: 2)
+        let flags = api.getClient()
+        let missing = flags.getStringDetails(key: "private-key-sentinel", defaultValue: "fallback")
+        let malformed = flags.getStringDetails(key: "malformed", defaultValue: "fallback")
+        XCTAssertEqual(missing.errorCode, .flagNotFound)
+        XCTAssertEqual(malformed.errorCode, .general)
+        for result in [missing, malformed] {
+            XCTAssertEqual(result.value, "fallback")
+            XCTAssertFalse(result.errorMessage?.contains("private-") ?? true)
+        }
+        XCTAssertEqual(nativeEvaluations, 0)
+        let nativeResult = await native.getValueDetails(
+            forKey: "malformed", defaultValue: "fallback")
+        XCTAssertTrue(nativeResult.isDefaultValue)
+        XCTAssertEqual(nativeEvaluations, 1)
+        provider.dispose()
+        await api.clearProviderAndWait()
+    }
+
     private func targetingClient() throws -> ConfeatureClient {
         let config = #"""
             {"f":{
                 "identity":{"t":0,"v":{"b":false},"i":"base","p":[{"p":100,"v":{"b":true},"i":"rollout"}]},
                 "custom":{"t":0,"v":{"b":false},"i":"base","a":"plan","p":[{"p":100,"v":{"b":true},"i":"rollout"}]},
+                "snakeCaseAttribute":{"t":0,"v":{"b":false},"a":"targeting_key","p":[{"p":100,"v":{"b":true}}]},
                 "integer":{"t":2,"v":{"i":7},"i":"seven"},
                 "double":{"t":3,"v":{"d":0.5},"i":"half"},
                 "string":{"t":1,"v":{"s":"base"},"i":"base",
