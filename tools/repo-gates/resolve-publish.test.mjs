@@ -157,6 +157,7 @@ describe("the real publish table", () => {
       "shared",
       "openfeature-node",
       "openfeature-browser",
+      "openfeature-dotnet",
       "openfeature-java",
       "openfeature-kotlin",
     ].sort(byName);
@@ -204,6 +205,35 @@ describe("the real publish table", () => {
       version: PYTHON_VERSION,
       gate: "test",
       daggerFn: "python-test",
+    });
+  });
+
+  it("the .NET OpenFeature release requires the published base package", async () => {
+    const base = await resolvePublish({ root: ROOT, unit: "dotnet" });
+    const companion = await resolvePublish({ root: ROOT, unit: "openfeature-dotnet" });
+    const tag = `sdk-openfeature-dotnet-v${companion.version}`;
+    const expectBase = (present) => async (url, dependency) => {
+      expect(url).toBe(
+        `https://api.nuget.org/v3-flatcontainer/confeature.client/${base.version}/confeature.client.nuspec`,
+      );
+      expect(dependency).toMatchObject({
+        registry: "nuget",
+        coordinates: "Confeature.Client",
+        version: base.version,
+      });
+      return present;
+    };
+
+    await expect(
+      resolvePublish({ root: ROOT, tag, exists: expectBase(false), ...MAIN }),
+    ).rejects.toThrow(/must follow Confeature\.Client@.*not published yet/);
+    await expect(
+      resolvePublish({ root: ROOT, tag, exists: expectBase(true), ...MAIN }),
+    ).resolves.toMatchObject({
+      name: "openfeature-dotnet",
+      registry: "nuget",
+      coordinates: "Confeature.OpenFeature",
+      daggerFn: "dotnet-test",
     });
   });
 
