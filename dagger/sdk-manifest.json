@@ -382,6 +382,18 @@
       "after": []
     },
     {
+      "name": "openfeature-ruby",
+      "gate": "ruby",
+      "registry": "rubygems",
+      "coordinates": "confeature-openfeature",
+      "path": "apps/sdk-ruby-openfeature",
+      "versionSource": {
+        "file": "apps/sdk-ruby-openfeature/lib/confeature_openfeature/version.rb",
+        "pattern": "^  VERSION = \\\"([^\\\"]+)\\\"$"
+      },
+      "after": ["ruby"]
+    },
+    {
       "name": "dotnet",
       "gate": "dotnet",
       "registry": "nuget",

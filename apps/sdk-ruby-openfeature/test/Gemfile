@@ -1,0 +1,11 @@
+# frozen_string_literal: true
+
+# SPDX-License-Identifier: MIT
+
+source "https://rubygems.org"
+
+gem "base64", "0.3.0"
+gem "logger", "1.7.0"
+gem "minitest", "6.0.0"
+gem "openfeature-sdk", "0.8.1"
+gem "webmock", "3.26.2"

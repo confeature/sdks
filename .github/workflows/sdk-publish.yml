@@ -604,8 +604,8 @@ jobs:
       sha256: ${{ steps.digest.outputs.sha256 }}
       file: ${{ steps.digest.outputs.file }}
     env:
-      UNIT_PATH: ${{ needs.setup.outputs.path }}
       UNIT_VERSION: ${{ needs.setup.outputs.version }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -635,17 +635,30 @@ jobs:
       - name: Pack the release artifact
         working-directory: ${{ needs.setup.outputs.path }}
         run: |
+          case "$UNIT_COORDINATES" in
+            confeature|confeature-openfeature) ;;
+            *) echo "::error::unexpected RubyGems unit"; exit 1 ;;
+          esac
           mkdir -p "$RUNNER_TEMP/release"
-          gem build confeature.gemspec --output "$RUNNER_TEMP/release/confeature-${UNIT_VERSION}.gem"
+          gem build "${UNIT_COORDINATES}.gemspec" --output "$RUNNER_TEMP/release/${UNIT_COORDINATES}-${UNIT_VERSION}.gem"
 
       # The gem's own specification must name the resolved unit.
       - name: Check the artifact against the resolved unit
         run: |
-          gem="$RUNNER_TEMP/release/confeature-${UNIT_VERSION}.gem"
-          name="$(gem spec "$gem" name | sed -n 's/^--- //p')"
-          version="$(gem spec "$gem" version | sed -n 's/^version: //p')"
-          [ "$name" = "confeature" ] && [ "$version" = "$UNIT_VERSION" ] ||
-            { echo "::error::the gem is ${name} ${version}, not confeature ${UNIT_VERSION}"; exit 1; }
+          gem="$RUNNER_TEMP/release/${UNIT_COORDINATES}-${UNIT_VERSION}.gem"
+          ruby -rrubygems/package -e '
+            gem = Gem::Package.new(ARGV.fetch(0)).spec
+            expected_name = ENV.fetch("UNIT_COORDINATES")
+            unless [gem.name, gem.version.to_s] == [expected_name, ENV.fetch("UNIT_VERSION")]
+              abort "The packed gem does not match the resolved RubyGems unit."
+            end
+            if expected_name == "confeature-openfeature"
+              dependencies = gem.runtime_dependencies.to_h { |dependency| [dependency.name, dependency.requirement.to_s] }
+              unless dependencies == { "confeature" => "= 0.2.0", "openfeature-sdk" => "= 0.8.1" }
+                abort "The packed Ruby provider has unexpected dependencies."
+              end
+            end
+          ' "$gem"
 
       - name: Record the artifact digest
         id: digest

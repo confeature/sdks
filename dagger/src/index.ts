@@ -711,15 +711,26 @@ export class Confeature {
     return `${base.trim()}\n${proof.trim()} (Tier 2 phpTest)`;
   }
 
-  /** Run apps/sdk-ruby's `rake` default (rubocop + rspec) on Ruby 3.3. */
+  /** Verify the native Ruby 3.3 SDK and the packed Ruby 3.4 OpenFeature consumer. */
   @func()
   async rubyTest(source: Directory): Promise<string> {
     // The Rakefile's default task is rubocop + spec: the SDK's merge bar.
-    const result = await rubyToolchain(source)
+    const native = await rubyToolchain(source)
       .withExec(["bash", "-eu", "-c", "bundle install && bundle exec rake"])
       .stdout();
-    const lastLine = result.trim().split("\n").slice(-1)[0];
-    return `${lastLine} (Tier 2 rubyTest)`;
+    const consumer = await withNativeHarness(
+      dag
+        .container()
+        .from("ruby:3.4.9-bookworm")
+        .withEnvVariable("CI", "true")
+        .withMountedDirectory("/work", source),
+      source,
+    );
+    const packed = await consumer
+      .withWorkdir("/work/apps/sdk-ruby-openfeature")
+      .withExec(["bash", "test/run-packed.sh", `${HARNESS_DIR}/dist/cli.js`])
+      .stdout();
+    return `${native.trim()}\n${packed.trim()} (Tier 2 rubyTest)`;
   }
 
   /** Verify the Rust 1.86 base and the packed OpenFeature consumer on 1.88. */

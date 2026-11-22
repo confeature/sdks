@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0",
+  "keys": [
+    {
+      "sdkKey": "confeature-sdk-1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "etag": "\"ruby-provider\"",
+      "payload": {
+        "f": {
+          "identity": {
+            "t": 0,
+            "v": { "b": false },
+            "i": "baseline",
+            "p": [{ "p": 100, "v": { "b": true }, "i": "rollout" }]
+          }
+        }
+      }
+    }
+  ]
+}

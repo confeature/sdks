@@ -171,6 +171,13 @@ export function registryUrl(unit, version) {
   ) {
     return `https://proxy.golang.org/${unit.coordinates}/@v/v${version}.mod`;
   }
+  if (
+    unit.registry === "rubygems" &&
+    unit.coordinates === "confeature" &&
+    new RegExp(`^${SEMVER}$`).test(version)
+  ) {
+    return `https://rubygems.org/api/v2/rubygems/confeature/versions/${version}.json?platform=ruby`;
+  }
   return null;
 }
 
@@ -178,7 +185,9 @@ export function registryUrl(unit, version) {
 export async function httpExists(url, dependency, fetcher = fetch) {
   let res;
   let accept = "application/json";
-  if (dependency) accept = dependency.registry === "go" ? "text/plain" : "application/xml";
+  if (dependency?.registry === "go") accept = "text/plain";
+  if (dependency?.registry === "maven" || dependency?.registry === "nuget")
+    accept = "application/xml";
   try {
     res = await fetcher(url, {
       method: "GET",
@@ -194,6 +203,23 @@ export async function httpExists(url, dependency, fetcher = fetch) {
     if (dependency.registry === "go") {
       if (!declaresGoModule(manifest, dependency.coordinates))
         throw new Refusal(`${url} did not identify the expected Go module`);
+    } else if (dependency.registry === "rubygems") {
+      let version;
+      try {
+        version = JSON.parse(manifest);
+      } catch {
+        throw new Refusal(`${url} returned invalid RubyGems metadata`);
+      }
+      if (
+        version?.name !== dependency.coordinates ||
+        version.version !== dependency.version ||
+        version.platform !== "ruby" ||
+        version.yanked !== false ||
+        typeof version.sha !== "string" ||
+        !/^[0-9a-f]{64}$/.test(version.sha)
+      ) {
+        throw new Refusal(`${url} did not identify the expected active Ruby gem`);
+      }
     } else if (dependency.registry === "nuget") {
       const identity = readXmlIdentity(
         manifest,
@@ -216,20 +242,34 @@ export async function httpExists(url, dependency, fetcher = fetch) {
 }
 
 function prerequisiteVersion(unit, dependency, root) {
-  if (unit.path !== GO_OPENFEATURE_DIR || dependency.coordinates !== GO_SDK_MODULE)
-    return declaredVersion(dependency, root, undefined);
-  const path = `${GO_OPENFEATURE_DIR}/go.mod`;
-  let version;
+  const go = unit.path === GO_OPENFEATURE_DIR && dependency.coordinates === GO_SDK_MODULE;
+  const ruby = unit.name === "openfeature-ruby" && dependency.registry === "rubygems";
+  if (!go && !ruby) return declaredVersion(dependency, root, undefined);
+  const path = go
+    ? `${GO_OPENFEATURE_DIR}/go.mod`
+    : "apps/sdk-ruby-openfeature/confeature-openfeature.gemspec";
+  let text;
   try {
-    version = requiredGoSdkVersion(readFileSync(join(root, path), "utf8"));
+    text = readFileSync(join(root, path), "utf8");
   } catch (e) {
     throw new InputError(`unit "${unit.name}": cannot read ${path} (${e.code ?? e.message})`, {
       cause: e,
     });
   }
-  if (!new RegExp(`^${SEMVER}$`).test(version ?? ""))
-    throw new Refusal(`unit "${unit.name}": ${path} must require one version of ${GO_SDK_MODULE}`);
-  return version;
+  if (go) {
+    const version = requiredGoSdkVersion(text);
+    if (!new RegExp(`^${SEMVER}$`).test(version ?? ""))
+      throw new Refusal(
+        `unit "${unit.name}": ${path} must require one version of ${GO_SDK_MODULE}`,
+      );
+    return version;
+  }
+
+  const declarations = [...text.matchAll(/^  spec\.add_dependency "confeature", "([^"]+)"$/gm)];
+  const pin = declarations[0]?.[1];
+  if (declarations.length !== 1 || !new RegExp(`^= ${SEMVER}$`).test(pin))
+    throw new Refusal(`unit "${unit.name}": ${path} must pin one exact confeature gem version`);
+  return pin.slice(2);
 }
 
 async function verifyPrerequisites(unit, units, root, exists) {
@@ -243,7 +283,7 @@ async function verifyPrerequisites(unit, units, root, exists) {
       throw new Refusal(
         `unit "${unit.name}": cannot check "${name}" on registry ${dependency.registry}`,
       );
-    const identity = ["maven", "nuget", "go"].includes(dependency.registry)
+    const identity = ["maven", "nuget", "go", "rubygems"].includes(dependency.registry)
       ? { registry: dependency.registry, coordinates: dependency.coordinates, version }
       : undefined;
     if (!(await exists(url, identity)))

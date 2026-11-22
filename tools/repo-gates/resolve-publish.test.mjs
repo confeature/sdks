@@ -206,6 +206,7 @@ describe("the real publish table", () => {
       "openfeature-go",
       "openfeature-java",
       "openfeature-kotlin",
+      "openfeature-ruby",
     ].sort(byName);
     expect(units).toEqual(expected);
   });
@@ -532,6 +533,76 @@ describe("every refusal fails closed", () => {
       base,
     );
     return refused(root, { tag: "sdk-a-v1.2.3" }, /cannot check "b"/);
+  });
+  it("requires the exact packaged Ruby dependency on RubyGems", async () => {
+    const gemspec = "apps/sdk-ruby-openfeature/confeature-openfeature.gemspec";
+    const root = fixture(
+      [
+        unit({
+          name: "openfeature-ruby",
+          registry: "rubygems",
+          coordinates: "confeature-openfeature",
+          after: ["b"],
+        }),
+        unit({
+          name: "b",
+          registry: "rubygems",
+          coordinates: "confeature",
+          versionSource: { file: "b/v.txt", pattern: "^version=(\\S+)$" },
+        }),
+      ],
+      [covered()],
+      { ...base, [gemspec]: '  spec.add_dependency "confeature", "= 0.2.0"\n' },
+    );
+    const options = { root, tag: "sdk-openfeature-ruby-v1.2.3", ...MAIN };
+    const url = "https://rubygems.org/api/v2/rubygems/confeature/versions/0.2.0.json?platform=ruby";
+    const gem = {
+      name: "confeature",
+      version: "0.2.0",
+      platform: "ruby",
+      yanked: false,
+      sha: "a".repeat(64),
+    };
+    await expect(
+      resolvePublish({
+        ...options,
+        exists: async (target, identity) => {
+          expect(target).toBe(url);
+          return httpExists(target, identity, async (requested, request) => {
+            expect(requested).toBe(url);
+            expect(request).toEqual({
+              method: "GET",
+              headers: { accept: "application/json" },
+              redirect: "error",
+            });
+            return Response.json(gem);
+          });
+        },
+      }),
+    ).resolves.toMatchObject({ coordinates: "confeature-openfeature" });
+    await expect(resolvePublish({ ...options, exists: unpublished })).rejects.toThrow(
+      /confeature@0\.2\.0, which is not published yet/,
+    );
+    for (const metadata of [
+      { ...gem, version: "0.4.0" },
+      { ...gem, name: "unrelated" },
+      { ...gem, platform: "java" },
+      { ...gem, yanked: true },
+      { ...gem, sha: "invalid" },
+    ]) {
+      await expect(
+        httpExists(
+          url,
+          { coordinates: gem.name, registry: "rubygems", version: gem.version },
+          async () => Response.json(metadata),
+        ),
+      ).rejects.toThrow(/expected active Ruby gem/);
+    }
+
+    writeFileSync(join(root, gemspec), '  spec.add_dependency "confeature", "~> 0.2.0"\n');
+    await expect(resolvePublish({ ...options, exists: published })).rejects.toThrow(
+      /pin one exact confeature gem version/,
+    );
   });
   it("a commit that is not on main", () =>
     refused(
