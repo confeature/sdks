@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const root = resolve(directory, "../..");
-const cli = resolve(process.argv[2] ?? resolve(root, "tools/test-harness-live-contract/dist/cli.js"));
+const cli = resolve(
+  process.argv[2] ?? resolve(root, "tools/test-harness-live-contract/dist/cli.js"),
+);
 if (!existsSync(cli)) {
   console.error("Build the live-contract harness or pass its compiled CLI path.");
   process.exit(2);
