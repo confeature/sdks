@@ -55,7 +55,6 @@
     "sdk-publish.yml: pack-pubdev step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-pypi: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-rubygems step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
-    "sdk-publish.yml: pack-rubygems: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-swiftpm: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: publish-crates: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: publish-pubdev: needs.setup.outputs.path: job setup has no output path"
