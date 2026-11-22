@@ -349,8 +349,8 @@ export const PUBLISH_EXCEPTIONS = {
  * Rule 17 (round 8): every credentialed job's action surface, frozen exactly
  * the way PINNED_ENV freezes its env: the ordered list of its `uses:` steps,
  * each with its id and its exact `with:` keys and values. An action input is
- * a destination or a source: pypa's `repository-url`, configure-rubygems-
- * credentials' `gem-server`, crates-io-auth-action's `url` and NuGet/login's
+ * a destination or a source: pypa's `repository-url`, the RubyGems OIDC
+ * script's URL, crates-io-auth-action's `url` and NuGet/login's
  * `token-service-url` would send the OIDC exchange to another host; a
  * checkout's `repository:` or `ref:` would run other code beside the
  * credential; attest-build-provenance's `subject-name`/`subject-digest` would
@@ -369,7 +369,6 @@ export const PIN = {
   nugetLogin: "NuGet/login@8d196754b4036150537f80ac539e15c2f1028841",
   pnpm: "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
   pypiPublish: "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33",
-  rubygemsAuth: "rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a",
   setupDart: "dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d",
   setupDeno: "denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282",
   setupBeam: "erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124",
@@ -566,7 +565,14 @@ export const ACTION_SURFACE = {
       step(PIN.setupRuby, { with: { "ruby-version": "${{ env.RUBY_VERSION }}" } }),
       uploadRelease("release-rubygems", "*.gem"),
     ],
-    "publish-rubygems": [download("release-rubygems", "release"), step(PIN.rubygemsAuth)],
+    "publish-rubygems": [
+      download("release-rubygems", "release"),
+      step(PIN.githubScript, {
+        with: {
+          script: { sha256: "de1458446b6c20486841e7ee605985bb639526ed84317d83ca77217a29a031ee" },
+        },
+      }),
+    ],
     "pack-nuget": [
       shallowCheckout(),
       step(PIN.pnpm),
@@ -1280,7 +1286,9 @@ export const CREDENTIALED_COMMANDS = {
   gem: (a) =>
     a[0]?.text === "push"
       ? argsProblem("gem push", a.slice(1), {
+          options: { "--host": "=https://rubygems.org" },
           positional: "any",
+          require: ["--host"],
           check: (ops) =>
             ops.length === 1 && ops[0].text === UPLOADED
               ? null

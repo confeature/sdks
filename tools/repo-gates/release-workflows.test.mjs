@@ -9,6 +9,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ACTION_SURFACE,
@@ -86,6 +87,58 @@ afterAll(() => ROWS.finish());
 
 describe("the real release workflows", () => {
   it("have no finding", () => expect(all(BASE)).toEqual([]));
+});
+
+describe("the RubyGems OIDC exchange", () => {
+  const { script } = BASE[P].jobs["publish-rubygems"].steps.find(
+    (step) => step.name === "Exchange the OIDC token",
+  ).with;
+  const key = `rubygems_${"a".repeat(48)}`;
+
+  function exchange(response, calls) {
+    return runInNewContext(`(async () => { ${script} })()`, {
+      AbortSignal,
+      core: {
+        getIDToken(audience) {
+          expect(audience).toBe("rubygems.org");
+          return "synthetic-oidc-token";
+        },
+        setSecret(value) {
+          calls.push(["mask", value]);
+        },
+        exportVariable(name, value) {
+          calls.push([name, value]);
+        },
+      },
+      fetch(url, options) {
+        expect(url).toBe("https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token");
+        expect(options.method).toBe("POST");
+        expect(options.redirect).toBe("error");
+        expect(JSON.parse(options.body)).toEqual({
+          jwt: "synthetic-oidc-token",
+          owner: "254301",
+        });
+        return response;
+      },
+    });
+  }
+
+  it("asserts the owner and masks the short-lived key before exporting it", async () => {
+    const calls = [];
+    await exchange({ status: 201, json: async () => ({ rubygems_api_key: key }) }, calls);
+    expect(calls).toEqual([
+      ["mask", key],
+      ["GEM_HOST_API_KEY", key],
+    ]);
+  });
+
+  it.each([403, 201])("exports no key after HTTP %i with an invalid response", async (status) => {
+    const calls = [];
+    await expect(
+      exchange({ status, json: async () => ({ rubygems_api_key: "invalid\nKEY=value" }) }, calls),
+    ).rejects.toThrow(/^RubyGems OIDC exchange/);
+    expect(calls).toEqual([]);
+  });
 });
 
 describe("a credential leaves no job through curl or a file (round 5, HIGH)", () => {
@@ -608,7 +661,7 @@ describe("the reviewers' round-4 driver cases, each refused for its own reason",
       ],
       [
         "gem pushing another file",
-        s("publish-rubygems", { run: 'gem push "./release/x.gem"' }),
+        s("publish-rubygems", { run: 'gem push "./release/x.gem" --host https://rubygems.org' }),
         /gem push uploads only/,
       ],
       [
@@ -1253,16 +1306,27 @@ describe("17 every credentialed job's action surface is frozen (round 8)", () =>
       [
         "C2 rubygems gem-server to an attacker",
         (w) => {
-          const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...s.with, "gem-server": "https://attacker.example" };
+          const s = S(w, P_, "publish-rubygems", uses("actions/github-script"));
+          s.with.script = s.with.script.replace("https://rubygems.org", "https://attacker.example");
         },
         SURFACE,
       ],
       [
         "C2b rubygems audience override",
         (w) => {
-          const s = S(w, P_, "publish-rubygems", uses("rubygems/"));
-          s.with = { ...s.with, audience: "attacker.example" };
+          const s = S(w, P_, "publish-rubygems", uses("actions/github-script"));
+          s.with.script = s.with.script.replace(
+            'getIDToken("rubygems.org")',
+            'getIDToken("attacker.example")',
+          );
+        },
+        SURFACE,
+      ],
+      [
+        "C2c rubygems owner override",
+        (w) => {
+          const s = S(w, P_, "publish-rubygems", uses("actions/github-script"));
+          s.with.script = s.with.script.replace('owner: "254301"', 'owner: "1"');
         },
         SURFACE,
       ],

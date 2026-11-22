@@ -465,7 +465,7 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
     expect(existsSync(join(ws, "release/x-1.0.0.tgz"))).toBe(true);
   });
 
-  it("gem pushes ./release/<the pack job's file>", () => {
+  it("gem pushes ./release/<the pack job's file> to rubygems.org", () => {
     const ws = workspace({ "release/x-1.0.0.gem": "g" });
     const { r, argv } = upload({
       jobId: "publish-rubygems",
@@ -480,7 +480,7 @@ describe("the uploads hand each client exactly the resolved artifact", () => {
       stubs: { gem: RECORD("gem") },
     });
     expect(r.status, r.stderr).toBe(0);
-    expect(argv).toEqual(["gem push ./release/x-1.0.0.gem"]);
+    expect(argv).toEqual(["gem push ./release/x-1.0.0.gem --host https://rubygems.org"]);
     expect(existsSync(join(ws, "release/x-1.0.0.gem"))).toBe(true);
   });
 

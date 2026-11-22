@@ -183,7 +183,6 @@
     "pnpm/action-setup@*",
     "pypa/gh-action-pypi-publish@*",
     "ruby/setup-ruby@*",
-    "rubygems/configure-rubygems-credentials@*",
     "rust-lang/crates-io-auth-action@*"
   ],
   "releaseTags": {
