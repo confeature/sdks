@@ -508,6 +508,15 @@ public final class ConfeatureClient: NSObject, @unchecked Sendable {
 
     // MARK: - Internal
 
+    func providerSnapshot() -> (config: [String: Any]?, overrides: FlagOverrides?, closed: Bool) {
+        stateQueue.sync { (cachedBody, options.flagOverrides, closed) }
+    }
+
+    var supportsSynchronousProvider: Bool {
+        if case .lazyLoad = options.pollingMode { return isLocalOnly() }
+        return true
+    }
+
     private func isClosed() -> Bool {
         stateQueue.sync { closed }
     }

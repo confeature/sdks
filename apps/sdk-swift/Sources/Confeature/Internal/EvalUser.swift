@@ -16,13 +16,13 @@ import Foundation
 /// well-known attributes (`Identifier` / `Email` / `Country`) are read from
 /// the dedicated fields; any other name reads `custom`.
 struct EvalUser {
-    let identifier: String
+    let identifier: String?
     let email: String?
     let country: String?
     let custom: [String: Any]
 
     init(
-        identifier: String, email: String? = nil, country: String? = nil,
+        identifier: String?, email: String? = nil, country: String? = nil,
         custom: [String: Any] = [:]
     ) {
         self.identifier = identifier

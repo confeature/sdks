@@ -22,6 +22,12 @@ import Foundation
 ///   LocalOnly contract: never fall through). Branch 7 returns the
 ///   typed override value.
 enum OverrideEval {
+    enum SyncResult {
+        case unavailable
+        case failure(EvaluationErrorCode)
+        case value(Any)
+    }
+
     /// Walks the 7-branch decision tree.
     ///
     /// Algorithm — byte-identical to every other Confeature SDK port:
@@ -38,19 +44,31 @@ enum OverrideEval {
         key: String,
         defaultValue: Any?
     ) -> (found: Bool, value: Any?) {
+        switch evaluateSyncDetails(overrides: overrides, key: key, defaultValue: defaultValue) {
+        case .unavailable: return (false, nil)
+        case .failure: return (true, defaultValue)
+        case .value(let value): return (true, value)
+        }
+    }
+
+    static func evaluateSyncDetails(
+        overrides: FlagOverrides?,
+        key: String,
+        defaultValue: Any?
+    ) -> SyncResult {
         // Branch 1.
         guard let overrides else {
-            return (false, nil)
+            return .unavailable
         }
 
         // Branch 2.
         guard overrides.behaviour == .localOnly else {
-            return (false, nil)
+            return .unavailable
         }
 
         // Branch 3.
         guard let map = overrides.dataSource.getOverridesSync() else {
-            return (false, nil)
+            return .unavailable
         }
 
         // From here we are committed to the LocalOnly contract —
@@ -58,23 +76,23 @@ enum OverrideEval {
 
         // Branch 4.
         guard let raw = map[key] else {
-            return (true, defaultValue)
+            return .failure(.settingKeyMissing)
         }
 
         // Branch 5 — NSNull / empty.
         if raw is NSNull {
-            return (true, defaultValue)
+            return .failure(.invalidConfigModel)
         }
 
         // Branch 6 — type-mismatch check. A nil default bypasses
         // the check (matches the TS `defaultValue !== null`
         // semantics; nil in Swift is the equivalent sentinel).
         if let defaultValue, !sameKind(raw, defaultValue) {
-            return (true, defaultValue)
+            return .failure(.settingValueTypeMismatch)
         }
 
         // Branch 7 — happy path.
-        return (true, raw)
+        return .value(raw)
     }
 
     /// Shared override router — Swift port of the canonical TS
