@@ -29,8 +29,10 @@ func (c *Client) evaluateWithContext(
 	ctx context.Context, key string, fallback any, user *User,
 ) (value any, info evalInfo) {
 	hasIdentifier, provider := providercontext.Evaluation(ctx)
-	if provider && ctx.Err() != nil {
-		return fallback, cancelledProviderEvaluation(ctx.Err())
+	if provider {
+		if err := ctx.Err(); err != nil {
+			return fallback, cancelledProviderEvaluation(err)
+		}
 	}
 	if c.closed.Load() {
 		if !provider {
@@ -39,23 +41,27 @@ func (c *Client) evaluateWithContext(
 		return fallback, evalInfo{IsDefault: true, ClientClosed: true, OmitUser: provider}
 	}
 	if !provider {
+		defer func() { c.fireEvaluationHook(key, user, value, info) }()
 		user = c.resolveUser(user)
+		return c.resolveEvaluation(ctx, key, fallback, evaluationUser{user: user})
 	}
 
-	defer func() {
-		if provider && ctx.Err() != nil {
-			value, info = fallback, cancelledProviderEvaluation(ctx.Err())
-			return
-		}
-		info.OmitUser = provider
-		if c.hooks != nil && c.hooks.OnFlagEvaluated != nil {
-			c.hooks.fireFlagEvaluated(&EvaluationDetails{
-				Value: value,
-				Data:  c.buildDetailsData(key, user, info),
-			})
-		}
-	}()
-	return c.resolveEvaluation(ctx, key, fallback, evaluationUser{user, provider, hasIdentifier})
+	value, info = c.resolveEvaluation(ctx, key, fallback, evaluationUser{user, true, hasIdentifier})
+	if err := ctx.Err(); err != nil {
+		return fallback, cancelledProviderEvaluation(err)
+	}
+	info.OmitUser = true
+	c.fireEvaluationHook(key, user, value, info)
+	return value, info
+}
+
+func (c *Client) fireEvaluationHook(key string, user *User, value any, info evalInfo) {
+	if c.hooks != nil && c.hooks.OnFlagEvaluated != nil {
+		c.hooks.fireFlagEvaluated(&EvaluationDetails{
+			Value: value,
+			Data:  c.buildDetailsData(key, user, info),
+		})
+	}
 }
 
 func cancelledProviderEvaluation(err error) evalInfo {
@@ -80,8 +86,10 @@ func (c *Client) resolveEvaluation(
 	}
 
 	c.poll.MaybeFetchForGetValue(ctx)
-	if user.provider && ctx.Err() != nil {
-		return fallback, cancelledProviderEvaluation(ctx.Err())
+	if user.provider {
+		if err := ctx.Err(); err != nil {
+			return fallback, cancelledProviderEvaluation(err)
+		}
 	}
 	var configMap map[string]any
 	if current := c.config.Load(); current != nil {

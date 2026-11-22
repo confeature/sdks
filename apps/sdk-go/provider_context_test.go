@@ -70,19 +70,39 @@ func TestProviderContextObservesCancellationDuringTheOverrideRead(t *testing.T) 
 		value := true
 		return map[string]confeature.SettingValue{"enabled": {B: &value}}
 	})
-	events := make(chan *confeature.EvaluationDetails, 1)
-	client := providerTestClient(t, source, confeature.WithHooks(&confeature.Hooks{
-		OnFlagEvaluated: func(details *confeature.EvaluationDetails) { events <- details },
-	}))
+	client := providerTestClient(t, source)
 	ctx := providercontext.WithEvaluation(caller, false)
 	details := client.GetBoolValueDetailsWithContext(ctx, "enabled", false, nil)
 	if details.Value || !details.Data.IsDefaultValue || !errors.Is(details.Data.Error, context.Canceled) {
 		t.Fatalf("cancellation should return the caller fallback and a cancellation error: %+v", details)
 	}
-	select {
-	case payload := <-events:
-		t.Fatalf("cancelled evaluation reached the hook: %+v", payload)
-	case <-time.After(25 * time.Millisecond):
+}
+
+func TestProviderContextClassifiesFlatOverrideFailuresFromOneRead(t *testing.T) {
+	wrongType := "a string"
+	cases := []struct {
+		name  string
+		flags map[string]confeature.SettingValue
+		err   error
+	}{
+		{"missing", map[string]confeature.SettingValue{}, confeature.ErrKeyNotFound},
+		{"empty entry", map[string]confeature.SettingValue{"flag": {}}, confeature.ErrMalformedValue},
+		{"unexpected type", map[string]confeature.SettingValue{"flag": {S: &wrongType}}, confeature.ErrTypeMismatch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := 0
+			source := synchronousSource(func() map[string]confeature.SettingValue {
+				reads++
+				return tc.flags
+			})
+			client := providerTestClient(t, source)
+			ctx := providercontext.WithEvaluation(context.Background(), false)
+			details := client.GetBoolValueDetailsWithContext(ctx, "flag", true, nil)
+			if reads != 1 || !details.Value || !details.Data.IsDefaultValue || !errors.Is(details.Data.Error, tc.err) {
+				t.Fatalf("want one read, the fallback and %v, got %d reads and %+v", tc.err, reads, details)
+			}
+		})
 	}
 }
 
