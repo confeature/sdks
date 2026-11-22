@@ -165,6 +165,7 @@ const URL_DELEGATES_TO_SDK = new Set([
   "apps/sdk-node-openfeature",
   "apps/sdk-react",
   "apps/sdk-ruby-openfeature",
+  "apps/sdk-swift-openfeature",
 ]);
 
 function isScannedSource(path) {

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "keys": [
+    {
+      "sdkKey": "confeature-sdk-1-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "etag": "\"swift-provider\"",
+      "payload": {
+        "f": {
+          "loopback": { "t": 0, "v": { "b": true }, "i": "served" }
+        }
+      }
+    }
+  ]
+}
