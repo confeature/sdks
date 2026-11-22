@@ -45,4 +45,7 @@ ruby -rconfeature_openfeature -e '
   end
 '
 ruby "$tests/local_consumer_test.rb"
-node "$harness" --seed "$tests/http-seed.json" --exec -- ruby "$tests/http_consumer_test.rb"
+env -u CDN_ENTRY -u CDN_CONFIG -u CDN_BASE_URL -u CONFEATURE_LIVE -u LIVE_HARNESS_URL \
+  -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u NO_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy -u no_proxy -u NODE_USE_ENV_PROXY \
+  node "$harness" --seed "$tests/http-seed.json" --exec -- ruby "$tests/http_consumer_test.rb"

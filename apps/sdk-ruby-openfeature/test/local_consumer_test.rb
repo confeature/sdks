@@ -75,6 +75,35 @@ class LocalConsumerTest < Minitest::Test
     assert_equal [0.0, "FLAG_NOT_FOUND"], [result.value, result.error_code]
   end
 
+  def test_typed_integer_and_float_resolvers_return_native_variants
+    integer = @client.fetch_integer_details(flag_key: "integer", default_value: 0)
+    decimal = @client.fetch_float_details(flag_key: "decimal", default_value: 0.0)
+
+    assert_equal [2, "two", nil], [integer.value, integer.variant, integer.error_code]
+    assert_equal [0.5, "half", nil], [decimal.value, decimal.variant, decimal.error_code]
+    assert_equal 2, @native.details_calls
+  end
+
+  def test_string_targeting_uses_the_merged_api_transaction_client_and_invocation_context
+    @api.configure do |configuration|
+      configuration.evaluation_context = SDK::EvaluationContext.new(plan: "api", region: "eu")
+    end
+    @api.set_transaction_context_propagator(SDK::ThreadLocalTransactionContextPropagator.new)
+    @api.set_transaction_context(SDK::EvaluationContext.new(plan: "transaction", transport: "isolated"))
+    @client.evaluation_context = SDK::EvaluationContext.new(plan: "client", surface: "checkout")
+
+    context = SDK::EvaluationContext.new(plan: "invocation")
+    targeted = @client.fetch_string_details(flag_key: "text", default_value: "fallback", evaluation_context: context)
+    baseline = @client.fetch_string_details(flag_key: "text", default_value: "fallback")
+
+    assert_equal ["example", "text-variant", "TARGETING_MATCH", nil],
+                 [targeted.value, targeted.variant, targeted.reason, targeted.error_code]
+    assert_equal ["original", "text-baseline", nil], [baseline.value, baseline.variant, baseline.error_code]
+    assert_equal 2, @native.details_calls
+  ensure
+    @api.set_transaction_context(nil)
+  end
+
   def test_object_returns_fallback_without_a_native_call
     fallback = { "value" => true }
     result = @client.fetch_object_details(flag_key: "integer", default_value: fallback)
@@ -97,10 +126,16 @@ class LocalConsumerTest < Minitest::Test
       "t" => 0, "v" => { "b" => false }, "i" => "baseline",
       "p" => [{ "p" => 100, "v" => { "b" => true }, "i" => "rolled" }]
     }
+    text_conditions = { "plan" => "invocation", "region" => "eu", "transport" => "isolated", "surface" => "checkout" }
+                      .map { |name, value| { "u" => { "a" => name, "c" => 28, "s" => value } } }
     {
       "f" => {
         "identity" => split,
         "custom" => split.merge("a" => "plan"),
+        "text" => {
+          "t" => 1, "v" => { "s" => "original" }, "i" => "text-baseline",
+          "r" => [{ "c" => text_conditions, "s" => { "v" => { "s" => "example" }, "i" => "text-variant" } }]
+        },
         "integer" => { "t" => 2, "v" => { "i" => 2 }, "i" => "two" },
         "decimal" => { "t" => 3, "v" => { "d" => 0.5 }, "i" => "half" }
       }
