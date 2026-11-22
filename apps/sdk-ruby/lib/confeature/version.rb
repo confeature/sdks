@@ -7,5 +7,5 @@ module Confeature
   # `version` field on the gemspec. The major version tracks the
   # Confeature API contract major version this SDK implements
   # (Constitution Principle VI).
-  VERSION = "0.1.1"
+  VERSION = "0.2.0"
 end

@@ -10,6 +10,7 @@ require_relative "segments"
 require_relative "prerequisites"
 require_relative "eval_log"
 require_relative "eval_logger"
+require_relative "provider_user"
 
 module Confeature
   module Internal
@@ -414,12 +415,8 @@ module Confeature
         end
 
         attr_name = ctx.setting["a"]
-        if attr_name.nil?
-          attr_name = IDENTIFIER_ATTRIBUTE
-          attr_value = user_identifier(ctx.user)
-        else
-          attr_value = get_user_attribute(ctx.user, attr_name)
-        end
+        attr_name = IDENTIFIER_ATTRIBUTE if attr_name.nil?
+        attr_value = get_user_attribute(ctx.user, attr_name)
         if attr_value.nil?
           ctx.state.eval_error ||= missing_user_attribute_error(attr_name)
           ctx.log.user_object_attribute_is_missing_for_percentage(ctx.key, attr_name)
@@ -855,7 +852,10 @@ module Confeature
 
       def user_identifier(user)
         id = user.identifier
-        id.nil? ? "" : id
+        case user
+        when ProviderUser then id
+        else id.nil? ? "" : id
+        end
       end
 
       def boolean?(value)

@@ -5,6 +5,7 @@
 require_relative "evaluation_details"
 require_relative "internal/evaluator"
 require_relative "internal/override_eval"
+require_relative "internal/provider_evaluation"
 
 module Confeature
   # Immutable view of the last-fetched config + a reference to overrides.
@@ -72,10 +73,28 @@ module Confeature
     # `EvaluationResult.error` string propagates verbatim into the
     # envelope's `error` field.
     def get_value_details(key, default, user = nil)
-      effective_user = user || @default_user
-      return local_only_details(key, default, effective_user) if local_only?
+      case user
+      when Internal::ProviderUser
+        provider_details(key, default, user)
+      else
+        effective_user = user || @default_user
+        return local_only_details(key, default, effective_user) if local_only?
 
-      result = Internal::Evaluator.evaluate(@config, key, default, effective_user)
+        result = Internal::Evaluator.evaluate(@config, key, default, effective_user)
+        details_from_result(key, result, effective_user)
+      end
+    end
+
+    private
+
+    def provider_details(key, default, user)
+      result = Internal::ProviderEvaluation.resolve(
+        key, default, user, config: @config, local_overrides: (local_only? ? @flag_overrides : nil)
+      )
+      details_from_result(key, result, nil)
+    end
+
+    def details_from_result(key, result, effective_user)
       matched_rule = result.matched_targeting_rule && TargetingRule.new(result.matched_targeting_rule)
       matched_option = result.matched_percentage_option && PercentageOption.new(result.matched_percentage_option)
       EvaluationDetails.new(
@@ -90,8 +109,6 @@ module Confeature
         matched_percentage_option: matched_option
       )
     end
-
-    private
 
     def local_only?
       return false if @flag_overrides.nil?
@@ -108,21 +125,7 @@ module Confeature
       found_full, result = Internal::OverrideEval.evaluate_full_config_override_details_sync(
         @flag_overrides, key, default, effective_user
       )
-      if found_full
-        matched_rule = result.matched_targeting_rule && TargetingRule.new(result.matched_targeting_rule)
-        matched_option = result.matched_percentage_option && PercentageOption.new(result.matched_percentage_option)
-        return EvaluationDetails.new(
-          key: key,
-          value: result.value,
-          variation_id: result.variation_id,
-          user: effective_user,
-          is_default_value: !result.error.nil?,
-          error: result.error,
-          fetch_time: @fetch_time,
-          matched_targeting_rule: matched_rule,
-          matched_percentage_option: matched_option
-        )
-      end
+      return details_from_result(key, result, effective_user) if found_full
 
       found, value = Internal::OverrideEval.evaluate_sync(@flag_overrides, key, default)
       data_source = @flag_overrides.data_source

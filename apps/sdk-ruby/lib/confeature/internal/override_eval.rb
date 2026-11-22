@@ -31,6 +31,12 @@ module Confeature
       module_function
 
       def evaluate_sync(flag_overrides, key, default_value)
+        outcome = evaluate_sync_details(flag_overrides, key, default_value)
+        outcome.pop if outcome.length > 2
+        outcome
+      end
+
+      def evaluate_sync_details(flag_overrides, key, default_value)
         # Branch 1: no overrides configured → caller falls through.
         return [false, nil] if flag_overrides.nil?
 
@@ -51,11 +57,11 @@ module Confeature
 
         # Branch 4: key absent → return default.
         raw = overrides_map[key]
-        return [true, default_value] if raw.nil?
+        return [true, default_value, "KEY_NOT_FOUND"] if raw.nil?
 
         # Branch 5: override slot empty → return default.
         candidate = raw.picked
-        return [true, default_value] if candidate.nil?
+        return [true, default_value, "MALFORMED_VALUE"] if candidate.nil?
 
         # Branch 6: TYPE_MISMATCH — primitive types diverge → return default.
         # A `nil` default_value intentionally bypasses the check (matches
@@ -66,7 +72,7 @@ module Confeature
         # mismatch.
         if !default_value.nil? && !boolean_kind_match?(candidate, default_value) &&
            candidate.class != default_value.class
-          return [true, default_value]
+          return [true, default_value, "TYPE_MISMATCH"]
         end
 
         # Branch 7: happy path — typed override value.

@@ -11,11 +11,9 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "Ruby SDK for Confeature — drop-in compatible with ConfigCat's configcat gem."
   spec.description   = <<~DESC
-    Confeature is an open-source feature-flag service that mirrors the ConfigCat
-    API surface 1:1 (Constitution Principle II). The `confeature` gem is the
-    Ruby SDK: same public class names, same option keywords, same polling
-    modes, same flag-override semantics as `configcat`. Migrate by renaming the
-    gem and swapping the SDK key.
+    The `confeature` gem is the MIT-licensed Ruby SDK for Confeature's
+    feature-flag service. It supports ConfigCat-style evaluation, polling
+    and flag overrides.
   DESC
   spec.homepage      = "https://confeature.io"
   spec.license       = "MIT"
