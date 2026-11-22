@@ -22,23 +22,23 @@ import Foundation
 ///   - Build metadata ignored for precedence.
 struct SemVer {
     let canonical: String
-    let major: Int
-    let minor: Int
-    let patch: Int
-    /// Pre-release identifiers; numeric ids carry their `Int`, else `String`.
+    let major: Int64
+    let minor: Int64
+    let patch: Int64
+    /// Pre-release identifiers; numeric ids carry their `Int64`, else `String`.
     let prerelease: [Identifier]
     /// Build-metadata identifiers (ignored for precedence).
     let build: [String]
 
     /// A pre-release / core identifier: numeric or alphanumeric.
     enum Identifier: Equatable {
-        case number(Int)
+        case number(Int64)
         case text(String)
     }
 
     private static let maxLength = 256
-    // Mirrors common-js `Number.MAX_SAFE_INTEGER`.
-    private static let maxSafeInteger = 9_007_199_254_740_991
+    // Mirrors common-js `Number.MAX_SAFE_INTEGER` on 32-bit targets as well.
+    private static let maxSafeInteger: Int64 = 9_007_199_254_740_991
 
     // MAJOR.MINOR.PATCH where each core component is `0|[1-9]\d*`, an optional
     // leading `v`, an optional `-prerelease`, an optional `+build`.
@@ -79,7 +79,7 @@ struct SemVer {
 
         guard
             let majStr = group(1), let minStr = group(2), let patStr = group(3),
-            let major = Int(majStr), let minor = Int(minStr), let patch = Int(patStr)
+            let major = Int64(majStr), let minor = Int64(minStr), let patch = Int64(patStr)
         else { return nil }
         if major < 0 || major > maxSafeInteger || minor < 0 || minor > maxSafeInteger
             || patch < 0 || patch > maxSafeInteger
@@ -90,7 +90,7 @@ struct SemVer {
         var prerelease: [Identifier] = []
         if let pre = group(4) {
             for id in pre.split(separator: ".", omittingEmptySubsequences: false).map(String.init) {
-                if isNumericIdentifier(id), let num = Int(id), num >= 0, num < maxSafeInteger {
+                if isNumericIdentifier(id), let num = Int64(id), num >= 0, num < maxSafeInteger {
                     prerelease.append(.number(num))
                 } else {
                     prerelease.append(.text(id))
@@ -186,10 +186,10 @@ struct SemVer {
         return astr < bstr ? -1 : 1
     }
 
-    private static func numericValue(_ id: Identifier) -> Int {
+    private static func numericValue(_ id: Identifier) -> Int64 {
         switch id {
         case .number(let n): return n
-        case .text(let s): return Int(s) ?? 0
+        case .text(let s): return Int64(s) ?? 0
         }
     }
 
