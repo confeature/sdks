@@ -92,53 +92,6 @@ type Result struct {
 // default on the first malformed slot (resilient to forward-compat JSON drift).
 type Config = map[string]any
 
-// User is the evaluator-internal targeting context. The public confeature.User
-// (string-only custom map) is adapted into this richer shape at the entry, so
-// the corpus's typed-attribute conversion cases can be exercised faithfully
-// while the public SDK surface stays unchanged.
-type User struct {
-	Identifier string
-	Email      string
-	Country    string
-	// Custom carries ConfigCat's UserAttributeValue family (string / number /
-	// bool / []string). The matrices feed strings; the conversion driver feeds
-	// typed values.
-	Custom map[string]any
-}
-
-const (
-	identifierAttribute = "Identifier"
-	emailAttribute      = "Email"
-	countryAttribute    = "Country"
-)
-
-// getUserAttribute reads a well-known or custom attribute. Mirrors
-// user.ts::getUserAttribute: Identifier → identifier ?? ""; Email → email;
-// Country → country; else custom[name]. Returns (value, present).
-func getUserAttribute(user *User, name string) (any, bool) {
-	switch name {
-	case identifierAttribute:
-		return user.Identifier, true
-	case emailAttribute:
-		if user.Email == "" {
-			return nil, false
-		}
-		return user.Email, true
-	case countryAttribute:
-		if user.Country == "" {
-			return nil, false
-		}
-		return user.Country, true
-	default:
-		if user.Custom != nil {
-			if v, ok := user.Custom[name]; ok {
-				return v, true
-			}
-		}
-		return nil, false
-	}
-}
-
 // settingResult is the raw result of evaluateSetting: the resolved v envelope +
 // matched-rule/option identity, fed into the typed guards + value select.
 type settingResult struct {
@@ -545,27 +498,12 @@ func evaluatePercentageOptions(
 		return settingResult{}, false, nil
 	}
 
-	var attrName string
-	var attrValue any
+	attrName := identifierAttribute
 	if a, ok := ctx.setting["a"].(string); ok && a != "" {
 		attrName = a
-		v, present := getUserAttribute(ctx.user, attrName)
-		if !present {
-			if ctx.state.evalError == "" {
-				ctx.state.evalError = missingUserAttributeError(attrName)
-			}
-			ctx.log.userObjectAttributeIsMissingForPercentage(ctx.key, attrName)
-			if lb != nil {
-				lb.newLine("Skipping % options because the User." + attrName + " attribute is missing.")
-			}
-			return settingResult{}, false, nil
-		}
-		attrValue = v
-	} else {
-		attrName = identifierAttribute
-		attrValue = ctx.user.Identifier
 	}
-	if attrValue == nil {
+	attrValue, present := getUserAttribute(ctx.user, attrName)
+	if !present || attrValue == nil {
 		if ctx.state.evalError == "" {
 			ctx.state.evalError = missingUserAttributeError(attrName)
 		}

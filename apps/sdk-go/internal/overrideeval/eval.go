@@ -71,23 +71,30 @@ type Overrides struct {
 // nil default bypasses the type check (matches configcat-js's
 // `defaultValue !== null` ternary).
 func EvaluateSync(fo *Overrides, key string, defaultValue any) (any, bool) {
+	value, ok, _ := EvaluateSyncDetails(fo, key, defaultValue)
+	return value, ok
+}
+
+// EvaluateSyncDetails also reports the outcome of the original synchronous
+// read. A valid value may equal the caller's default.
+func EvaluateSyncDetails(fo *Overrides, key string, defaultValue any) (any, bool, string) {
 	// Branch 1: no overrides configured → caller falls through.
 	if fo == nil {
-		return nil, false
+		return nil, false, ""
 	}
 
 	// Branch 2: non-LocalOnly behaviours short-circuit (spec 031 §R8).
 	if fo.Behaviour != BehaviourLocalOnly {
-		return nil, false
+		return nil, false, ""
 	}
 
 	// Branch 3: no synchronous data source or nil map → fall through.
 	if fo.DataSource == nil {
-		return nil, false
+		return nil, false, ""
 	}
 	m := fo.DataSource.GetOverridesSync()
 	if m == nil {
-		return nil, false
+		return nil, false, ""
 	}
 
 	// From here we are committed to the LocalOnly contract: NEVER fall
@@ -96,27 +103,25 @@ func EvaluateSync(fo *Overrides, key string, defaultValue any) (any, bool) {
 	// Branch 4: key absent → return default.
 	raw, ok := m[key]
 	if !ok {
-		return defaultValue, true
+		return defaultValue, true, "KEY_NOT_FOUND"
 	}
 
 	// Branch 5: override slot empty → return default.
 	candidate := pickCandidate(raw)
 	if candidate == nil {
-		return defaultValue, true
+		return defaultValue, true, "MALFORMED_VALUE"
 	}
 
 	// Branch 6: TYPE_MISMATCH — primitive types diverge → return default.
 	// A nil defaultValue intentionally bypasses the check (matches
 	// the TS `defaultValue !== null` semantics; nil in Go is the
 	// equivalent sentinel).
-	if defaultValue != nil {
-		if reflect.TypeOf(candidate) != reflect.TypeOf(defaultValue) {
-			return defaultValue, true
-		}
+	if defaultValue != nil && reflect.TypeOf(candidate) != reflect.TypeOf(defaultValue) {
+		return defaultValue, true, "TYPE_MISMATCH"
 	}
 
 	// Branch 7: happy path — typed override value.
-	return candidate, true
+	return candidate, true, ""
 }
 
 // pickCandidate returns the first non-nil slot of a SettingValue.

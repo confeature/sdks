@@ -268,125 +268,13 @@ func (c *Client) GetValueWithContext(
 	return value
 }
 
-// evaluateWithContext is the shared internal resolver used by GetValue,
-// the typed getters, and the typed *ValueDetails accessors. It returns
-// the resolved value plus the evaluator's diagnostic envelope:
-//
-//   - value is the cached typed value on the happy path, otherwise the
-//     supplied defaultValue.
-//   - errCode is the evaluator's string error code ("" on happy path,
-//     "KEY_NOT_FOUND" / "TYPE_MISMATCH" / ... otherwise). Bridged to
-//     a Go error via errorFromCode at the typed-details boundary.
-//   - isDefault is true on every failure branch (and on a closed
-//     client) — fed to EvaluationDetailsData.IsDefaultValue.
-//   - variationID is currently always "" — v1 ships no variation IDs.
-//   - errClosed is true when the client was closed and the call was
-//     served defaults; bridged to ErrClientClosed.
-func (c *Client) evaluateWithContext(
-	ctx context.Context,
-	key string,
-	defaultValue any,
-	user *User,
-) (value any, info evalInfo) {
-	if c.closed.Load() {
-		c.logger.Warning(
-			"GetValue called after Close",
-			"sdkKey", sdkkey.RedactSdkKey(c.sdkKey),
-			"key", key,
-		)
-		info.IsDefault = true
-		info.ClientClosed = true
-		return defaultValue, info
-	}
-
-	// OnFlagEvaluated fires for every evaluation that produces an
-	// EvaluationDetails — mirrors upstream snapshot.go's
-	// `go snap.hooks.OnFlagEvaluated(...)`. A deferred fire keeps the
-	// single emission point correct across all the result-producing
-	// return branches below (override full-config, override sync,
-	// cache-driven). The closed-client guard above returns first and is
-	// NOT an evaluation, so it does not fire. effectiveUser captures the
-	// user actually used (post default-user fallback) for the details.
-	var effectiveUser *User
-	defer func() {
-		if c.hooks == nil || c.hooks.OnFlagEvaluated == nil {
-			return
-		}
-		c.hooks.fireFlagEvaluated(&EvaluationDetails{
-			Value: value,
-			Data:  c.buildDetailsData(key, effectiveUser, info),
-		})
-	}()
-	effectiveUser = c.resolveUser(user)
-
-	// Override path FIRST (spec-036 correctness inherited from day one).
-	if c.flagOverrides != nil {
-		// Full-config override source (spec 135 / #433): route the FULL
-		// {p, f, s} config through the real evaluator so targeting rules /
-		// segments / prerequisites / percentage options resolve offline. The
-		// flat-map / custom source keeps the byte-identical EvaluateSync path.
-		if src, isFull := fullConfigSource(c.flagOverrides); isFull {
-			r := evaluator.EvaluateForUser(
-				src.Config(), key, defaultValue, toEvalUser(c.resolveUser(user)),
-			)
-			info.ErrorCode = r.Error
-			info.VariationID = r.VariationID
-			info.IsDefault = r.Error != ""
-			info.MatchedTargetingRule = r.MatchedTargetingRule
-			info.MatchedPercentageOption = r.MatchedPercentageOption
-			return r.Value, info
-		}
-		if v, ok := overrideeval.EvaluateSync(
-			c.overrideInternal(),
-			key,
-			defaultValue,
-		); ok {
-			// Override-eval surfaces either the typed override candidate
-			// (happy path — Branch 7) or the supplied default (Branches
-			// 4-6: LocalOnly contract). For the typed *ValueDetails
-			// path we need to distinguish the two and surface an
-			// evaluator-equivalent error code on the default branches.
-			info.ErrorCode = classifyOverrideOutcome(
-				c.overrideInternal(), key, defaultValue, v,
-			)
-			info.IsDefault = info.ErrorCode != ""
-			return v, info
-		}
-		// Non-LocalOnly behaviours: log the deferral and fall back to
-		// default. Mirrors the Python deferral pattern.
-		if c.flagOverrides.Behaviour != LocalOnly {
-			c.logger.Warning(
-				"override behaviour not implemented",
-				"sdkKey", sdkkey.RedactSdkKey(c.sdkKey),
-				"behaviour", c.flagOverrides.Behaviour.String(),
-				"err", ErrOverrideBehaviourNotImplemented.Error(),
-			)
-		}
-	}
-
-	// LazyLoad: trigger an on-demand fetch if stale.
-	c.poll.MaybeFetchForGetValue(ctx)
-
-	// Cache-driven evaluation.
-	var configMap map[string]any
-	if p := c.config.Load(); p != nil {
-		configMap = *p
-	}
-	user = c.resolveUser(user)
-	r := evaluator.EvaluateForUser(configMap, key, defaultValue, toEvalUser(user))
-	info.ErrorCode = r.Error
-	info.VariationID = r.VariationID
-	info.IsDefault = r.Error != ""
-	info.MatchedTargetingRule = r.MatchedTargetingRule
-	info.MatchedPercentageOption = r.MatchedPercentageOption
-	return r.Value, info
-}
-
 // evalInfo is the internal diagnostic envelope produced by
 // evaluateWithContext. Consumed by GetValue (drops it),
 // Get<T>Value (drops it), and Get<T>ValueDetails (maps it onto
 // EvaluationDetailsData).
 type evalInfo struct {
+	OmitUser                bool
+	ContextError            error
 	ErrorCode               string
 	VariationID             string
 	IsDefault               bool
@@ -757,12 +645,17 @@ func (c *Client) GetFloatValueDetailsWithContext(
 func (c *Client) buildDetailsData(
 	key string, user *User, info evalInfo,
 ) EvaluationDetailsData {
+	if info.OmitUser {
+		user = nil
+	}
 	var fetchTime time.Time
 	if p := c.fetchTime.Load(); p != nil {
 		fetchTime = *p
 	}
 	var err error
-	if info.ClientClosed {
+	if info.ContextError != nil {
+		err = info.ContextError
+	} else if info.ClientClosed {
 		err = ErrClientClosed
 	} else {
 		err = errorFromCode(info.ErrorCode)
