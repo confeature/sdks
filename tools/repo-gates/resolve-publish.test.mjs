@@ -30,6 +30,10 @@ const PYTHON_VERSION = /^version = "([^"]+)"$/m.exec(
 )?.[1];
 if (!PYTHON_VERSION) throw new Error("Expected a declared Python version in pyproject.toml");
 const PYTHON_TAG = `sdk-python-v${PYTHON_VERSION}`;
+const GO_VERSION = /^const Version = "([^"]+)"$/m.exec(
+  readFileSync(join(ROOT, "apps/sdk-go/version.go"), "utf8"),
+)?.[1];
+if (!GO_VERSION) throw new Error("Expected a declared Go version in version.go");
 const published = async () => true;
 const MAIN = { mainRef: "origin/main", isOnMain: () => true };
 const unpublished = async () => false;
@@ -237,16 +241,27 @@ describe("the real publish table", () => {
     });
   });
 
-  it("Go's release tag and the mirrors' tags are filled from the unit", async () => {
-    expect((await resolvePublish({ root: ROOT, tag: "sdk-go-v0.1.1", ...MAIN })).releaseTag).toBe(
-      "apps/sdk-go/v0.1.1",
-    );
+  it("the mirror's tags are filled from its unit", async () => {
     const php = await resolvePublish({ root: ROOT, tag: "sdk-php-v0.1.0", ...MAIN });
     expect(php).toMatchObject({
       mirrorRepository: "confeature/confeature-php-sdk",
       mirrorTag: "v0.1.0",
     });
   });
+});
+
+it("resolves the base Go release from its source declaration", async () => {
+  const go = await resolvePublish({ root: ROOT, tag: `sdk-go-v${GO_VERSION}`, ...MAIN });
+  expect(go).toMatchObject({
+    name: "go",
+    path: "apps/sdk-go",
+    version: GO_VERSION,
+    releaseTag: `apps/sdk-go/v${GO_VERSION}`,
+  });
+  const other = GO_VERSION === "0.0.0" ? "0.0.1" : "0.0.0";
+  await expect(resolvePublish({ root: ROOT, tag: `sdk-go-v${other}`, ...MAIN })).rejects.toThrow(
+    /tag version .* differs from the .* that go declares/,
+  );
 });
 
 describe("tagFormat", () => {
