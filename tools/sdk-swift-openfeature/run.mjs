@@ -14,9 +14,14 @@ if (!existsSync(cli)) {
   console.error("Build the live-contract harness or pass its compiled CLI path.");
   process.exit(2);
 }
-const packagePath = resolve(
-  process.env.SWIFT_OPENFEATURE_PACKAGE_PATH ?? resolve(root, "apps/sdk-swift-openfeature"),
-);
+const preparedPackage = process.env.SWIFT_OPENFEATURE_PACKAGE_PATH;
+const packagePath = resolve(preparedPackage ?? resolve(root, "apps/sdk-swift-openfeature"));
+const suitePaths = preparedPackage
+  ? ["config", "cache", "security"].flatMap((storage) => [
+      `--${storage}-path`,
+      resolve(packagePath, ".swiftpm", `native-${storage}`),
+    ])
+  : [];
 const env = { ...process.env };
 for (const key of [
   "CDN_ENTRY",
@@ -43,6 +48,8 @@ const result = spawnSync(
     "test",
     "--package-path",
     packagePath,
+    ...suitePaths,
+    "--force-resolved-versions",
     "--skip-build",
     "--filter",
     "LoopbackTests",

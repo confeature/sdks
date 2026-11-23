@@ -118,6 +118,13 @@ it.each([
   ["loopback after upload", (steps) => steps.push(takeRun(steps, LIVE))],
   ["harness before native precheck", (steps) => steps.unshift(takeRun(steps, HARNESS))],
   [
+    "consumer build that can re-resolve",
+    (steps) => {
+      const build = steps.find((step) => step.run?.startsWith("xcrun swift build "));
+      build.run = build.run.replace(" --force-resolved-versions", "");
+    },
+  ],
+  [
     "missing public pin check",
     (steps) =>
       takeRun(
@@ -187,7 +194,12 @@ it.each([
     const cli = join(folder, "fake-harness.mjs");
     writeFileSync(
       cli,
-      `if (!process.argv.includes(process.env.SWIFT_OPENFEATURE_PACKAGE_PATH)) process.exit(2);
+      `const path = process.env.SWIFT_OPENFEATURE_PACKAGE_PATH;
+const expected = [path, "--skip-build", "--force-resolved-versions"];
+for (const storage of ["config", "cache", "security"]) {
+  expected.push("--" + storage + "-path", path + "/.swiftpm/native-" + storage);
+}
+if (!expected.every((part) => process.argv.includes(part))) process.exit(2);
 console.log(${JSON.stringify(log)});`,
     );
     const result = spawnSync(

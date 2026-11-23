@@ -1597,7 +1597,7 @@ jobs:
       - name: Check the companion's public dependencies
         run: node tools/sdk-pack/check-swiftpm-resolved.mjs "$RUNNER_TEMP/consume/consumer/Package.resolved"
       - name: Build the companion's consumer (no credentials)
-        run: xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer"
+        run: xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer" --force-resolved-versions
 
       - name: Hand the artifact to the publish job
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

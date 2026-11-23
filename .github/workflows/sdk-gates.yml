@@ -220,21 +220,19 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Build, test and lint (scripts/swift-precheck.sh)
-        run: bash scripts/swift-precheck.sh
-
-      # The harness's toolchain, as verify.yml sets it up: pnpm, the pinned
-      # Node, the workspace from the frozen lockfile (wrangler and its darwin
-      # workerd), and the harness's dist/, which every runner starts.
-      - name: Setup pnpm
-        if: matrix.sdk.live
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-
       - name: Setup Node.js
-        if: matrix.sdk.live
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build, test and lint (scripts/swift-precheck.sh)
+        run: bash scripts/swift-precheck.sh
+
+      # The live harness adds pnpm, the workspace from the frozen lockfile
+      # (including the Darwin workerd) and the build every live runner starts.
+      - name: Setup pnpm
+        if: matrix.sdk.live
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Install the workspace
         if: matrix.sdk.live

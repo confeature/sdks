@@ -103,7 +103,7 @@ const swiftpmPackRuns = [
   SWIFT_OPENFEATURE_LIVE_RUN,
   "bash tools/sdk-pack/check-swiftpm-consumer.sh openfeature",
   'node tools/sdk-pack/check-swiftpm-resolved.mjs "$RUNNER_TEMP/consume/consumer/Package.resolved"',
-  'xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer"',
+  'xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer" --force-resolved-versions',
 ];
 
 // Distinct steps make Xcode and the compiled test package from GITHUB_ENV

@@ -23,11 +23,18 @@ const expected = new Map([
 
 // The provider graph must resolve to public packages. In particular, the base
 // SDK's ConfigCat conformance dependency belongs to its own tests.
-export function checkSwiftPMResolved({ pins }) {
-  if (!Array.isArray(pins) || pins.length !== expected.size)
-    throw new Error("Expected only the Confeature, OpenFeature and SwiftLog package pins");
+export function checkSwiftPMResolved({ pins }, { native = false } = {}) {
+  // The native suite uses a local base mirror. The official pin is identical in both modes.
+  const checkedPins =
+    native && Array.isArray(pins) ? pins.filter((pin) => pin?.identity === "swift-sdk") : pins;
+  if (!Array.isArray(checkedPins) || checkedPins.length !== (native ? 1 : expected.size))
+    throw new Error(
+      native
+        ? "Expected one official OpenFeature package pin"
+        : "Expected only the Confeature, OpenFeature and SwiftLog package pins",
+    );
   const seen = new Set();
-  for (const pin of pins) {
+  for (const pin of checkedPins) {
     const want = expected.get(pin.identity);
     if (
       !want ||
@@ -44,7 +51,9 @@ export function checkSwiftPMResolved({ pins }) {
 
 if (isEntry(process.argv[1], fileURLToPath(import.meta.url))) {
   try {
-    checkSwiftPMResolved(JSON.parse(readFileSync(process.argv[2], "utf8")));
+    checkSwiftPMResolved(JSON.parse(readFileSync(process.argv[2], "utf8")), {
+      native: process.argv[3] === "--native",
+    });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

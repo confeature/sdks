@@ -21,9 +21,18 @@ git -C "$base" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
   -c user.name=Confeature -c user.email=noreply@github.com commit --quiet -m 'Local Swift SDK fixture'
 git -C "$base" -c tag.gpgSign=false tag 0.2.0
 cd "$companion"
-"${swift_cmd[@]}" package config set-mirror \
+
+# The temporary base has the public identity but its own revision.
+swiftpm_paths=()
+for storage in config cache security; do
+  swiftpm_paths+=("--$storage-path" "$companion/.swiftpm/native-$storage")
+done
+"${swift_cmd[@]}" package "${swiftpm_paths[@]}" config set-mirror \
   --original https://github.com/confeature/confeature-swift.git --mirror "file://$base"
-"${swift_cmd[@]}" test
+"${swift_cmd[@]}" package "${swiftpm_paths[@]}" resolve
+node "$root/tools/sdk-pack/check-swiftpm-resolved.mjs" Package.resolved --native
+locked=("${swiftpm_paths[@]}" --force-resolved-versions)
+"${swift_cmd[@]}" test "${locked[@]}"
 
 # An ordinary host build does not exercise the older deployment targets,
 # especially the 32-bit watchOS target.
@@ -32,7 +41,7 @@ for settings in macosx:arm64-apple-macosx12.0 iphoneos:arm64-apple-ios15.0 \
   sdk="${settings%%:*}"
   triple="${settings#*:}"
   sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
-  "${swift_cmd[@]}" build --build-system native --scratch-path "$temp/build-$sdk" \
+  "${swift_cmd[@]}" build "${locked[@]}" --build-system native --scratch-path "$temp/build-$sdk" \
     --sdk "$sdk_path" --triple "$triple" --target ConfeatureOpenFeature
 done
 

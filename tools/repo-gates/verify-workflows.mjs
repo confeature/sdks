@@ -3363,20 +3363,21 @@ function daggerLegProblems(job) {
 const NATIVE_LIVE_RUN = `node ${LIVE_SCRIPT}`;
 const NATIVE_LIVE_ENV = { SDK: "${{ matrix.sdk.name }}" };
 const NODE_VERSION_REF = "${{ env.NODE_VERSION }}";
+const NATIVE_NODE_PREP = {
+  label: `${PIN.setupNode} with node-version: ${NODE_VERSION_REF}`,
+  is: (st) =>
+    String(st?.uses ?? "").trim() === PIN.setupNode &&
+    st?.with?.["node-version"] === NODE_VERSION_REF,
+};
 /**
- * What the macOS job prepares, in order, between its suite and its live step:
- * pnpm and the workflow's pinned Node, as verify.yml sets them up; the
+ * Shared tooling for the macOS jobs. The Swift suite checks dependency pins
+ * with Node before its tests. The native live steps also need pnpm, the
  * workspace from the frozen lockfile (the harness's wrangler and workerd);
  * the harness's dist/, which every liveSuite.runner starts.
  */
 const NATIVE_LIVE_PREP = [
   { label: PIN.pnpm, is: (st) => String(st?.uses ?? "").trim() === PIN.pnpm },
-  {
-    label: `${PIN.setupNode} with node-version: ${NODE_VERSION_REF}`,
-    is: (st) =>
-      String(st?.uses ?? "").trim() === PIN.setupNode &&
-      st?.with?.["node-version"] === NODE_VERSION_REF,
-  },
+  NATIVE_NODE_PREP,
   {
     label: "pnpm install --frozen-lockfile",
     is: (st) => String(st?.run ?? "").trim() === "pnpm install --frozen-lockfile",
@@ -3391,7 +3392,7 @@ const NATIVE_LIVE_PREP = [
 /**
  * Rule 19's half over the macOS job's steps (#924): the native counterpart of
  * daggerLegProblems. The job runs its suite (scripts/swift-precheck.sh,
- * unconditional), then prepares Node, the workspace and the harness, then runs
+ * unconditional, after Node is pinned), then prepares the workspace and harness, then runs
  * exactly one live step, `node tools/repo-gates/run-live-suite.mjs` with
  * `SDK: ${{ matrix.sdk.name }}`, only when select-sdks.mjs marks the leg
  * `live`. The runner itself is the manifest's, read by that script; which SDK
@@ -3426,19 +3427,24 @@ function nativeLegProblems(job) {
     out.push(`its live step's env: is not exactly SDK: ${NATIVE_LIVE_ENV.SDK}`);
   if (suite === undefined) return out;
   const from = steps.indexOf(suite);
+  if (!steps.slice(0, from).some((st) => st.if === undefined && NATIVE_NODE_PREP.is(st)))
+    out.push(
+      `has no \`${NATIVE_NODE_PREP.label}\` step before its native suite that runs unconditionally`,
+    );
   const to = steps.indexOf(live);
   if (to < from) {
     out.push("its live step does not come after its suite");
     return out;
   }
   const between = steps.slice(from + 1, to);
-  const at = NATIVE_LIVE_PREP.map((p) => between.findIndex(p.is));
-  NATIVE_LIVE_PREP.forEach((p, i) => {
+  const prep = NATIVE_LIVE_PREP.filter((p) => p !== NATIVE_NODE_PREP);
+  const at = prep.map((p) => between.findIndex(p.is));
+  prep.forEach((p, i) => {
     if (at[i] === -1) out.push(`has no \`${p.label}\` step between its suite and its live step`);
   });
   if (!at.includes(-1) && at.some((x, i) => i > 0 && x < at[i - 1]))
     out.push(
-      `its live-suite preparation is not in order (${NATIVE_LIVE_PREP.map((p) => p.label).join(", then ")})`,
+      `its live-suite preparation is not in order (${prep.map((p) => p.label).join(", then ")})`,
     );
   return out;
 }
