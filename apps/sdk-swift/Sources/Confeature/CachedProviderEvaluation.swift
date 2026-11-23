@@ -26,10 +26,6 @@ import Foundation
 }
 
 extension ConfeatureClient {
-    @_spi(OpenFeature) public var supportsCachedEvaluation: Bool {
-        supportsSynchronousProvider
-    }
-
     /// Resolves current SDK data without substituting the native default user.
     @_spi(OpenFeature) public func evaluateCachedFlag<Value>(
         forKey key: String, defaultValue: Value,
