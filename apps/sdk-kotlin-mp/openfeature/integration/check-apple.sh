@@ -76,19 +76,41 @@ simctl 240 list devices >/dev/null || {
   simctl 120 list devices >/dev/null
 }
 
-device=$(simctl 120 create 'Confeature Kotlin OpenFeature' \
-  com.apple.CoreSimulator.SimDeviceType.iPhone-17 com.apple.CoreSimulator.SimRuntime.iOS-26-0)
+device=
+start_device() {
+  device=$(simctl 120 create 'Confeature Kotlin OpenFeature' \
+    com.apple.CoreSimulator.SimDeviceType.iPhone-17 com.apple.CoreSimulator.SimRuntime.iOS-26-0)
+  simctl 120 boot "$device"
+}
+
+retire_device() {
+  local retiring=$device shutdown_status=0
+  device=
+  # The device may already be stopped. Deletion still has to succeed.
+  simctl 30 shutdown "$retiring" || shutdown_status=$?
+  simctl 30 delete "$retiring" || return "$?"
+  if [[ "$shutdown_status" == 130 || "$shutdown_status" == 143 ]]; then
+    return "$shutdown_status"
+  fi
+}
+
 cleanup() {
   local status=$?
-  simctl 30 shutdown "$device" || true
-  if ! simctl 30 delete "$device" && [[ "$status" == 0 ]]; then
+  if [[ -n "$device" ]] && ! retire_device && [[ "$status" == 0 ]]; then
     status=1
   fi
   return "$status"
 }
 trap cleanup EXIT
-simctl 120 boot "$device"
-simctl 300 bootstatus "$device" -b
+start_device
+simctl 300 bootstatus "$device" -b || {
+  status=$?
+  [[ "$status" == 124 ]] || exit "$status"
+  printf '%s\n' 'Retrying simulator boot with a fresh device after a timeout.' >&2
+  retire_device
+  start_device
+  simctl 300 bootstatus "$device" -b
+}
 export CONFEATURE_KOTLIN_SIMULATOR="$device"
 node "$integration/run-fixture.mjs" apple
 if [[ -n "${GITHUB_ENV:-}" ]]; then

@@ -12,8 +12,18 @@ const SOURCE = readFileSync(
 );
 const XCODE = SOURCE.match(/grep -Fx '([^']+)'/)[1];
 const DEVICE = "54ADC2F6-A37C-48EA-B4C0-A0CFA960990E";
-const STARTUP = ["list", "create", "boot", "bootstatus"];
-const CLEANUP = ["shutdown", "delete"];
+const REPLACEMENT = "F67E1E2B-5B8F-4B6C-82E8-E81248E35749";
+const createAndBoot = (device) => ["create", `boot ${device}`, `bootstatus ${device}`];
+const retire = (device) => [`shutdown ${device}`, `delete ${device}`];
+const STARTUP = ["list", ...createAndBoot(DEVICE)];
+const CLEANUP = retire(DEVICE);
+const RECOVERY = [...STARTUP, ...CLEANUP, ...createAndBoot(REPLACEMENT)];
+const FIXTURE = `import { appendFileSync } from "node:fs";
+const { CONFEATURE_KOTLIN_SIMULATOR: device, SIM_MODE, CALL_LOG } = process.env;
+const expected = SIM_MODE === "slow-boot" ? "${REPLACEMENT}" : "${DEVICE}";
+if (process.argv[2] !== "apple" || device !== expected) process.exit(64);
+appendFileSync(CALL_LOG, "fixture " + device + "\\n");
+if (SIM_MODE.startsWith("fixture-failure")) process.exit(42);`;
 
 function run(mode) {
   const dir = mkdtempSync(join(tmpdir(), "kotlin-simctl-"));
@@ -23,14 +33,7 @@ function run(mode) {
     writeFileSync(log, "");
     writeFileSync(githubEnv, "");
     writeFileSync(join(dir, "check-apple.sh"), SOURCE);
-    writeFileSync(
-      join(dir, "run-fixture.mjs"),
-      `import { appendFileSync } from "node:fs";
-      if (process.argv[2] !== "apple" || process.env.CONFEATURE_KOTLIN_SIMULATOR !== "${DEVICE}")
-        process.exit(64);
-      appendFileSync(process.env.CALL_LOG, "fixture\\n");
-      if (process.env.SIM_MODE.startsWith("fixture-failure")) process.exit(42);`,
-    );
+    writeFileSync(join(dir, "run-fixture.mjs"), FIXTURE);
 
     const tools = {
       uname: 'printf "%s\\n" arm64',
@@ -38,17 +41,20 @@ function run(mode) {
       // Only the deadlines of the deliberately hung commands are shortened.
       node: `if [ "$1" = "--input-type=module" ]; then
         case "$SIM_MODE:$5" in
-          slow-list:list|stalled-list:list|stalled-boot:bootstatus|stalled-create:create)
+          slow-list:list|stalled-list:list|stalled-create:create|slow-boot:bootstatus|stalled-boot:bootstatus|failed-retirement:bootstatus|interrupted-retirement:bootstatus)
             exec "$REAL_NODE" "$1" "$2" "$3" 0.15 "\${@:5}" ;;
         esac
       fi
       exec "$REAL_NODE" "$@"`,
       xcrun: `[ "$1" = simctl ] || exit 64
-      printf "%s\\n" "$2" >> "$CALL_LOG"
+      case "$2" in
+        boot|bootstatus|shutdown|delete) printf "%s %s\\n" "$2" "$3" ;;
+        *) printf "%s\\n" "$2" ;;
+      esac >> "$CALL_LOG"
       case "$SIM_MODE:$2" in
-        failed-list:list) exit 21 ;;
-        exit-124:list) exit 124 ;;
-        interrupted-list:list)
+        failed-list:list|failed-bootstatus:bootstatus) exit 21 ;;
+        exit-124:list|exit-124-bootstatus:bootstatus) exit 124 ;;
+        interrupted-list:list|interrupted-bootstatus:bootstatus|interrupted-retirement:shutdown)
           wrapper=$PPID
           ( /bin/sleep 0.2; kill -TERM "$wrapper"; exec /bin/sleep 5 ) &
           exit 0 ;;
@@ -56,8 +62,10 @@ function run(mode) {
           /bin/sleep 5 &
           printf "%s\\n" "$!" > "$HOME/descendant"
           wait "$!" ;;
-        fixture-failure-cleanup:delete|failed-cleanup:delete) exit 32 ;;
+        fixture-failure-cleanup:delete|failed-cleanup:delete|failed-retirement:delete) exit 32 ;;
         stalled-list:list|stalled-boot:bootstatus) exec /bin/sleep 5 ;;
+        slow-boot:bootstatus|failed-retirement:bootstatus|interrupted-retirement:bootstatus)
+          if [ "$3" = "$FAKE_DEVICE" ]; then exec /bin/sleep 5; fi ;;
         slow-list:list)
           if [ ! -e "$HOME/listed" ]; then
             : > "$HOME/listed"
@@ -65,8 +73,16 @@ function run(mode) {
           fi ;;
       esac
       case "$2" in
-        create) printf "%s\\n" "$FAKE_DEVICE" ;;
-        boot|bootstatus|shutdown|delete) [ "$3" = "$FAKE_DEVICE" ] ;;
+        create)
+          [ "$4" = com.apple.CoreSimulator.SimDeviceType.iPhone-17 ] &&
+          [ "$5" = com.apple.CoreSimulator.SimRuntime.iOS-26-0 ] || exit 64
+          if [ -e "$HOME/created" ]; then
+            printf "%s\\n" "$FAKE_REPLACEMENT"
+          else
+            : > "$HOME/created"
+            printf "%s\\n" "$FAKE_DEVICE"
+          fi ;;
+        boot|bootstatus|shutdown|delete) [ "$3" = "$FAKE_DEVICE" ] || [ "$3" = "$FAKE_REPLACEMENT" ] ;;
       esac`,
     };
     for (const [tool, body] of Object.entries(tools)) {
@@ -85,6 +101,7 @@ function run(mode) {
         SIM_MODE: mode,
         FAKE_XCODE: XCODE,
         FAKE_DEVICE: DEVICE,
+        FAKE_REPLACEMENT: REPLACEMENT,
         CALL_LOG: log,
         GITHUB_ENV: githubEnv,
       },
@@ -113,7 +130,7 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
   it("runs the fixture on the created simulator and exports the Xcode for the Maven link", () => {
     const result = run("ready");
     expect(result.status).toBe(0);
-    expect(result.calls).toEqual([...STARTUP, "fixture", ...CLEANUP]);
+    expect(result.calls).toEqual([...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]);
     expect(result.githubEnv).toMatch(
       /^DEVELOPER_DIR=\/Applications\/Xcode_.*\/Contents\/Developer\n$/,
     );
@@ -122,8 +139,16 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
   it("retries simulator discovery exactly once when the first call times out", () => {
     const result = run("slow-list");
     expect(result.status).toBe(0);
-    expect(result.calls).toEqual(["list", ...STARTUP, "fixture", ...CLEANUP]);
+    expect(result.calls).toEqual(["list", ...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]);
     expect(result.stderr).toContain("Retrying simulator discovery after a timeout");
+  });
+
+  it("replaces an unready simulator once and runs the fixture on the ready replacement", () => {
+    const result = run("slow-boot");
+    expect(result.status).toBe(0);
+    expect(result.calls).toEqual([...RECOVERY, `fixture ${REPLACEMENT}`, ...retire(REPLACEMENT)]);
+    expect(result.stderr).toContain("Retrying simulator boot with a fresh device after a timeout");
+    expect(result.githubEnv).toMatch(/^DEVELOPER_DIR=.+\n$/);
   });
 
   it("times out creation even when a child holds its stdout open", () => {
@@ -138,7 +163,7 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
   it("fails if the fixture passed but deleting its simulator fails", () => {
     const result = run("failed-cleanup");
     expect(result.status).toBe(1);
-    expect(result.calls).toEqual([...STARTUP, "fixture", ...CLEANUP]);
+    expect(result.calls).toEqual([...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]);
   });
 
   it.each([
@@ -146,9 +171,14 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
     ["exit-124", 1, ["list"]],
     ["interrupted-list", 143, ["list"]],
     ["stalled-list", 124, ["list", "list"]],
-    ["stalled-boot", 124, [...STARTUP, ...CLEANUP]],
-    ["fixture-failure", 42, [...STARTUP, "fixture", ...CLEANUP]],
-    ["fixture-failure-cleanup", 42, [...STARTUP, "fixture", ...CLEANUP]],
+    ["stalled-boot", 124, [...RECOVERY, ...retire(REPLACEMENT)]],
+    ["failed-bootstatus", 21, [...STARTUP, ...CLEANUP]],
+    ["exit-124-bootstatus", 1, [...STARTUP, ...CLEANUP]],
+    ["interrupted-bootstatus", 143, [...STARTUP, ...CLEANUP]],
+    ["failed-retirement", 32, [...STARTUP, ...CLEANUP]],
+    ["interrupted-retirement", 143, [...STARTUP, ...CLEANUP]],
+    ["fixture-failure", 42, [...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]],
+    ["fixture-failure-cleanup", 42, [...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]],
   ])("fails closed for %s", (mode, status, calls) => {
     const result = run(mode);
     expect(result.status).toBe(status);
