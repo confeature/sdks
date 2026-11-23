@@ -799,12 +799,6 @@ jobs:
         run: dotnet nuget push "./release/${UNIT_COORDINATES}.${UNIT_VERSION}.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
 
   # ------------------------------------------------------------- pubdev ----
-  # pub.dev takes no prebuilt archive: `dart pub publish` packs and uploads in
-  # one command, from the package directory, in the job that holds the OIDC
-  # token, and pub.dev accepts it only on a tag push matching the package's
-  # pattern (`sdk-dart-v{{version}}`) in the environment it names. That one
-  # command is rule 3's recorded exception for this job (PUBLISH_EXCEPTIONS);
-  # pub runs no package code while packing.
 
   pack-pubdev:
     name: pack ${{ needs.setup.outputs.coordinates }}
@@ -1591,8 +1585,12 @@ jobs:
           echo "split=$(tail -n 1 "$RUNNER_TEMP/split.out")" >> "$GITHUB_OUTPUT"
           echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Select the pinned Xcode
-        run: bash scripts/swift-precheck.sh --toolchain-only
+      - name: Build, test and lint with the pinned Xcode
+        run: bash scripts/swift-precheck.sh
+      - name: Build the live-contract harness
+        run: pnpm --filter @confeature/test-harness-live-contract build
+      - name: Run the OpenFeature provider's seeded loopback tests
+        run: node tools/sdk-swift-openfeature/run.mjs
 
       - name: Resolve the companion's consumer
         run: bash tools/sdk-pack/check-swiftpm-consumer.sh openfeature

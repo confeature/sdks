@@ -43,11 +43,6 @@ fail() {
   exit 1
 }
 
-case "${1:-}" in
-  "" | --toolchain-only) ;;
-  *) fail "usage: $0 [--toolchain-only]" ;;
-esac
-
 if ! [[ "$XCODE_PIN" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
   fail "XCODE_PIN '${XCODE_PIN}' is not a version (<major>[.<minor>…])."
 fi
@@ -115,9 +110,6 @@ else
   say "WARN: the pinned Xcode ${XCODE_PIN} is not installed at ${XCODE_DEV}."
   say "WARN: judging Swift with ${in_use} instead; CI judges it with Xcode ${XCODE_PIN}."
 fi
-
-# The companion's pack job uses the same pin before building against public dependencies.
-if [ "${1:-}" = --toolchain-only ]; then exit 0; fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/apps/sdk-swift"

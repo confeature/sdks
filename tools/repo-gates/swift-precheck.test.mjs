@@ -81,7 +81,6 @@ function run({
   source = SOURCE,
   without = [],
   bare = false,
-  toolchainOnly = false,
 } = {}) {
   const box = mkdtempSync(join(tmpdir(), "swift-precheck-"));
   boxes.push(box);
@@ -105,7 +104,7 @@ function run({
   const ghEnv = join(box, "github-env");
   if (githubEnv) writeFileSync(ghEnv, "");
   const extra = typeof env === "function" ? env(dev) : env;
-  const r = spawnSync("/bin/bash", [script, ...(toolchainOnly ? ["--toolchain-only"] : [])], {
+  const r = spawnSync("/bin/bash", [script], {
     cwd: box,
     encoding: "utf8",
     env: {
@@ -174,13 +173,6 @@ describe("scripts/swift-precheck.sh holds the Xcode pin", () => {
       const r = run({ env: ACTIONS, githubEnv: true });
       expect(r.status, r.stderr).toBe(0);
       expect(r.tools.at(-1)).toBe(`${r.dev}|companion xcrun swift`);
-    });
-
-    it("the pack job can select the same Xcode without running source checks", () => {
-      const r = run({ env: ACTIONS, githubEnv: true, toolchainOnly: true });
-      expect(r.status, r.stderr).toBe(0);
-      expect(r.tools).toEqual([]);
-      expect(r.githubEnv).toBe(`DEVELOPER_DIR=${r.dev}\n`);
     });
 
     it("control: a preset DEVELOPER_DIR equal to the pinned path is accepted", () => {

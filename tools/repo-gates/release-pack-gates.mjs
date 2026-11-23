@@ -93,3 +93,42 @@ export const RELEASE_PACK_GATES = {
     ],
   },
 };
+
+export const SWIFT_NATIVE_SUITE_RUN = "bash scripts/swift-precheck.sh";
+export const SWIFT_OPENFEATURE_LIVE_RUN = "node tools/sdk-swift-openfeature/run.mjs";
+
+const swiftpmPackRuns = [
+  SWIFT_NATIVE_SUITE_RUN,
+  "pnpm --filter @confeature/test-harness-live-contract build",
+  SWIFT_OPENFEATURE_LIVE_RUN,
+  "bash tools/sdk-pack/check-swiftpm-consumer.sh openfeature",
+  'node tools/sdk-pack/check-swiftpm-resolved.mjs "$RUNNER_TEMP/consume/consumer/Package.resolved"',
+  'xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer"',
+];
+
+// Distinct steps make Xcode and the compiled test package from GITHUB_ENV
+// available to the seeded suite. Neither a skip nor a test failure may upload.
+export function swiftpmCompanionPackProblem(job) {
+  const steps = Array.isArray(job?.steps) ? job.steps : [];
+  const matches = [
+    ...swiftpmPackRuns.map((command) => (step) => step?.run === command),
+    (step) =>
+      step?.with?.name === "release-swiftpm-openfeature" &&
+      step.uses?.startsWith("actions/upload-artifact@"),
+  ];
+  let previous = -1;
+  for (const match of matches) {
+    const found = steps.findIndex(match);
+    if (found <= previous || steps.findLastIndex(match) !== found)
+      return "the SwiftPM companion must run the native suite, harness build, seeded loopback, dependency checks, consumer build and upload once each in that order";
+    const step = steps[found];
+    if (
+      step.if !== undefined ||
+      step["continue-on-error"] !== undefined ||
+      step.shell !== undefined
+    )
+      return `the SwiftPM companion step "${step.name}" must run unconditionally and fail on errors`;
+    previous = found;
+  }
+  return null;
+}

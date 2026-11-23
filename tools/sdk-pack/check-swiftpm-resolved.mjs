@@ -11,7 +11,12 @@ const expected = new Map([
   ],
   [
     "swift-sdk",
-    { location: "https://github.com/open-feature/swift-sdk.git", version: /^0\.7\.0$/ },
+    {
+      location: "https://github.com/open-feature/swift-sdk.git",
+      version: /^0\.7\.0$/,
+      // A moved upstream tag would invalidate the provider's reviewed dependency.
+      revision: "19c0de402027db6b69bf055b134f3123ea97f2f2",
+    },
   ],
   ["swift-log", { location: "https://github.com/apple/swift-log", version: /^1\.\d+\.\d+$/ }],
 ]);
@@ -29,7 +34,8 @@ export function checkSwiftPMResolved({ pins }) {
       seen.has(pin.identity) ||
       pin.kind !== "remoteSourceControl" ||
       pin.location !== want.location ||
-      !want.version.test(pin.state?.version ?? "")
+      !want.version.test(pin.state?.version ?? "") ||
+      (want.revision !== undefined && pin.state?.revision !== want.revision)
     )
       throw new Error(`Unexpected SwiftPM resolution for ${pin.identity}`);
     seen.add(pin.identity);

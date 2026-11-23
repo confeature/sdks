@@ -72,6 +72,15 @@ OIDC job) and publish-jsr (`deno publish` of the pack job's staged source,
 which it unpacks first: `tar -x`). Rule 3 allows exactly those commands, in exactly
 those jobs.
 
+## Pub.dev releases
+
+pub.dev takes no prebuilt archive: `dart pub publish` packs and uploads in
+one command, from the package directory, in the job that holds the OIDC
+token, and pub.dev accepts it only on a tag push matching the package's
+pattern (`sdk-dart-v{{version}}`) in the environment it names. That one
+command is rule 3's recorded exception for this job (PUBLISH_EXCEPTIONS);
+pub runs no package code while packing.
+
 ## Git mirrors
 
 Packagist and SwiftPM read a whole repository, with its manifest at the
@@ -85,8 +94,9 @@ commit, so `main` only fast-forwards, and a tag is never moved. Packagist
 picks the tag up through the mirror's GitHub hook.
 
 A SwiftPM mirror tag is the release. Its consumer dry run requires Apple's toolchain and runs on macOS.
-The OpenFeature companion has its own mirror and deploy key. Its credential-free check builds a
-consumer on the pinned Xcode and checks that SwiftPM resolves the base SDK from its public mirror.
+The OpenFeature companion has its own mirror and deploy key. Its credential-free pack job runs the
+native suite and seeded loopback tests on the pinned Xcode, checks the public dependency graph and
+builds a consumer before handing off the bundle.
 Publish the base SDK 0.2.0 before running this check for the first companion release.
 
 ## Maven releases

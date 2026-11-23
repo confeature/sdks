@@ -123,7 +123,7 @@
         {
           "name": "MIRROR_DEPLOY_KEY",
           "kind": "deploy-key",
-          "issuer": "SSH deploy key (write) on confeature/confeature-swift-openfeature, created by the operator's applier (mirrors[])",
+          "issuer": "SSH deploy key (write) on confeature/confeature-swift-openfeature, supplied by the operator and verified by the release settings applier (mirrors[])",
           "rotateBy": "2027-10-16"
         }
       ]

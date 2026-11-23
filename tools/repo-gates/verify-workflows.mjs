@@ -190,6 +190,11 @@ import {
   SETTINGS,
 } from "./release-refs.mjs";
 
+import {
+  SWIFT_NATIVE_SUITE_RUN,
+  SWIFT_OPENFEATURE_LIVE_RUN,
+  swiftpmCompanionPackProblem,
+} from "./release-pack-gates.mjs";
 import { writesOutput } from "./workflow-outputs.mjs";
 
 export { globMatches, MANIFEST, SETTINGS, writesOutput };
@@ -2484,6 +2489,10 @@ function shapeRules({ settings, manifest, workflows, envs, add }) {
         );
     } else if (envName(job) !== undefined)
       add(PUBLISH_WORKFLOW, jobId, "a pack job binds an environment");
+    if (jobId === "pack-swiftpm-openfeature") {
+      const problem = swiftpmCompanionPackProblem(job);
+      if (problem) add(PUBLISH_WORKFLOW, jobId, problem);
+    }
   }
 }
 
@@ -3351,9 +3360,7 @@ function daggerLegProblems(job) {
 }
 
 /** The macOS job's suite and its live step (#924), exactly. */
-const NATIVE_SUITE_RUN = "bash scripts/swift-precheck.sh";
 const NATIVE_LIVE_RUN = `node ${LIVE_SCRIPT}`;
-const SWIFT_OPENFEATURE_LIVE_RUN = "node tools/sdk-swift-openfeature/run.mjs";
 const NATIVE_LIVE_ENV = { SDK: "${{ matrix.sdk.name }}" };
 const NODE_VERSION_REF = "${{ env.NODE_VERSION }}";
 /**
@@ -3394,9 +3401,10 @@ function nativeLegProblems(job) {
   const out = [];
   const steps = stepsOf(job);
   const run = (st) => String(st?.run ?? "").trim();
-  const suite = steps.find((st) => run(st) === NATIVE_SUITE_RUN && st.if === undefined);
+  const suite = steps.find((st) => run(st) === SWIFT_NATIVE_SUITE_RUN && st.if === undefined);
   const lives = steps.filter((st) => run(st) === NATIVE_LIVE_RUN);
-  if (suite === undefined) out.push(`has no unconditional step running \`${NATIVE_SUITE_RUN}\``);
+  if (suite === undefined)
+    out.push(`has no unconditional step running \`${SWIFT_NATIVE_SUITE_RUN}\``);
   if (lives.length === 0) {
     out.push(`has no step running \`${NATIVE_LIVE_RUN}\``);
     return out;

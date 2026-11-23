@@ -10,6 +10,7 @@ import { parse } from "yaml";
 import { checkSwiftPMResolved } from "../sdk-pack/check-swiftpm-resolved.mjs";
 import { resolvePublish } from "../sdk-pack/resolve-publish.mjs";
 import { classifyPath } from "./select-sdks.mjs";
+import { findings } from "./verify-workflows.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const REPO = "confeature/confeature-swift-openfeature";
@@ -19,6 +20,9 @@ const PUBLISH = "publish-swiftpm-openfeature";
 const ENV = "sdk-publish-swiftpm-openfeature";
 const workflow = parse(
   readFileSync(new URL("../../.github/workflows/sdk-publish.yml", import.meta.url), "utf8"),
+);
+const manifest = JSON.parse(
+  readFileSync(new URL("../../dagger/sdk-manifest.json", import.meta.url), "utf8"),
 );
 const settings = JSON.parse(
   readFileSync(new URL("./release-settings.json", import.meta.url), "utf8"),
@@ -70,15 +74,77 @@ it("scopes the bundle and SSH key to the companion's publish leg", () => {
   });
 });
 
-const pin = (identity, location, version) => ({
+const PRECHECK = "bash scripts/swift-precheck.sh";
+const HARNESS = "pnpm --filter @confeature/test-harness-live-contract build";
+const LIVE = "node tools/sdk-swift-openfeature/run.mjs";
+const PACK_FILE = "sdk-publish.yml";
+
+const companionFindings = (doc) =>
+  findings({ manifest, settings, workflows: { [PACK_FILE]: doc } }).filter(
+    (finding) => finding.job === PACK && finding.why.includes("SwiftPM companion"),
+  );
+
+it("requires native validation, harness build and loopback in separate ordered steps", () => {
+  expect(companionFindings(workflow)).toEqual([]);
+  const runs = workflow.jobs[PACK].steps.map((step) => step.run);
+  const native = runs.indexOf(PRECHECK);
+  expect(native).toBeGreaterThanOrEqual(0);
+  expect(runs.indexOf(HARNESS)).toBeGreaterThan(native);
+  expect(runs.indexOf(LIVE)).toBeGreaterThan(runs.indexOf(HARNESS));
+});
+
+const takeRun = (steps, command) =>
+  steps.splice(
+    steps.findIndex((step) => step.run === command),
+    1,
+  )[0];
+
+it.each([
+  ["missing precheck", (steps) => takeRun(steps, PRECHECK)],
+  ["missing harness", (steps) => takeRun(steps, HARNESS)],
+  ["missing loopback", (steps) => takeRun(steps, LIVE)],
+  [
+    "loopback combined with the native precheck",
+    (steps) => {
+      steps.find((step) => step.run === PRECHECK).run = `${PRECHECK}\n${LIVE}`;
+      takeRun(steps, LIVE);
+    },
+  ],
+  ["skipped loopback", (steps) => (steps.find((step) => step.run === LIVE).if = "false")],
+  [
+    "an ignored loopback failure",
+    (steps) => (steps.find((step) => step.run === LIVE)["continue-on-error"] = true),
+  ],
+  ["loopback after upload", (steps) => steps.push(takeRun(steps, LIVE))],
+  ["harness before native precheck", (steps) => steps.unshift(takeRun(steps, HARNESS))],
+  [
+    "missing public pin check",
+    (steps) =>
+      takeRun(
+        steps,
+        'node tools/sdk-pack/check-swiftpm-resolved.mjs "$RUNNER_TEMP/consume/consumer/Package.resolved"',
+      ),
+  ],
+])("the workflow verifier refuses %s in the companion pack job", (_label, mutate) => {
+  const doc = structuredClone(workflow);
+  mutate(doc.jobs[PACK].steps);
+  expect(companionFindings(doc)).not.toHaveLength(0);
+});
+
+const pin = (identity, location, version, revision) => ({
   identity,
   kind: "remoteSourceControl",
   location,
-  state: { version },
+  state: { version, revision },
 });
 const publicPins = [
   pin("confeature-swift", "https://github.com/confeature/confeature-swift.git", "0.2.0"),
-  pin("swift-sdk", "https://github.com/open-feature/swift-sdk.git", "0.7.0"),
+  pin(
+    "swift-sdk",
+    "https://github.com/open-feature/swift-sdk.git",
+    "0.7.0",
+    "19c0de402027db6b69bf055b134f3123ea97f2f2",
+  ),
   pin("swift-log", "https://github.com/apple/swift-log", "1.9.0"),
 ];
 
@@ -91,7 +157,9 @@ it.each([
   ["another minor of the base", 0, { state: { version: "0.3.0" } }],
   ["a local base", 0, { location: "file:///tmp/confeature-swift" }],
   ["the base test's ConfigCat SDK", 1, { location: "https://github.com/configcat/swift-sdk.git" }],
-  ["a different OpenFeature version", 1, { state: { version: "0.7.1" } }],
+  ["a different OpenFeature version", 1, { state: { ...publicPins[1].state, version: "0.7.1" } }],
+  ["a moved OpenFeature tag", 1, { state: { version: "0.7.0", revision: "0".repeat(40) } }],
+  ["an OpenFeature pin without a revision", 1, { state: { version: "0.7.0" } }],
   ["a duplicate pin", 2, publicPins[0]],
 ])("refuses %s in the consumer lockfile", (_label, index, replacement) => {
   const pins = publicPins.map((entry, i) => (index === i ? { ...entry, ...replacement } : entry));
