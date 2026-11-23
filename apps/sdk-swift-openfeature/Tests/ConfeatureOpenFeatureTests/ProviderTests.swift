@@ -16,8 +16,8 @@ final class ProviderTests: XCTestCase {
         defer { native.close() }
         let first = OpenFeatureAPI()
         let second = OpenFeatureAPI()
-        let firstProvider = try ConfeatureProvider(client: native)
-        let secondProvider = try ConfeatureProvider(client: native)
+        let firstProvider = ConfeatureProvider(client: native)
+        let secondProvider = ConfeatureProvider(client: native)
         let context = ImmutableContext(attributes: [
             "plan": .string("trial"),
             "Identifier": .string("shadow"),
@@ -67,7 +67,7 @@ final class ProviderTests: XCTestCase {
         let native = try targetingClient()
         defer { native.close() }
         let api = OpenFeatureAPI()
-        let provider = try ConfeatureProvider(client: native)
+        let provider = ConfeatureProvider(client: native)
         let context = ImmutableContext(attributes: ["plan": .string("trial")])
         await api.setProviderAndWait(provider: provider, initialContext: context)
         let flags = api.getClient()
@@ -98,12 +98,12 @@ final class ProviderTests: XCTestCase {
         await api.clearProviderAndWait()
     }
 
-    func testFlatOverridesAreReadOnceAndObjectDoesNotRead() async throws {
+    func testFlatOverridesAreReadOnceAndObjectDoesNotRead() async {
         let source = CountedOverrides(["good": true, "bad": 7, "null": NSNull()])
         let native = nativeClient(overrides: FlagOverrides.localOnly(source))
         defer { native.close() }
         let api = OpenFeatureAPI()
-        await api.setProviderAndWait(provider: try ConfeatureProvider(client: native))
+        await api.setProviderAndWait(provider: ConfeatureProvider(client: native))
         let flags = api.getClient()
         XCTAssertEqual(source.reads, 0)
         XCTAssertNil(flags.getBooleanDetails(key: "good", defaultValue: true).errorCode)
@@ -119,7 +119,7 @@ final class ProviderTests: XCTestCase {
         let unavailable = CountedOverrides(nil)
         let cold = nativeClient(overrides: FlagOverrides.localOnly(unavailable))
         defer { cold.close() }
-        await api.setProviderAndWait(provider: try ConfeatureProvider(client: cold))
+        await api.setProviderAndWait(provider: ConfeatureProvider(client: cold))
         let fallback = flags.getBooleanDetails(key: "good", defaultValue: true)
         XCTAssertTrue(fallback.value)
         XCTAssertEqual(fallback.errorCode, .providerNotReady)
@@ -127,26 +127,21 @@ final class ProviderTests: XCTestCase {
         await api.clearProviderAndWait()
     }
 
-    func testColdRegistrationCompletesAndLazyLoadRequiresAnAsyncProvider() async throws {
-        let native = nativeClient()
-        defer { native.close() }
-        let api = OpenFeatureAPI()
-        await api.setProviderAndWait(provider: try ConfeatureProvider(client: native))
-        XCTAssertEqual(api.getProviderStatus(), .ready)
-        let cold = api.getClient().getBooleanDetails(key: "flag", defaultValue: true)
-        XCTAssertTrue(cold.value)
-        XCTAssertEqual(cold.errorCode, .providerNotReady)
-        await api.clearProviderAndWait()
-
-        let lazy = nativeClient(pollingMode: .defaultLazyLoad)
-        defer { lazy.close() }
-        XCTAssertThrowsError(try ConfeatureProvider(client: lazy)) { error in
-            XCTAssertEqual(
-                error as? ConfeatureProvider.InitializationError, .lazyLoadRequiresAsyncEvaluation)
+    func testColdManualPollAndLazyLoadReturnCallerFallback() async {
+        for mode in [PollingMode.manualPoll, .defaultLazyLoad] {
+            let native = nativeClient(pollingMode: mode)
+            defer { native.close() }
+            let api = OpenFeatureAPI()
+            await api.setProviderAndWait(provider: ConfeatureProvider(client: native))
+            XCTAssertEqual(api.getProviderStatus(), .ready)
+            let cold = api.getClient().getBooleanDetails(key: "flag", defaultValue: true)
+            XCTAssertTrue(cold.value)
+            XCTAssertEqual(cold.errorCode, .providerNotReady)
+            await api.clearProviderAndWait()
         }
     }
 
-    func testFoundationNumbersKeepTheirOverrideTypes() async throws {
+    func testFoundationNumbersKeepTheirOverrideTypes() async {
         let source = CountedOverrides([
             "integer": NSNumber(value: 1),
             "double": NSNumber(value: 7.0),
@@ -155,7 +150,7 @@ final class ProviderTests: XCTestCase {
         let native = nativeClient(overrides: .localOnly(source))
         defer { native.close() }
         let api = OpenFeatureAPI()
-        await api.setProviderAndWait(provider: try ConfeatureProvider(client: native))
+        await api.setProviderAndWait(provider: ConfeatureProvider(client: native))
         let flags = api.getClient()
         XCTAssertEqual(
             flags.getBooleanDetails(key: "integer", defaultValue: false).errorCode, .typeMismatch)
@@ -170,7 +165,7 @@ final class ProviderTests: XCTestCase {
         await api.clearProviderAndWait()
     }
 
-    func testProviderErrorsAndEventsDoNotExposeNativeDataOrContext() async throws {
+    func testProviderErrorsAndEventsDoNotExposeNativeDataOrContext() async {
         let native = nativeClient(
             overrides: .fromConfig([
                 "f": ["malformed": ["t": 1, "v": ["not-a-string-slot": "private-body-sentinel"]]]
@@ -179,7 +174,7 @@ final class ProviderTests: XCTestCase {
         var nativeEvaluations = 0
         native.hooks.onFlagEvaluated { _ in nativeEvaluations += 1 }
         let api = OpenFeatureAPI()
-        let provider = try ConfeatureProvider(client: native)
+        let provider = ConfeatureProvider(client: native)
         let ready = expectation(description: "Provider publishes one sanitized ready event")
         let subscription = provider.observe().sink { event in
             if case .ready(let details) = event {

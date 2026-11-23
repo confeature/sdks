@@ -22,7 +22,7 @@ final class LoopbackTests: XCTestCase {
 
         let manual = nativeClient(polling: .manualPoll, origin: origin, session: session)
         defer { manual.close() }
-        let manualProvider = try ConfeatureProvider(client: manual)
+        let manualProvider = ConfeatureProvider(client: manual)
         let api = OpenFeatureAPI()
         await api.setProviderAndWait(provider: manualProvider)
         let flags = api.getClient()
@@ -61,7 +61,7 @@ final class LoopbackTests: XCTestCase {
             origin: origin, session: session)
         defer { automatic.close() }
         let autoApi = OpenFeatureAPI()
-        let autoProvider = try ConfeatureProvider(client: automatic)
+        let autoProvider = ConfeatureProvider(client: automatic)
         await autoApi.setProviderAndWait(provider: autoProvider)
         _ = await automatic.waitForReady()
         XCTAssertTrue(autoApi.getClient().getBooleanValue(key: "loopback", defaultValue: false))
@@ -77,6 +77,43 @@ final class LoopbackTests: XCTestCase {
         } catch let error as URLError {
             XCTAssertEqual(error.code, .unsupportedURL)
         }
+    }
+
+    func testLazyLoadOnlyFetchesThroughNativeAsyncEvaluation() async throws {
+        guard ProcessInfo.processInfo.environment["CONFEATURE_LIVE"] == "1" else {
+            throw XCTSkip("Run the HTTP case through the seeded live-contract harness.")
+        }
+        let origin = try XCTUnwrap(ExactOriginGuard.origin)
+        let session = newSession()
+        defer { session.invalidateAndCancel() }
+        let initialCount = try await requests(origin, session: session).count
+
+        let native = nativeClient(
+            polling: .lazyLoad(cacheRefreshInterval: 0), origin: origin, session: session)
+        defer { native.close() }
+        let provider = ConfeatureProvider(client: native)
+        let api = OpenFeatureAPI()
+        await api.setProviderAndWait(provider: provider)
+        let flags = api.getClient()
+        let cold = flags.getBooleanDetails(key: "loopback", defaultValue: false)
+        XCTAssertFalse(cold.value)
+        XCTAssertEqual(cold.errorCode, .providerNotReady)
+        let coldCount = try await requests(origin, session: session).count
+        XCTAssertEqual(coldCount, initialCount)
+
+        let nativeValue = await native.getValue(forKey: "loopback", defaultValue: false)
+        XCTAssertTrue(nativeValue)
+        let refreshedCount = try await requests(origin, session: session).count
+        XCTAssertEqual(refreshedCount, initialCount + 1)
+
+        let cached = flags.getBooleanDetails(key: "loopback", defaultValue: false)
+        XCTAssertTrue(cached.value)
+        XCTAssertNil(cached.errorCode)
+        XCTAssertEqual(cached.variant, "served")
+        let cachedCount = try await requests(origin, session: session).count
+        XCTAssertEqual(cachedCount, refreshedCount)
+        provider.dispose()
+        await api.clearProviderAndWait()
     }
 
     private func nativeClient(

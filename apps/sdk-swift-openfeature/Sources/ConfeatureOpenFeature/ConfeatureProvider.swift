@@ -5,13 +5,10 @@ import Combine
 import Foundation
 import OpenFeature
 
-/// Resolves flags from the current configuration of a borrowed Confeature client.
+/// Resolves flags from the current snapshot of a borrowed Confeature client.
+/// Applications refresh LazyLoad clients through a native asynchronous read or `forceRefresh()`.
 /// Create a separate provider for each OpenFeature API instance.
 public final class ConfeatureProvider: FeatureProvider {
-    public enum InitializationError: Error, Equatable {
-        case lazyLoadRequiresAsyncEvaluation
-    }
-
     private struct Metadata: ProviderMetadata {
         let name: String? = "Confeature"
     }
@@ -23,10 +20,7 @@ public final class ConfeatureProvider: FeatureProvider {
     public let metadata: ProviderMetadata = Metadata()
     public let hooks: [any Hook] = []
 
-    public init(client: ConfeatureClient) throws {
-        guard client.supportsCachedEvaluation else {
-            throw InitializationError.lazyLoadRequiresAsyncEvaluation
-        }
+    public init(client: ConfeatureClient) {
         self.client = client
     }
 
