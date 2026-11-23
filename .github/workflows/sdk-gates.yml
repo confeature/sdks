@@ -25,8 +25,8 @@
 #   swift           Swift natively on macOS (ci.native: macos): the one SDK
 #                   whose toolchain is Apple's, on a macos-15 runner; then its
 #                   live wire-cases natively (run-live-suite.mjs, #924).
-#   kotlin-apple    Kotlin OpenFeature on an arm64 iOS simulator and a
-#                   separate Apple device binary linked from Maven artifacts.
+#   kotlin-apple    Kotlin OpenFeature on an arm64 iOS simulator on macos-26
+#                   and a separate Apple device binary linked from Maven artifacts.
 #   smoke           Unreal's source-quality smoke (ci.native: smoke), labelled
 #                   as such: no hosted runner has an Unreal Engine.
 #   sdk gates       the aggregate, and the one required check on main:
@@ -295,7 +295,7 @@ jobs:
     name: ${{ matrix.sdk }} (iOS OpenFeature)
     needs: select
     if: needs.select.outputs.kotlin_apple != '[]'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -323,7 +323,7 @@ jobs:
         run: pnpm --filter @confeature/test-harness-live-contract build
 
       - name: Exercise the iOS provider
-        run: bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh
+        run: bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh --install-runtime
 
       - name: Link the iOS Maven consumer
         run: bash apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh apple

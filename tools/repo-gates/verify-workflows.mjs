@@ -3194,7 +3194,7 @@ export function daggerFnFindings(manifest) {
   return out;
 }
 
-/** The only runner labels sdk-gates.yml's jobs run on (FR-001): exact, never `*-latest` or self-hosted. */
+/** The shared runner labels (FR-001): the Kotlin Apple leg checks its own exact runner. */
 export const GATE_RUNNERS = ["ubuntu-24.04", "macos-15"];
 /** sdk-gates.yml's triggers, exactly. */
 const SDK_GATE_TRIGGERS = ["push", "pull_request", "schedule"];
@@ -3449,17 +3449,18 @@ function nativeLegProblems(job) {
   return out;
 }
 
-const KOTLIN_APPLE_RUN = "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh";
+const KOTLIN_APPLE_RUN =
+  "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh --install-runtime";
 const KOTLIN_APPLE_LINK =
   "bash apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh apple";
 
 function kotlinAppleLegProblems(job) {
   const out = [];
-  if (job["runs-on"] !== "macos-15") out.push("must run on the arm64 macos-15 runner");
+  if (job["runs-on"] !== "macos-26") out.push("must run on the arm64 macos-26 runner");
   const steps = stepsOf(job);
   const matches = steps.filter((step) => String(step?.run ?? "").trim() === KOTLIN_APPLE_RUN);
   if (matches.length !== 1 || matches[0].if !== undefined) {
-    out.push("must run exactly one unconditional Kotlin Apple check");
+    out.push("must run exactly one unconditional Kotlin Apple check with --install-runtime");
     return out;
   }
   const before = steps.slice(0, steps.indexOf(matches[0]));
@@ -3550,7 +3551,7 @@ export function sdkGateFindings({ settings, manifest, workflows }) {
       add(where, `a value names ${XCODE_PATH}: the Xcode pin is scripts/swift-precheck.sh's`);
   for (const [id, job] of Object.entries(jobs)) {
     if (job?.environment !== undefined) add(id, "binds an environment");
-    if (!GATE_RUNNERS.includes(job?.["runs-on"]))
+    if (id !== "kotlin-apple" && !GATE_RUNNERS.includes(job?.["runs-on"]))
       add(
         id,
         `runs on ${canonical(job?.["runs-on"] ?? null)}, not one of ${GATE_RUNNERS.join(", ")}`,

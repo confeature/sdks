@@ -4,6 +4,17 @@ set -euo pipefail
 
 integration=$(cd "$(dirname "$0")" && pwd)
 export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
+readonly ios_version=26.0
+readonly ios_runtime="com.apple.CoreSimulator.SimRuntime.iOS-${ios_version//./-}"
+
+install_runtime=false
+if [[ "$#" == 1 && "$1" == --install-runtime ]]; then
+  install_runtime=true
+elif [[ "$#" != 0 ]]; then
+  printf 'Usage: %s [--install-runtime]\n' "$0" >&2
+  exit 64
+fi
+
 xcodebuild -version | grep -Fx 'Xcode 26.0.1'
 [[ "$(uname -m)" == arm64 ]]
 
@@ -65,21 +76,41 @@ simctl() {
   ' "$seconds" "$@"
 }
 
-# The first call can wait for CoreSimulator to mount the installed runtimes.
-# Retry only that read-only call, and only on a timeout (runner-images#15247).
-simctl 240 list devices >/dev/null || {
-  status=$?
-  if [[ "$status" != 124 ]]; then
-    exit "$status"
-  fi
-  printf '%s\n' 'Retrying simulator discovery after a timeout.' >&2
-  simctl 120 list devices >/dev/null
+runtime_available() {
+  local listing status
+  # CoreSimulator can take time to mount its runtimes (runner-images#15247).
+  listing=$(simctl 240 list runtimes --json) || {
+    status=$?
+    [[ "$status" == 124 ]] || return "$status"
+    printf '%s\n' 'Retrying simulator discovery after a timeout.' >&2
+    listing=$(simctl 120 list runtimes --json) || return "$?"
+  }
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const { runtimes } = JSON.parse(readFileSync(0, "utf8"));
+    if (!Array.isArray(runtimes) || runtimes.some((runtime) =>
+      typeof runtime?.identifier !== "string" || typeof runtime.isAvailable !== "boolean"))
+      throw new Error("Invalid simulator runtime listing");
+    console.log(runtimes.some((runtime) =>
+      runtime.identifier === process.argv[1] && runtime.isAvailable));
+  ' "$ios_runtime" <<< "$listing"
 }
+
+available=$(runtime_available)
+if [[ "$available" == false && "$install_runtime" == true ]]; then
+  printf 'Installing the pinned iOS %s simulator runtime for arm64.\n' "$ios_version" >&2
+  xcodebuild -downloadPlatform iOS -buildVersion "$ios_version" -architectureVariant arm64
+  available=$(runtime_available)
+fi
+if [[ "$available" != true ]]; then
+  printf 'Required simulator runtime %s is unavailable.\n' "$ios_runtime" >&2
+  exit 1
+fi
 
 device=
 start_device() {
   device=$(simctl 120 create 'Confeature Kotlin OpenFeature' \
-    com.apple.CoreSimulator.SimDeviceType.iPhone-17 com.apple.CoreSimulator.SimRuntime.iOS-26-0)
+    com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$ios_runtime")
   simctl 120 boot "$device"
 }
 

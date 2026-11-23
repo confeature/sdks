@@ -1963,6 +1963,11 @@ describe("19 the SDK gates' own shape (#793)", () => {
       /swift: runs on \["self-hosted","macos"\]/,
     ],
     [
+      "the Kotlin runner used for Swift",
+      ({ jobs }) => void (jobs.swift["runs-on"] = "macos-26"),
+      /swift: runs on "macos-26", not one of ubuntu-24\.04, macos-15/,
+    ],
+    [
       "fail-fast: true",
       ({ jobs }) => void (jobs.gate.strategy["fail-fast"] = true),
       /gate: a matrix without fail-fast: false/,
@@ -2069,6 +2074,14 @@ describe("19 the SDK gates' own shape (#793)", () => {
       /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
     ],
     [
+      "a Kotlin Apple check without explicit runtime provisioning",
+      ({ jobs }) => {
+        const exercise = step(jobs["kotlin-apple"], "Exercise the iOS provider");
+        exercise.run = exercise.run.replace(/ --install-runtime$/, "");
+      },
+      /kotlin-apple: must run exactly one unconditional Kotlin Apple check with --install-runtime/,
+    ],
+    [
       "an Apple Maven link that can be skipped",
       ({ jobs }) => void (step(jobs["kotlin-apple"], "Link the iOS Maven consumer").if = "false"),
       /kotlin-apple: must link the iOS Maven consumer unconditionally/,
@@ -2076,7 +2089,12 @@ describe("19 the SDK gates' own shape (#793)", () => {
     [
       "the Kotlin Apple check on Ubuntu",
       ({ jobs }) => void (jobs["kotlin-apple"]["runs-on"] = "ubuntu-24.04"),
-      /kotlin-apple: must run on the arm64 macos-15 runner/,
+      /kotlin-apple: must run on the arm64 macos-26 runner/,
+    ],
+    [
+      "the Kotlin Apple check on the previous macOS image",
+      ({ jobs }) => void (jobs["kotlin-apple"]["runs-on"] = "macos-15"),
+      /kotlin-apple: must run on the arm64 macos-26 runner/,
     ],
     [
       "an environment",
