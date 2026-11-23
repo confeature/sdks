@@ -6,6 +6,8 @@ integration=$(cd "$(dirname "$0")" && pwd)
 export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
 readonly ios_version=26.0
 readonly ios_runtime="com.apple.CoreSimulator.SimRuntime.iOS-${ios_version//./-}"
+# Cold boots can still be migrating data after five minutes on hosted runners.
+readonly boot_deadline_seconds=600
 
 install_runtime=false
 if [[ "$#" == 1 && "$1" == --install-runtime ]]; then
@@ -134,13 +136,13 @@ cleanup() {
 }
 trap cleanup EXIT
 start_device
-simctl 300 bootstatus "$device" -b || {
+simctl "$boot_deadline_seconds" bootstatus "$device" -b || {
   status=$?
   [[ "$status" == 124 ]] || exit "$status"
   printf '%s\n' 'Retrying simulator boot with a fresh device after a timeout.' >&2
   retire_device
   start_device
-  simctl 300 bootstatus "$device" -b
+  simctl "$boot_deadline_seconds" bootstatus "$device" -b
 }
 export CONFEATURE_KOTLIN_SIMULATOR="$device"
 node "$integration/run-fixture.mjs" apple

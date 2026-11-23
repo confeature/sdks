@@ -40,6 +40,7 @@ const TOOLS = {
   esac`,
   // Only the deadlines of the deliberately hung commands are shortened.
   node: `if [ "$1" = "--input-type=module" ]; then
+    if [ "$5" = "bootstatus" ]; then printf "%s\\n" "$4" >> "$CALL_LOG.boot"; fi
     case "$SIM_MODE:$5" in
       slow-list:list|stalled-list:list|stalled-create:create|slow-boot:bootstatus|stalled-boot:bootstatus|failed-retirement:bootstatus|interrupted-retirement:bootstatus)
         exec "$REAL_NODE" "$1" "$2" "$3" 0.15 "\${@:5}" ;;
@@ -104,6 +105,7 @@ function run(mode, args = []) {
   const dir = mkdtempSync(join(tmpdir(), "kotlin-simctl-"));
   try {
     const log = join(dir, "calls");
+    const bootLog = `${log}.boot`;
     const githubEnv = join(dir, "github-env");
     writeFileSync(log, "");
     writeFileSync(githubEnv, "");
@@ -144,6 +146,7 @@ function run(mode, args = []) {
       elapsed: performance.now() - started,
       status: result.status,
       calls: readFileSync(log, "utf8").trim().split("\n"),
+      bootDeadlines: existsSync(bootLog) ? readFileSync(bootLog, "utf8").trim().split("\n") : [],
       stderr: result.stderr,
       githubEnv: readFileSync(githubEnv, "utf8"),
     };
@@ -213,6 +216,7 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
   it("replaces an unready simulator once and runs the fixture on the ready replacement", () => {
     const result = run("slow-boot");
     expect(result.status).toBe(0);
+    expect(result.bootDeadlines).toEqual(["600", "600"]);
     expect(result.calls).toEqual([...RECOVERY, `fixture ${REPLACEMENT}`, ...retire(REPLACEMENT)]);
     expect(result.stderr).toContain("Retrying simulator boot with a fresh device after a timeout");
     expect(result.githubEnv).toMatch(/^DEVELOPER_DIR=.+\n$/);
