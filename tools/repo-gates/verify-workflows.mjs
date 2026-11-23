@@ -3449,8 +3449,7 @@ function nativeLegProblems(job) {
   return out;
 }
 
-const KOTLIN_APPLE_RUN =
-  "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh --install-runtime";
+const KOTLIN_APPLE_RUN = "bash apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh";
 const KOTLIN_APPLE_LINK =
   "bash apps/sdk-kotlin-mp/openfeature/integration/check-maven-consumer.sh apple";
 
@@ -3460,7 +3459,7 @@ function kotlinAppleLegProblems(job) {
   const steps = stepsOf(job);
   const matches = steps.filter((step) => String(step?.run ?? "").trim() === KOTLIN_APPLE_RUN);
   if (matches.length !== 1 || matches[0].if !== undefined) {
-    out.push("must run exactly one unconditional Kotlin Apple check with --install-runtime");
+    out.push("must run exactly one unconditional Kotlin Apple check");
     return out;
   }
   const before = steps.slice(0, steps.indexOf(matches[0]));

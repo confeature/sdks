@@ -2074,12 +2074,12 @@ describe("19 the SDK gates' own shape (#793)", () => {
       /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
     ],
     [
-      "a Kotlin Apple check without explicit runtime provisioning",
+      "a Kotlin Apple check using the obsolete runtime installation flag",
       ({ jobs }) => {
         const exercise = step(jobs["kotlin-apple"], "Exercise the iOS provider");
-        exercise.run = exercise.run.replace(/ --install-runtime$/, "");
+        exercise.run += " --install-runtime";
       },
-      /kotlin-apple: must run exactly one unconditional Kotlin Apple check with --install-runtime/,
+      /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
     ],
     [
       "an Apple Maven link that can be skipped",

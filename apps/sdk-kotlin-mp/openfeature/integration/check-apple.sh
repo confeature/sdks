@@ -4,16 +4,13 @@ set -euo pipefail
 
 integration=$(cd "$(dirname "$0")" && pwd)
 export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
-readonly ios_version=26.0
+readonly ios_version=26.2
 readonly ios_runtime="com.apple.CoreSimulator.SimRuntime.iOS-${ios_version//./-}"
-# Cold boots can still be migrating data after five minutes on hosted runners.
-readonly boot_deadline_seconds=600
+readonly readiness_deadline_seconds=180
+readonly probe_timeout_seconds=15
 
-install_runtime=false
-if [[ "$#" == 1 && "$1" == --install-runtime ]]; then
-  install_runtime=true
-elif [[ "$#" != 0 ]]; then
-  printf 'Usage: %s [--install-runtime]\n' "$0" >&2
+if [[ "$#" != 0 ]]; then
+  printf 'Usage: %s\n' "$0" >&2
   exit 64
 fi
 
@@ -99,11 +96,6 @@ runtime_available() {
 }
 
 available=$(runtime_available)
-if [[ "$available" == false && "$install_runtime" == true ]]; then
-  printf 'Installing the pinned iOS %s simulator runtime for arm64.\n' "$ios_version" >&2
-  xcodebuild -downloadPlatform iOS -buildVersion "$ios_version" -architectureVariant arm64
-  available=$(runtime_available)
-fi
 if [[ "$available" != true ]]; then
   printf 'Required simulator runtime %s is unavailable.\n' "$ios_runtime" >&2
   exit 1
@@ -114,6 +106,38 @@ start_device() {
   device=$(simctl 120 create 'Confeature Kotlin OpenFeature' \
     com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$ios_runtime")
   simctl 120 boot "$device"
+}
+
+wait_for_launchd() {
+  local deadline=$((SECONDS + readiness_deadline_seconds))
+  local remaining manager status
+  while (( SECONDS < deadline )); do
+    remaining=$((deadline - SECONDS))
+    if (( remaining <= 0 )); then
+      break
+    fi
+    if (( remaining > probe_timeout_seconds )); then
+      remaining=$probe_timeout_seconds
+    fi
+    # Kotlin/Native runs its test binary through simctl spawn on this device.
+    if manager=$(simctl "$remaining" spawn "$device" launchctl managerpid); then
+      if [[ "$manager" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'iOS simulator %s is accepting processes.\n' "$device" >&2
+        return 0
+      fi
+      printf '%s\n' 'The simulator returned an invalid launchd PID.' >&2
+      return 1
+    else
+      status=$?
+      # 149 is CoreSimulator reporting that the device is still booting.
+      case "$status" in
+        124|149) sleep 1 ;;
+        *) return "$status" ;;
+      esac
+    fi
+  done
+  printf 'The iOS simulator did not accept processes within %ss.\n' "$readiness_deadline_seconds" >&2
+  return 124
 }
 
 retire_device() {
@@ -136,13 +160,13 @@ cleanup() {
 }
 trap cleanup EXIT
 start_device
-simctl "$boot_deadline_seconds" bootstatus "$device" -b || {
+wait_for_launchd || {
   status=$?
   [[ "$status" == 124 ]] || exit "$status"
-  printf '%s\n' 'Retrying simulator boot with a fresh device after a timeout.' >&2
+  printf '%s\n' 'Retrying simulator readiness with a fresh device after a timeout.' >&2
   retire_device
   start_device
-  simctl "$boot_deadline_seconds" bootstatus "$device" -b
+  wait_for_launchd
 }
 export CONFEATURE_KOTLIN_SIMULATOR="$device"
 node "$integration/run-fixture.mjs" apple
