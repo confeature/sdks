@@ -121,6 +121,8 @@ export const GATE_PREFIXES = [
   "tools/dagger-call/",
   "tools/test-harness-live-contract/",
   "scripts/swift-precheck.sh",
+  "scripts/swift-openfeature-suite.sh",
+  "tools/sdk-swift-openfeature/",
   "apps/sdk-unreal/scripts/",
   "apps/sdk-kotlin-mp/openfeature/integration/",
   // What `pnpm install` reads before any gate step runs (#793 re-review F7).
