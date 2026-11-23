@@ -332,6 +332,8 @@ export function manifestProblems(manifest) {
  */
 export function classifyPath(path, names) {
   if (path.startsWith("apps/cli/")) return null;
+  // The native Swift leg builds the companion against the base SDK in this checkout.
+  if (names.has("swift") && path.startsWith("apps/sdk-swift-openfeature/")) return "swift";
   const m = /^apps\/sdk-([^/]+)\/./s.exec(path);
   if (m !== null && names.has(m[1])) return m[1];
   return "all";

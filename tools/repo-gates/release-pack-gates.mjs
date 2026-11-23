@@ -43,6 +43,30 @@ export const RELEASE_PACK_GATES = {
       },
     ],
   },
+  "swiftpm-consumer": {
+    // Resolve the staged companion from a clean scratch project before the
+    // public dependency check. The base's older macOS smoke stays separate.
+    script: "tools/sdk-pack/check-swiftpm-consumer.sh",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Check the companion's public dependencies",
+        perJob: true,
+        direct: true,
+      },
+    ],
+  },
+  "swiftpm-public-dependencies": {
+    script: "tools/sdk-pack/check-swiftpm-resolved.mjs",
+    homes: [
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Build the companion's consumer (no credentials)",
+        perJob: true,
+        direct: true,
+      },
+    ],
+  },
   "split-mirror": {
     // The PHP and Swift SDKs are published as mirror repositories whose
     // history is this split of the unit's directory, and a pushed history
@@ -59,6 +83,11 @@ export const RELEASE_PACK_GATES = {
       {
         file: ".github/workflows/sdk-publish.yml",
         before: "swift build against the mirror (no credentials)",
+        perJob: true,
+      },
+      {
+        file: ".github/workflows/sdk-publish.yml",
+        before: "Resolve the companion's consumer",
         perJob: true,
       },
     ],

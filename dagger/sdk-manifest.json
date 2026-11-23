@@ -494,6 +494,19 @@
       }
     },
     {
+      "name": "openfeature-swift",
+      "gate": "swift",
+      "registry": "swiftpm-openfeature",
+      "coordinates": "https://github.com/confeature/confeature-swift-openfeature",
+      "path": "apps/sdk-swift-openfeature",
+      "versionSource": "tag",
+      "after": [],
+      "mirror": {
+        "repository": "confeature/confeature-swift-openfeature",
+        "releaseTag": "{version}"
+      }
+    },
+    {
       "name": "java",
       "gate": "java",
       "registry": "maven",

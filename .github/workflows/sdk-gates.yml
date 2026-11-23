@@ -195,7 +195,7 @@ jobs:
         sdk: ${{ fromJSON(needs.select.outputs.known_red) }}
     steps: *dagger-leg
 
-  # Swift natively on macOS (ci.native: macos): scripts/swift-precheck.sh,
+  # Swift and its OpenFeature companion on macOS: scripts/swift-precheck.sh,
   # the same script the local pre-push runs, which fails closed under CI when
   # swift or swift-format is missing. The script holds the Xcode pin: it
   # selects the pinned Xcode, fails the job when that Xcode is not the one
@@ -252,6 +252,10 @@ jobs:
         env:
           SDK: ${{ matrix.sdk.name }}
         run: node tools/repo-gates/run-live-suite.mjs
+
+      - name: Run the OpenFeature provider's seeded loopback tests
+        if: matrix.sdk.live
+        run: node tools/sdk-swift-openfeature/run.mjs
 
   # The labelled source-quality smoke (ci.native: smoke): NOT A BUILD. No
   # hosted runner has an Unreal Engine, so apps/sdk-<name>/scripts/

@@ -81,6 +81,7 @@ function run({
   source = SOURCE,
   without = [],
   bare = false,
+  toolchainOnly = false,
 } = {}) {
   const box = mkdtempSync(join(tmpdir(), "swift-precheck-"));
   boxes.push(box);
@@ -94,13 +95,17 @@ function run({
   }
   const script = join(box, "scripts", "swift-precheck.sh");
   writeFileSync(script, source.replaceAll("/Applications/", `${box}/Applications/`));
+  writeFileSync(
+    join(box, "scripts", "swift-openfeature-suite.sh"),
+    `printf '%s|companion %s\\n' "$DEVELOPER_DIR" "$*" >> "$FAKE_LOG"\n`,
+  );
   const dev = `${box}/Applications/${DEV_SHAPE.replaceAll("${XCODE_PIN}", PIN)}`;
   if (installed) mkdirSync(dev, { recursive: true });
   const log = join(box, "tools.log");
   const ghEnv = join(box, "github-env");
   if (githubEnv) writeFileSync(ghEnv, "");
   const extra = typeof env === "function" ? env(dev) : env;
-  const r = spawnSync("/bin/bash", [script], {
+  const r = spawnSync("/bin/bash", [script, ...(toolchainOnly ? ["--toolchain-only"] : [])], {
     cwd: box,
     encoding: "utf8",
     env: {
@@ -162,6 +167,19 @@ describe("scripts/swift-precheck.sh holds the Xcode pin", () => {
       expect(r.status, r.stderr).toBe(0);
       judgedWith(r, r.dev);
       // M11: exactly one line, the derived path, for the job's live step.
+      expect(r.githubEnv).toBe(`DEVELOPER_DIR=${r.dev}\n`);
+    });
+
+    it("uses the pinned Swift tool for the companion after testing the base SDK", () => {
+      const r = run({ env: ACTIONS, githubEnv: true });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.tools.at(-1)).toBe(`${r.dev}|companion xcrun swift`);
+    });
+
+    it("the pack job can select the same Xcode without running source checks", () => {
+      const r = run({ env: ACTIONS, githubEnv: true, toolchainOnly: true });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.tools).toEqual([]);
       expect(r.githubEnv).toBe(`DEVELOPER_DIR=${r.dev}\n`);
     });
 

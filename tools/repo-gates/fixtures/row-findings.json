@@ -55,6 +55,7 @@
     "sdk-publish.yml: pack-pubdev step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-pypi: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-rubygems step Pack the release artifact: needs.setup.outputs.path: job setup has no output path",
+    "sdk-publish.yml: pack-swiftpm-openfeature: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: pack-swiftpm: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: publish-crates: needs.setup.outputs.path: job setup has no output path",
     "sdk-publish.yml: publish-pubdev: needs.setup.outputs.path: job setup has no output path"
@@ -132,6 +133,7 @@
     "sdk-publish.yml: pack-pubdev: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-pypi: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-rubygems: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-swiftpm-openfeature: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-swiftpm: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: publish-crates: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: publish-go step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
@@ -142,6 +144,8 @@
     "sdk-publish.yml: publish-pubdev: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: publish-swiftpm step Check the artifact against the pack job's digest and split: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
     "sdk-publish.yml: publish-swiftpm step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-swiftpm-openfeature step Check the artifact against the pack job's digest and split: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
+    "sdk-publish.yml: publish-swiftpm-openfeature step Upload: env GIT_CONFIG_NOSYSTEM redefines the workflow's GIT_CONFIG_NOSYSTEM",
     "sdk-publish.yml: setup: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: workflow-rules: GIT_CONFIG_NOSYSTEM is set in the workflow's env, which actions/checkout inherits (set it on the git steps)"
   ],
@@ -206,6 +210,7 @@
     "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets BASH_ENV, which CREDENTIALED_ENV does not allow"
   ],
   "N3e workflow env GIT_CONFIG_GLOBAL": [
@@ -221,6 +226,7 @@
     "sdk-publish.yml: pack-pubdev: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-pypi: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-rubygems: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
+    "sdk-publish.yml: pack-swiftpm-openfeature: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: pack-swiftpm: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: publish-crates: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
     "sdk-publish.yml: publish-crates: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
@@ -253,6 +259,10 @@
     "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
     "sdk-publish.yml: publish-swiftpm step Check the artifact against the pack job's digest and split: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
     "sdk-publish.yml: publish-swiftpm step Upload: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-swiftpm-openfeature step Check the artifact against the pack job's digest and split: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-swiftpm-openfeature step Upload: env GIT_CONFIG_GLOBAL redefines the workflow's GIT_CONFIG_GLOBAL",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: GIT_CONFIG_GLOBAL is publish-tmp/gc, not its pinned expression",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets GIT_CONFIG_GLOBAL, which points every tool at another configuration",
     "sdk-publish.yml: setup: GIT_CONFIG_GLOBAL is set in the workflow's env, which actions/checkout inherits (set it on the git steps)",
@@ -270,6 +280,7 @@
     "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets CURL_HOME, which CREDENTIALED_ENV does not allow"
   ],
   "N3g step env HOME": [
@@ -476,6 +487,7 @@
     "sdk-publish.yml: publish-pubdev: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-pypi: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-rubygems: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: it sets EXTRA, which CREDENTIALED_ENV does not allow"
   ],
   "TOJSON(SECRETS) in upper case": [
@@ -660,6 +672,7 @@
     "sdk-publish.yml: publish-pubdev: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
     "sdk-publish.yml: publish-pypi: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
     "sdk-publish.yml: publish-rubygems: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
+    "sdk-publish.yml: publish-swiftpm-openfeature: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression",
     "sdk-publish.yml: publish-swiftpm: a credentialed job's env: GITHUB_SSH_KNOWN_HOST is github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVIL, not its pinned expression"
   ],
   "C1 pypi repository-url to an attacker": [

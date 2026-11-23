@@ -20,6 +20,7 @@
 //     `bash` for publish-r2.sh) is an argv-recording stub; the test asserts the
 //     full argv, and that the file it names exists.
 
+import { mirrorPublishCases } from "./mirror-publish-fixtures.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -284,10 +285,7 @@ describe("a block's PATH is exactly its job's tools and the stubs", () => {
   );
 });
 
-describe.each([
-  ["publish-packagist", "git@github.com:confeature/confeature-php-sdk.git", "pack-packagist"],
-  ["publish-swiftpm", "git@github.com:confeature/confeature-swift.git", "pack-swiftpm"],
-])("%s pushes the received split, verbatim", (jobId, url, packId) => {
+describe.each(mirrorPublishCases)("%s pushes the split", (jobId, url, packId) => {
   const CHECK = "Check the artifact against the pack job's digest and split";
   function workspace(src) {
     const ws = scratch();

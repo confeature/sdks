@@ -207,6 +207,7 @@ describe("the real publish table", () => {
       "openfeature-java",
       "openfeature-kotlin",
       "openfeature-ruby",
+      "openfeature-swift",
     ].sort(byName);
     expect(units).toEqual(expected);
   });

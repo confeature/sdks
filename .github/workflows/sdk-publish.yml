@@ -1540,25 +1540,138 @@ jobs:
         if: always()
         run: rm -rf publish-tmp/ssh
 
-  # -------------------------------------------------------------- maven ----
-  # The JVM SDKs are served by a static Maven repository on Cloudflare R2
-  # (MAVEN_URL), not Maven Central (#902). R2 stores whatever it is given, so
-  # the pack job enforces what a registry would: the release is exactly the
-  # unit's, at the resolved version, with checksums that match, sources and
-  # javadoc jars, and complete POMs carrying no address
-  # (tools/sdk-pack/check-maven-release.mjs); and no file of that version is
-  # live yet. A released version is never rewritten. The maven-metadata.xml
-  # files are the only objects ever overwritten: the pack job puts the live ones
-  # in Gradle's output repository and publishes again, and Gradle adds the new
-  # version to the list, so every earlier one stays listed.
-  #
-  # Every Maven pack runs on macOS: the Kotlin Multiplatform SDK publishes ALL
-  # its targets from one host, in one run (its root module names every
-  # target's), and only macOS builds the iOS targets. The Java and Android SDKs
-  # build the same on any host, and a public repository's macOS minutes are
-  # free. Nothing is signed (no key to hold): integrity is the Maven checksums
-  # plus a GitHub artifact attestation of every file, made by the publish job.
+  pack-swiftpm-openfeature:
+    name: pack ${{ needs.setup.outputs.coordinates }}
+    needs: [setup, gate]
+    if: >-
+      always() &&
+      needs.setup.result == 'success' &&
+      needs.setup.outputs.registry == 'swiftpm-openfeature' &&
+      (needs.setup.outputs.gate == 'skip' || needs.gate.result == 'success')
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.split.outputs.sha256 }}
+      split: ${{ steps.split.outputs.split }}
+    env:
+      UNIT_NAME: ${{ needs.setup.outputs.name }}
+      UNIT_PATH: ${{ needs.setup.outputs.path }}
+      UNIT_COORDINATES: ${{ needs.setup.outputs.coordinates }}
+      MIRROR_REPOSITORY: ${{ needs.setup.outputs.mirrorRepository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every manifest names MakerLabs (verify:manifest-author)
+        run: pnpm run verify:manifest-author
+
+      - name: Pack the release artifact
+        run: pnpm run split-mirror "$UNIT_PATH" "$RUNNER_TEMP/release/mirror.bundle" > "$RUNNER_TEMP/split.out"
+
+      - name: Check the artifact against the resolved unit
+        id: split
+        run: |
+          sha="$(bash tools/sdk-pack/stage-swiftpm-mirror.sh)"
+          echo "split=$(tail -n 1 "$RUNNER_TEMP/split.out")" >> "$GITHUB_OUTPUT"
+          echo "sha256=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Select the pinned Xcode
+        run: bash scripts/swift-precheck.sh --toolchain-only
+
+      - name: Resolve the companion's consumer
+        run: bash tools/sdk-pack/check-swiftpm-consumer.sh openfeature
+      - name: Check the companion's public dependencies
+        run: node tools/sdk-pack/check-swiftpm-resolved.mjs "$RUNNER_TEMP/consume/consumer/Package.resolved"
+      - name: Build the companion's consumer (no credentials)
+        run: xcrun swift build --package-path "$RUNNER_TEMP/consume/consumer"
+
+      - name: Hand the artifact to the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-swiftpm-openfeature
+          path: ${{ runner.temp }}/release/*.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-swiftpm-openfeature:
+    name: publish ${{ needs.setup.outputs.mirrorRepository }}@${{ needs.setup.outputs.mirrorTag }}
+    needs: [setup, pack-swiftpm-openfeature]
+    if: >-
+      always() &&
+      needs.pack-swiftpm-openfeature.result == 'success' &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: sdk-publish-swiftpm-openfeature
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SHA256: ${{ needs.pack-swiftpm-openfeature.outputs.sha256 }}
+      SPLIT_SHA: ${{ needs.pack-swiftpm-openfeature.outputs.split }}
+      MIRROR_TAG: ${{ needs.setup.outputs.mirrorTag }}
+    steps:
+      - name: Receive the artifact (this run only)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-swiftpm-openfeature
+          path: release
+
+      - name: Check the artifact against the pack job's digest and split
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        run: |
+          printf '%s  %s\n' "$EXPECTED_SHA256" release/mirror.bundle | sha256sum --check --strict
+          mkdir -p publish-tmp
+          git init --quiet --bare publish-tmp/mirror.git
+          git --git-dir=publish-tmp/mirror.git bundle verify --quiet --end-of-options release/mirror.bundle
+          git --git-dir=publish-tmp/mirror.git fetch --quiet --end-of-options release/mirror.bundle refs/heads/main:refs/heads/main
+          git --git-dir=publish-tmp/mirror.git rev-parse refs/heads/main > publish-tmp/got-split
+          printf '%s\n' "$SPLIT_SHA" > publish-tmp/want-split
+          if cmp publish-tmp/got-split publish-tmp/want-split; then echo "main is the pack job's split"; else echo "::error::the received main is not the pack job's split $SPLIT_SHA"; exit 1; fi
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then echo "::error::MIRROR_DEPLOY_KEY is not set in environment sdk-publish-swiftpm-openfeature"; exit 1; fi
+          umask 077
+          mkdir -p publish-tmp/ssh
+          printf '%s\n' "$DEPLOY_KEY" > publish-tmp/ssh/key
+          printf '%s\n' "$GITHUB_SSH_KNOWN_HOST" > publish-tmp/ssh/known_hosts
+
+      - name: Upload
+        env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_SSH_COMMAND: ssh -F /dev/null -i ${{ github.workspace }}/publish-tmp/ssh/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ github.workspace }}/publish-tmp/ssh/known_hosts
+          GIT_ALLOW_PROTOCOL: ssh
+        run: |
+          if [ -z "$MIRROR_TAG" ]; then echo "::error::the resolver gave no mirror tag"; exit 1; fi
+          git --git-dir=publish-tmp/mirror.git push --atomic --end-of-options git@github.com:confeature/confeature-swift-openfeature.git refs/heads/main:refs/heads/main "refs/heads/main:refs/tags/${MIRROR_TAG}"
+
+      - name: Remove the deploy key
+        if: always()
+        run: rm -rf publish-tmp/ssh
+
+  # -------------------------------------------------------------- maven ----
   pack-maven:
     name: pack ${{ needs.setup.outputs.coordinates }}
     needs: [setup, gate]
@@ -1767,6 +1880,8 @@ jobs:
       - publish-packagist
       - pack-swiftpm
       - publish-swiftpm
+      - pack-swiftpm-openfeature
+      - publish-swiftpm-openfeature
       - pack-maven
       - publish-maven
       - pack-jsr

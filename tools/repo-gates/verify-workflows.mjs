@@ -654,6 +654,13 @@ export const ACTION_SURFACE = {
       uploadRelease("release-swiftpm", "*.bundle"),
     ],
     "publish-swiftpm": [download("release-swiftpm", "release")],
+    "pack-swiftpm-openfeature": [
+      fullCheckout(),
+      step(PIN.pnpm),
+      setupNode(),
+      uploadRelease("release-swiftpm-openfeature", "*.bundle"),
+    ],
+    "publish-swiftpm-openfeature": [download("release-swiftpm-openfeature", "release")],
     "pack-maven": [
       shallowCheckout(),
       step(PIN.pnpm),
@@ -952,6 +959,7 @@ const DEPLOY_KEY_SECRET = {
   "publish-go": "GO_TAG_DEPLOY_KEY",
   "publish-packagist": "MIRROR_DEPLOY_KEY",
   "publish-swiftpm": "MIRROR_DEPLOY_KEY",
+  "publish-swiftpm-openfeature": "MIRROR_DEPLOY_KEY",
 };
 const PACK = (jobId, out) =>
   EXPR(`needs\\.${jobId.replace(/^publish-/, "pack-")}\\.outputs\\.${out}`);
@@ -1323,9 +1331,22 @@ export const CREDENTIALED_COMMANDS = {
  * Rule 3, per environment (round 5): the commands each credentialed job may
  * run, exactly the ones it uses (a recorded exception aside). A secret can
  * leave a job only through a tool that talks to the network, so curl is the
- * Go job's alone, git the three git jobs', and each registry client its own
+ * Go job's alone, git the Git publication jobs', and each registry client its own
  * job's. An environment not listed runs nothing.
  */
+const MIRROR_COMMANDS = [
+  "[",
+  "cmp",
+  "echo",
+  "exit",
+  "git",
+  "mkdir",
+  "printf",
+  "rm",
+  "sha256sum",
+  "umask",
+];
+
 export const ENVIRONMENT_COMMANDS = {
   "sdk-publish-npm": ["npm", "printf", "sha256sum"],
   "sdk-publish-pypi": [
@@ -1360,30 +1381,9 @@ export const ENVIRONMENT_COMMANDS = {
   // The upload is its PUBLISH_EXCEPTIONS curl; these check the digest and the key.
   "sdk-publish-hex": ["[", "echo", "exit", "printf", "sha256sum"],
   "sdk-publish-go": ["[", "curl", "echo", "exit", "git", "mkdir", "printf", "rm", "umask"],
-  "sdk-publish-packagist": [
-    "[",
-    "cmp",
-    "echo",
-    "exit",
-    "git",
-    "mkdir",
-    "printf",
-    "rm",
-    "sha256sum",
-    "umask",
-  ],
-  "sdk-publish-swiftpm": [
-    "[",
-    "cmp",
-    "echo",
-    "exit",
-    "git",
-    "mkdir",
-    "printf",
-    "rm",
-    "sha256sum",
-    "umask",
-  ],
+  "sdk-publish-packagist": MIRROR_COMMANDS,
+  "sdk-publish-swiftpm": MIRROR_COMMANDS,
+  "sdk-publish-swiftpm-openfeature": MIRROR_COMMANDS,
   "sdk-publish-maven": [
     "cmp",
     "cut",
@@ -3353,6 +3353,7 @@ function daggerLegProblems(job) {
 /** The macOS job's suite and its live step (#924), exactly. */
 const NATIVE_SUITE_RUN = "bash scripts/swift-precheck.sh";
 const NATIVE_LIVE_RUN = `node ${LIVE_SCRIPT}`;
+const SWIFT_OPENFEATURE_LIVE_RUN = "node tools/sdk-swift-openfeature/run.mjs";
 const NATIVE_LIVE_ENV = { SDK: "${{ matrix.sdk.name }}" };
 const NODE_VERSION_REF = "${{ env.NODE_VERSION }}";
 /**
@@ -3402,6 +3403,15 @@ function nativeLegProblems(job) {
   }
   if (lives.length !== 1) out.push(`runs ${lives.length} live steps, not exactly one`);
   const live = lives[0];
+  const companion = steps.filter((st) => run(st) === SWIFT_OPENFEATURE_LIVE_RUN);
+  if (
+    companion.length !== 1 ||
+    String(companion[0].if ?? "").trim() !== LIVE_IF ||
+    steps.indexOf(companion[0]) <= steps.indexOf(live)
+  )
+    out.push(
+      `must run \`${SWIFT_OPENFEATURE_LIVE_RUN}\` once after the base live suite under ${LIVE_IF}`,
+    );
   if (String(live.if ?? "").trim() !== LIVE_IF)
     out.push(`its live step's if: is not exactly ${LIVE_IF}`);
   if (canonical(live.env ?? null) !== canonical(NATIVE_LIVE_ENV))

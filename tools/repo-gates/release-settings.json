@@ -117,6 +117,18 @@
       ]
     },
     {
+      "name": "sdk-publish-swiftpm-openfeature",
+      "registry": "swiftpm-openfeature",
+      "secrets": [
+        {
+          "name": "MIRROR_DEPLOY_KEY",
+          "kind": "deploy-key",
+          "issuer": "SSH deploy key (write) on confeature/confeature-swift-openfeature, created by the operator's applier (mirrors[])",
+          "rotateBy": "2027-10-16"
+        }
+      ]
+    },
+    {
       "name": "cli-release",
       "tagPatterns": ["cli-v*"],
       "secrets": [
@@ -218,6 +230,13 @@
       "environment": "sdk-publish-swiftpm",
       "tags": ["refs/tags/*"],
       "deployKeyTitle": "sdk-publish-swiftpm"
+    },
+    {
+      "repository": "confeature/confeature-swift-openfeature",
+      "unit": "openfeature-swift",
+      "environment": "sdk-publish-swiftpm-openfeature",
+      "tags": ["refs/tags/*"],
+      "deployKeyTitle": "sdk-publish-swiftpm-openfeature"
     }
   ],
   "requiredChecks": {

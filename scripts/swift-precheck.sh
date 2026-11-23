@@ -43,6 +43,11 @@ fail() {
   exit 1
 }
 
+case "${1:-}" in
+  "" | --toolchain-only) ;;
+  *) fail "usage: $0 [--toolchain-only]" ;;
+esac
+
 if ! [[ "$XCODE_PIN" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
   fail "XCODE_PIN '${XCODE_PIN}' is not a version (<major>[.<minor>…])."
 fi
@@ -111,6 +116,9 @@ else
   say "WARN: judging Swift with ${in_use} instead; CI judges it with Xcode ${XCODE_PIN}."
 fi
 
+# The companion's pack job uses the same pin before building against public dependencies.
+if [ "${1:-}" = --toolchain-only ]; then exit 0; fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/apps/sdk-swift"
 
@@ -130,5 +138,8 @@ elif [ "$ci_mode" = true ]; then
   fail "no swift-format under CI — the format lint cannot run."
 else
   say "WARN: swift-format not on PATH — skipping format lint (brew install swift-format)."
+fi
+if [ "$(uname -s)" = Darwin ] || [ "$ci_mode" = true ]; then
+  bash "$ROOT/scripts/swift-openfeature-suite.sh" "${swift_cmd[@]}"
 fi
 echo "[swift-precheck] OK"

@@ -14,6 +14,9 @@ if (!existsSync(cli)) {
   console.error("Build the live-contract harness or pass its compiled CLI path.");
   process.exit(2);
 }
+const packagePath = resolve(
+  process.env.SWIFT_OPENFEATURE_PACKAGE_PATH ?? resolve(root, "apps/sdk-swift-openfeature"),
+);
 const env = { ...process.env };
 for (const key of [
   "CDN_ENTRY",
@@ -39,12 +42,19 @@ const result = spawnSync(
     "swift",
     "test",
     "--package-path",
-    resolve(root, "apps/sdk-swift-openfeature"),
+    packagePath,
     "--skip-build",
     "--filter",
     "LoopbackTests",
   ],
-  { cwd: root, env, stdio: "inherit" },
+  { cwd: root, env, encoding: "utf8" },
 );
+process.stdout.write(result.stdout ?? "");
+process.stderr.write(result.stderr ?? "");
 if (result.error) console.error(result.error.message);
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+// XCTest reports success even when the harness is absent and both cases skip.
+if (!/Executed 2 tests, with 0 failures/.test(result.stdout) || / skipped\b/.test(result.stdout)) {
+  console.error("Expected both OpenFeature provider loopback tests to run without skips.");
+  process.exit(1);
+}
