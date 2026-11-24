@@ -2082,6 +2082,13 @@ describe("19 the SDK gates' own shape (#793)", () => {
       /kotlin-apple: must run exactly one unconditional Kotlin Apple check/,
     ],
     [
+      "a Kotlin Apple job that installs the full workspace",
+      ({ jobs }) =>
+        void (step(jobs["kotlin-apple"], "Install the live-contract harness dependencies").run =
+          "pnpm install --frozen-lockfile"),
+      /kotlin-apple: must prepare pnpm, Node, the harness dependencies/,
+    ],
+    [
       "an Apple Maven link that can be skipped",
       ({ jobs }) => void (step(jobs["kotlin-apple"], "Link the iOS Maven consumer").if = "false"),
       /kotlin-apple: must link the iOS Maven consumer unconditionally/,
@@ -2263,17 +2270,18 @@ describe("19 the SDK gates' own shape (#793)", () => {
       /swift: has no unconditional step running `bash scripts\/swift-precheck\.sh`/,
     ],
     [
-      "swift: no workspace install before the live step",
+      "swift: installs the full workspace before the live step",
       ({ jobs }) =>
-        void (jobs.swift.steps = jobs.swift.steps.filter(
-          (x) => x.run !== "pnpm install --frozen-lockfile",
-        )),
-      /swift: has no `pnpm install --frozen-lockfile` step between its suite and its live step/,
+        void (step(jobs.swift, "Install the live-contract harness dependencies").run =
+          "pnpm install --frozen-lockfile"),
+      /swift: has no `pnpm --filter @confeature\/test-harness-live-contract\.\.\. install --frozen-lockfile` step/,
     ],
     [
       "swift: no harness build before the live step",
       ({ jobs }) =>
-        void (jobs.swift.steps = jobs.swift.steps.filter((x) => !/--filter/.test(x.run ?? ""))),
+        void (jobs.swift.steps = jobs.swift.steps.filter(
+          (x) => x.name !== "Build the live-contract harness",
+        )),
       /swift: has no `pnpm --filter @confeature\/test-harness-live-contract build` step/,
     ],
     [

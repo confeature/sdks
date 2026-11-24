@@ -228,15 +228,15 @@ jobs:
       - name: Build, test and lint (scripts/swift-precheck.sh)
         run: bash scripts/swift-precheck.sh
 
-      # The live harness adds pnpm, the workspace from the frozen lockfile
-      # (including the Darwin workerd) and the build every live runner starts.
+      # The live harness adds pnpm, its frozen dependencies (including the
+      # Darwin workerd) and the build every live runner starts.
       - name: Setup pnpm
         if: matrix.sdk.live
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - name: Install the workspace
+      - name: Install the live-contract harness dependencies
         if: matrix.sdk.live
-        run: pnpm install --frozen-lockfile
+        run: pnpm --filter @confeature/test-harness-live-contract... install --frozen-lockfile
 
       - name: Build the live-contract harness
         if: matrix.sdk.live
@@ -316,8 +316,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install the workspace
-        run: pnpm install --frozen-lockfile
+      - name: Install the live-contract harness dependencies
+        run: pnpm --filter @confeature/test-harness-live-contract... install --frozen-lockfile
 
       - name: Build the live-contract harness
         run: pnpm --filter @confeature/test-harness-live-contract build

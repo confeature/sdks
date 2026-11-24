@@ -3369,18 +3369,20 @@ const NATIVE_NODE_PREP = {
     String(st?.uses ?? "").trim() === PIN.setupNode &&
     st?.with?.["node-version"] === NODE_VERSION_REF,
 };
+const NATIVE_HARNESS_INSTALL =
+  "pnpm --filter @confeature/test-harness-live-contract... install --frozen-lockfile";
 /**
  * Shared tooling for the macOS jobs. The Swift suite checks dependency pins
  * with Node before its tests. The native live steps also need pnpm, the
- * workspace from the frozen lockfile (the harness's wrangler and workerd);
+ * harness's dependencies from the frozen lockfile (including workerd) and
  * the harness's dist/, which every liveSuite.runner starts.
  */
 const NATIVE_LIVE_PREP = [
   { label: PIN.pnpm, is: (st) => String(st?.uses ?? "").trim() === PIN.pnpm },
   NATIVE_NODE_PREP,
   {
-    label: "pnpm install --frozen-lockfile",
-    is: (st) => String(st?.run ?? "").trim() === "pnpm install --frozen-lockfile",
+    label: NATIVE_HARNESS_INSTALL,
+    is: (st) => String(st?.run ?? "").trim() === NATIVE_HARNESS_INSTALL,
   },
   {
     label: "pnpm --filter @confeature/test-harness-live-contract build",
@@ -3392,7 +3394,7 @@ const NATIVE_LIVE_PREP = [
 /**
  * Rule 19's half over the macOS job's steps (#924): the native counterpart of
  * daggerLegProblems. The job runs its suite (scripts/swift-precheck.sh,
- * unconditional, after Node is pinned), then prepares the workspace and harness, then runs
+ * unconditional, after Node is pinned), then prepares the harness, then runs
  * exactly one live step, `node tools/repo-gates/run-live-suite.mjs` with
  * `SDK: ${{ matrix.sdk.name }}`, only when select-sdks.mjs marks the leg
  * `live`. The runner itself is the manifest's, read by that script; which SDK
@@ -3468,7 +3470,7 @@ function kotlinAppleLegProblems(job) {
   );
   if (indexes.some((index, i) => index === -1 || (i > 0 && index < indexes[i - 1])))
     out.push(
-      "must prepare pnpm, Node, the workspace and the harness in order before the Apple check",
+      "must prepare pnpm, Node, the harness dependencies and the harness build in order before the Apple check",
     );
   const links = steps.filter((step) => String(step?.run ?? "").trim() === KOTLIN_APPLE_LINK);
   if (
