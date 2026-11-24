@@ -166,7 +166,14 @@ wait_for_launchd || {
   printf '%s\n' 'Retrying simulator readiness with a fresh device after a timeout.' >&2
   retire_device
   start_device
-  wait_for_launchd
+  wait_for_launchd || {
+    status=$?
+    if [[ "$status" == 124 ]]; then
+      # Capture CoreSimulator's reported state without extending the retry.
+      simctl 10 list devices "$device" >&2 || true
+    fi
+    exit "$status"
+  }
 }
 export CONFEATURE_KOTLIN_SIMULATOR="$device"
 node "$integration/run-fixture.mjs" apple

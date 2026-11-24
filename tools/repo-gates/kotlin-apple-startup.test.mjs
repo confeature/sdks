@@ -41,6 +41,7 @@ const TOOLS = {
   xcrun: `[ "$1" = simctl ] || exit 64
   case "$2" in
     boot|spawn|shutdown|delete) printf "%s %s\\n" "$2" "$3" ;;
+    list) if [ "$3" = devices ]; then printf "list devices %s\\n" "$4"; else printf "list\\n"; fi ;;
     *) printf "%s\\n" "$2" ;;
   esac >> "$CALL_LOG"
   case "$SIM_MODE:$2" in
@@ -66,6 +67,11 @@ const TOOLS = {
   esac
   case "$2" in
     list)
+      if [ "$3" = devices ]; then
+        [ "$#" = 4 ] && [ "$4" = "$FAKE_REPLACEMENT" ] || exit 64
+        printf "Simulator still reports Booted\\n"
+        exit 0
+      fi
       [ "$#" = 4 ] && [ "$3" = runtimes ] && [ "$4" = --json ] || exit 64
       identifier=$FAKE_RUNTIME
       availability=true
@@ -228,6 +234,19 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
     expect(["", "Z"]).toContain(result.descendantState?.charAt(0));
   });
 
+  it("reports the replacement's state within a bounded diagnostic after final timeout", () => {
+    const result = run("stalled-readiness");
+    expect(result.status).toBe(124);
+    expect(result.calls).toEqual([
+      ...RECOVERY,
+      `list devices ${REPLACEMENT}`,
+      ...retire(REPLACEMENT),
+    ]);
+    expect(result.stderr).toContain("list (timeout 10s)");
+    expect(result.stderr).toContain("Simulator still reports Booted");
+    expect(result.githubEnv).toBe("");
+  }, 12_000);
+
   it("fails if the fixture passed but deleting its simulator fails", () => {
     const result = run("failed-cleanup");
     expect(result.status).toBe(1);
@@ -239,7 +258,6 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
     ["exit-124", 1, ["list"]],
     ["interrupted-list", 143, ["list"]],
     ["stalled-list", 124, ["list", "list"]],
-    ["stalled-readiness", 124, [...RECOVERY, ...retire(REPLACEMENT)]],
     ["invalid-pid", 1, [...STARTUP, ...CLEANUP]],
     ["zero-pid", 1, [...STARTUP, ...CLEANUP]],
     ["failed-spawn", 21, [...STARTUP, ...CLEANUP]],
