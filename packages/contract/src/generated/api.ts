@@ -930,6 +930,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/configs/{configId}/setting-order": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        configId: string;
+      };
+      cookie?: never;
+    };
+    /** Get the order of settings in a config (Confeature extension) */
+    get: operations["getSettingOrder"];
+    /** Reorder settings in a config atomically (Confeature extension) */
+    put: operations["reorderSettings"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/configs/{configId}/settings/{key}": {
     parameters: {
       query?: never;
@@ -2396,7 +2416,7 @@ export interface components {
       predefinedVariations?: components["schemas"]["CreatePredefinedVariationModel"][] | null;
       /**
        * Format: int32
-       * @description Not supported yet (#818): settings are ordered by creation. Accepted only when null.
+       * @description Accepted only when null. Use reorderSettings to change the config's order after creation.
        */
       order?: number | null;
       /** @description Public creation accepts omission, false or null. A true value returns 400 (#818). Product import can enable JSON-text mode. */
@@ -2426,6 +2446,41 @@ export interface components {
       /** @description The change note for the audit log. Required (400 reason_required) when the product requires a reason for changes. A Confeature addition: a ConfigCat client omits it. */
       reason?: string;
     };
+    /**
+     * Format: int32
+     * @description Identifier of an existing setting.
+     */
+    SettingOrderId: number;
+    SettingOrderItem: {
+      settingId: components["schemas"]["SettingOrderId"];
+      key: components["schemas"]["SettingKey"];
+      name: string;
+    };
+    SettingOrder: {
+      /** @description All settings in the config's current order. */
+      settings: components["schemas"]["SettingOrderItem"][];
+      /** @description Whether the owning product requires a change note. */
+      reasonRequired: boolean;
+    };
+    /** @description Replace the order of the complete settings list in one transaction. The two arrays must contain the same set of distinct setting IDs. */
+    ReorderSettingsRequest: {
+      /** @description The ordered setting IDs from getSettingOrder. */
+      expectedSettingIds: components["schemas"]["SettingOrderId"][];
+      /** @description The complete setting IDs in the desired order. */
+      settingIds: components["schemas"]["SettingOrderId"][];
+      /** @description Change note for the audit log, required by the owning product's policy. */
+      reason?: string;
+    };
+    SettingOrderLimit: {
+      /** @enum {string} */
+      error: "setting_order_limit";
+      message: string;
+    };
+    SettingOrderConflict: {
+      /** @enum {string} */
+      error: "setting_order_conflict";
+      message: string;
+    };
     /** @description A Feature Flag or Setting, as the config's settings list and the per-key routes (get one, create, update) answer it (#937). Aligned 1:1 with ConfigCat's `SettingModel` (get-settings). It carries no value: a value is per-environment (`SettingFormulaModel`). `tags` lists the tags assigned to the setting, by assignment order (#1009). `predefinedVariations` lists the setting's predefined variations, in their order. */
     SettingModel: {
       /**
@@ -2440,7 +2495,7 @@ export interface components {
       hint: string | null;
       /**
        * Format: int32
-       * @description The order of the setting in its config, from 0, by creation.
+       * @description The zero-based rank of the setting in its config's current order.
        */
       order: number;
       settingType: components["schemas"]["SettingType"];
@@ -2594,7 +2649,10 @@ export interface components {
       settingType: components["schemas"]["SettingType"];
       /** @description True for a string setting with JSON-text mode enabled through product import. Its values remain strings. Ordinary settings report false. */
       isJson: boolean;
-      /** Format: int32 */
+      /**
+       * Format: int32
+       * @description The zero-based rank of the setting in its config's current order.
+       */
       order: number;
       /** Format: date-time */
       createdAt: string | null;
@@ -7547,6 +7605,166 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ValueNotLive"];
+        };
+      };
+    };
+  };
+  getSettingOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        configId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The complete settings list in the config's current order, with the owning product's change-note policy. An empty config returns an empty list. */
+      200: {
+        headers: {
+          /** @description The response is private and must not be stored. */
+          "Cache-Control"?: "private, no-store";
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingOrder"];
+        };
+      };
+      /** @description Invalid config ID. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid credentials. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The caller lacks setting:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The config is absent or outside the active organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The config exceeds 8,192 settings. The response contains no partial list. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingOrderLimit"];
+        };
+      };
+      429: components["responses"]["TooManyAttempts"];
+    };
+  };
+  reorderSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        configId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReorderSettingsRequest"];
+      };
+    };
+    responses: {
+      /** @description The config has the requested order. An actual reorder records one audit event. If the current order already matches the requested order, there is no write or audit event. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid config ID or request body, duplicate settings, unequal ID sets, or a required change note is missing. Also bad_request when a cookie request body is not JSON. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Missing or invalid credentials. */
+      401: {
+        headers: {
+          "WWW-Authenticate": components["headers"]["BasicChallenge"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The caller lacks setting:write. Also forbidden (cross-origin request refused) when the cookie request comes from outside an allowed origin. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The config is absent or outside the active organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The config's current membership or order has changed. Nothing was written. Read getSettingOrder again before retrying. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingOrderConflict"];
+        };
+      };
+      /** @description The request body exceeds 256 KiB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description The organization write budget or the HTTP Basic attempt limit was exceeded. */
+      429: {
+        headers: {
+          "Retry-After": number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RateLimited"] | components["schemas"]["Error"];
         };
       };
     };
