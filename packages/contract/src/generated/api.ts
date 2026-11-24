@@ -2345,7 +2345,7 @@ export interface components {
       reason?: string;
     };
     /**
-     * @description The evaluation version of a Config. Aligned 1:1 with ConfigCat's `EvaluationVersion` (configcat-publicapi-node-client/model/ evaluation-version.ts). Confeature only ever produces `v2`; `v1` is carried for wire parity.
+     * @description The evaluation version of a Config. Aligned 1:1 with ConfigCat's `EvaluationVersion` (configcat-publicapi-node-client/model/ evaluation-version.ts). Confeature defaults new Configs to `v2` and supports `v1` Configs.
      * @enum {string}
      */
     EvaluationVersion: "v1" | "v2";
@@ -2365,7 +2365,7 @@ export interface components {
       order: number;
       /**
        * Format: uuid
-       * @description Identifier of the Config the current Config was migrated from. Always null in Confeature v1 — carried for wire parity.
+       * @description Identifier of the Config the current Config was migrated from. Null for Configs that were created independently.
        */
       migratedConfigId: string | null;
       evaluationVersion: components["schemas"]["EvaluationVersion"];

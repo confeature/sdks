@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.14.0
+  version: 0.14.1
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -8682,8 +8682,8 @@ components:
       description: >
         The evaluation version of a Config. Aligned 1:1 with ConfigCat's
         `EvaluationVersion` (configcat-publicapi-node-client/model/
-        evaluation-version.ts). Confeature only ever produces `v2`; `v1` is
-        carried for wire parity.
+        evaluation-version.ts). Confeature defaults new Configs to `v2`
+        and supports `v1` Configs.
       enum:
         - v1
         - v2
@@ -8727,7 +8727,7 @@ components:
           nullable: true
           description: >
             Identifier of the Config the current Config was migrated from.
-            Always null in Confeature v1 — carried for wire parity.
+            Null for Configs that were created independently.
         evaluationVersion:
           $ref: "#/components/schemas/EvaluationVersion"
     CreateConfigRequest:
