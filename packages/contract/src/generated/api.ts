@@ -35,7 +35,7 @@ export interface paths {
     put?: never;
     /**
      * Sign in with email + password
-     * @description Verifies the credential and, on success, issues a session cookie (`__Host-cfsession`, HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age=604800). The cookie value is opaque; revocation is server-side via POST /v1/auth/logout. Failures return the SAME shape and timing whether the email does not exist or the password is wrong (auth-side enumeration defence). Failed passwords are budgeted per IP and per address, and over budget the attempt is refused before verification.
+     * @description Verifies the credential and, for an account without an enrolled second factor, issues a session cookie (`__Host-cfsession`, HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age=604800). The cookie value is opaque; revocation is server-side via POST /v1/auth/logout. Failures return the SAME shape and timing whether the email does not exist or the password is wrong (auth-side enumeration defence). Failed passwords are budgeted per IP and per address, and over budget the attempt is refused before verification. An enrolled account instead requires a second factor before issuing a session.
      */
     post: operations["authLogin"];
     delete?: never;
@@ -75,7 +75,7 @@ export interface paths {
     put?: never;
     /**
      * Use an emailed verification link
-     * @description Confeature addition (#1169). The dashboard's /verify-email page posts the link's token here from a button, never on load. The token proves the mailbox; the registrant is proven by the `__Host-cfsignup` binding of the browser that signed up, by the account's own session (for an existing account that asked for its link), or by the password. On a pending sign-up it creates the account (email verified) and signs in; on an existing account it marks the address verified, and signs in when proven by the password. Five wrong passwords end the link.
+     * @description Confeature addition (#1169). The dashboard's /verify-email page posts the link's token here from a button, never on load. The token proves the mailbox; the registrant is proven by the `__Host-cfsignup` binding of the browser that signed up, by the account's own session (for an existing account that asked for its link), or by the password. On a pending sign-up it creates the account (email verified) and signs in; on an existing account it marks the address verified, and signs in when proven by the password and any enrolled second factor. Five wrong passwords end the link.
      */
     post: operations["authVerifyEmail"];
     delete?: never;
@@ -158,6 +158,94 @@ export interface paths {
     get: operations["authSession"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/two-factor": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read whether two-factor authentication is enabled for this account */
+    get: operations["authTwoFactorStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/two-factor/enrollment": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start setting up an authenticator app for this account */
+    post: operations["authTwoFactorStart"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/two-factor/enrollment/confirm": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm an authenticator and enable two-factor authentication */
+    post: operations["authTwoFactorConfirm"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/two-factor/verify": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Complete pending sign-in or reauthentication with a second factor
+     * @description Completes the pending challenge for the browser that proved the first factor. The server binds the challenge to its account and purpose. A successful response consumes the challenge and proof, sets a new session cookie, and clears the pending cookie.
+     */
+    post: operations["authTwoFactorVerify"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/auth/two-factor/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Disable two-factor authentication for this account after proof */
+    post: operations["authTwoFactorDisable"];
     delete?: never;
     options?: never;
     head?: never;
@@ -275,7 +363,7 @@ export interface paths {
     put?: never;
     /**
      * Complete an OIDC SSO flow and issue a session cookie
-     * @description Confeature-original endpoint (same note as `ssoStart`: no ConfigCat counterpart exists). Consumes the KV state triple atomically (read + delete), exchanges the `code` at the provider's token endpoint, fetches the operator's email at the userinfo endpoint, upserts a single `users` row by email-match (preserving any existing `password_hash`), creates a session, and sets the `__Host-cfsession` cookie using the same machinery as `/v1/auth/login` and `/v1/auth/accept-invite`. All 400-class failures (missing / consumed / malformed state, missing email, malformed body) return one bytewise-identical body. All 502-class failures (token endpoint down, userinfo endpoint down) return one bytewise-identical body. No per-branch enumeration.
+     * @description Confeature-original endpoint (same note as `ssoStart`: no ConfigCat counterpart exists). Consumes the KV state triple atomically (read + delete), exchanges the `code` at the provider's token endpoint, fetches the operator's email at the userinfo endpoint, upserts a single `users` row by email-match (preserving any existing `password_hash`), creates a session once any enrolled second factor is verified, and sets the `__Host-cfsession` cookie using the same machinery as `/v1/auth/login` and `/v1/auth/accept-invite`. All 400-class failures (missing / consumed / malformed state, missing email, malformed body) return one bytewise-identical body. All 502-class failures (token endpoint down, userinfo endpoint down) return one bytewise-identical body. No per-branch enumeration.
      */
     post: operations["ssoCallback"];
     delete?: never;
@@ -315,7 +403,7 @@ export interface paths {
     put?: never;
     /**
      * Confirm a password account and attach a pending Google identity
-     * @description Confeature-original endpoint. The second leg of the no-silent-merge linking flow: the `google` callback verified the Google identity server-side and minted a single-use link challenge (returned as `challenge_id` in the callback's `link_required` branch). This endpoint loads the user by the challenge's email, verifies the supplied password with argon2id (timing-equalised on a wrong/unknown password), and — on success — spends the challenge, attaches `sso_provider_id='google'` + `sso_subject`, creates a session, and sets the `__Host-cfsession` cookie. A wrong password spends one of the challenge's 5 attempts, not the challenge. No token or password is ever logged.
+     * @description Confeature-original endpoint. The second leg of the no-silent-merge linking flow: the `google` callback verified the Google identity server-side and minted a single-use link challenge (returned as `challenge_id` in the callback's `link_required` branch). This endpoint loads the user by the challenge's email, verifies the supplied password with argon2id (timing-equalised on a wrong/unknown password), and — on success — spends the challenge, attaches `sso_provider_id='google'` + `sso_subject`, creates a session, and sets the `__Host-cfsession` cookie after any enrolled second factor is verified. A wrong password spends one of the challenge's 5 attempts, not the challenge. No token or password is ever logged.
      */
     post: operations["authLinkGoogle"];
     delete?: never;
@@ -1918,6 +2006,39 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    TwoFactorPending: {
+      /** @constant */
+      status: "mfa_required";
+    };
+    TwoFactorStatus: {
+      enabled: boolean;
+    };
+    TwoFactorEnrollmentRequest: Record<string, never>;
+    TwoFactorEnrollmentSetup: {
+      /** @description Base32 authenticator key. Display only during setup. */
+      setupKey: string;
+      /** @description Authenticator URI for generating a QR code locally. */
+      authenticatorUri: string;
+    };
+    TwoFactorEnrollmentConfirmRequest: {
+      code: components["schemas"]["TwoFactorAuthenticatorCode"];
+    };
+    TwoFactorAuthenticatorCode: string;
+    TwoFactorRecoveryCodes: {
+      /** @description One-use recovery codes, shown once when enabling two-factor authentication. */
+      recoveryCodes: string[];
+    };
+    TwoFactorProof:
+      | {
+          /** @constant */
+          method: "authenticator";
+          code: components["schemas"]["TwoFactorAuthenticatorCode"];
+        }
+      | {
+          /** @constant */
+          method: "recovery";
+          code: string;
+        };
     /** @description Auth-surface error envelope. On /v1/auth/login an unknown email and a wrong password return the same error, so the response never reveals whether an account exists. `bad_request`, with a `message`, is the same-origin guard's: the request carried a Confeature cookie and a body that is not JSON (#1166). */
     AuthError: {
       /** @enum {string} */
@@ -3380,7 +3501,7 @@ export interface components {
       /** @description Name of the Organization. */
       name: string;
     };
-    /** @description Describes an Organization Admin. ConfigCat parity (organization-admin-model.ts). `twoFactorEnabled` always reports `false` in Confeature v1 — the field is carried for wire-shape parity; truthful values arrive when 2FA support ships. */
+    /** @description Describes an Organization Admin. ConfigCat parity (organization-admin-model.ts). */
     OrganizationAdminModel: {
       /**
        * Format: uuid
@@ -3394,7 +3515,7 @@ export interface components {
        * @description Email of the Organization Admin.
        */
       email: string;
-      /** @description Determines whether 2FA is enabled for the Organization Admin. Always `false` in Confeature v1 (no 2FA yet). */
+      /** @description Whether two-factor authentication is enabled on the Administrator's account. */
       twoFactorEnabled: boolean;
     };
     /** @description Describes an Organization Member. ConfigCat parity (organization-member-model.ts). The `permissions` field always returns an empty array in Confeature v1 — per-product ACL is not yet supported. The shape is preserved so ConfigCat customers regenerating clients against the Confeature API don't lose fields. */
@@ -3405,6 +3526,7 @@ export interface components {
       fullName: string;
       /** Format: email */
       email: string;
+      /** @description Whether two-factor authentication is enabled on the Member's account. */
       twoFactorEnabled: boolean;
       /** @description The permissions of the Member. v1 of Confeature does not implement per-product permissions; this field always returns an empty array. */
       permissions: components["schemas"]["OrganizationPermissionModel"][];
@@ -3433,6 +3555,8 @@ export interface components {
        * @description Email of the Member.
        */
       email: string;
+      /** @description Optional Confeature extension used by the Team Members dashboard. Whether two-factor authentication is enabled on the Member's account. */
+      twoFactorEnabled?: boolean;
     };
     /** @description Per-product permission entry (ConfigCat parity placeholder). Confeature v1 returns EMPTY arrays in `OrganizationMemberModel.permissions`. The shape is published so client codegen does not break; field-level fidelity will land when per-product ACL ships. */
     OrganizationPermissionModel: Record<string, never>;
@@ -3652,7 +3776,10 @@ export interface components {
       | "password_reset"
       | "name_changed"
       | "avatar_changed"
-      | "avatar_removed";
+      | "avatar_removed"
+      | "two_factor_enabled"
+      | "two_factor_disabled"
+      | "two_factor_recovery_used";
     /**
      * @description ConfigCat audit log event type. Lists ConfigCat's full enum verbatim (incl. its own casing inconsistencies) for migration-client deserializer safety, PLUS the additive Confeature values `configPublished` and `settingTargetingRulesChanged` (a change to a value's targeting rules, its sensitive comparison values redacted; ConfigCat records it under `settingValueChanged`). Confeature's emitter only produces the config-plane subset it supports.
      * @enum {string}
@@ -4045,6 +4172,91 @@ export interface components {
     };
   };
   responses: {
+    /** @description First-factor proof succeeded and the account still requires a second factor. No full session or identity is returned. */
+    TwoFactorPendingResponse: {
+      headers: {
+        "Cache-Control": components["headers"]["TwoFactorNoStore"];
+        /** @description Sets the short-lived pending `__Host-cfmfa` cookie. */
+        "Set-Cookie": string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["TwoFactorPending"];
+      };
+    };
+    /** @description The request body is not JSON or does not match this operation's schema. */
+    TwoFactorBadRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The pending challenge or second-factor proof was missing, expired or invalid. */
+    TwoFactorProofRejected: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The required browser session was missing, expired or invalid. */
+    TwoFactorSessionRequired: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The credential cannot authorize this operation, or cross-origin request refused. */
+    TwoFactorForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The second-factor proof was invalid, the credential was unacceptable, or cross-origin request refused. */
+    TwoFactorProofForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Current enrollment or factor state prevents the requested change. */
+    TwoFactorConflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Too many attempts. Wait the number of seconds specified by Retry-After. */
+    TwoFactorRateLimit: {
+      headers: {
+        "Retry-After": number;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description The requested operation requires unavailable or invalid authenticator key configuration. */
+    TwoFactorKeyUnavailable: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
     /** @description `forbidden` (cross-origin request refused): the request carries a Confeature cookie and comes from neither the dashboard's own origin (`Sec-Fetch-Site: same-origin`) nor an allowlisted Origin. A request with an `Authorization` header, or with no Confeature cookie, is never refused this way. */
     CrossOriginWrite: {
       headers: {
@@ -4183,6 +4395,11 @@ export interface components {
   };
   requestBodies: never;
   headers: {
+    TwoFactorNoStore: "no-store";
+    /** @description Rotates the authenticated browser's `__Host-cfsession` cookie. */
+    TwoFactorSessionCookie: string;
+    /** @description Sets a new `__Host-cfsession` and expires `__Host-cfmfa` in separate Set-Cookie headers. */
+    TwoFactorCompletedSessionCookie: string;
     /** @description `Basic realm="Confeature Management API", charset="UTF-8"`. Sent on a 401 ONLY when the request carried HTTP Basic (`basicAuth`): a challenge on every 401 would make a browser prompt on dashboard calls and cache an ambient credential. */
     BasicChallenge: string;
     /** @description Always `max-age=0, must-revalidate`, as ConfigCat's CDN sends it: caches must revalidate before reuse, so a stale flag set is never served from a heuristic freshness window. */
@@ -4274,6 +4491,7 @@ export interface operations {
           "application/json": components["schemas"]["User"];
         };
       };
+      202: components["responses"]["TwoFactorPendingResponse"];
       /** @description Malformed request body (e.g. not an email, or an empty password). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
       400: {
         headers: {
@@ -4365,6 +4583,7 @@ export interface operations {
           "application/json": components["schemas"]["User"];
         };
       };
+      202: components["responses"]["TwoFactorPendingResponse"];
       /** @description The body is not JSON, from either of two sources: a body declared `application/json` that does not parse (a plain-text answer from the request parser), or, when the request carries a Confeature cookie, a body of another content type (the JSON `bad_request` envelope). Any other malformed body is the 410. */
       400: {
         headers: {
@@ -4548,6 +4767,153 @@ export interface operations {
           "application/json": components["schemas"]["SessionProbe"];
         };
       };
+    };
+  };
+  authTwoFactorStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The authenticated account's two-factor status. */
+      200: {
+        headers: {
+          "Cache-Control": components["headers"]["TwoFactorNoStore"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TwoFactorStatus"];
+        };
+      };
+      401: components["responses"]["TwoFactorSessionRequired"];
+      403: components["responses"]["TwoFactorForbidden"];
+    };
+  };
+  authTwoFactorStart: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TwoFactorEnrollmentRequest"];
+      };
+    };
+    responses: {
+      /** @description Setup material for pending enrollment. Confirm a valid authenticator code to enable two-factor authentication. */
+      200: {
+        headers: {
+          "Cache-Control": components["headers"]["TwoFactorNoStore"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TwoFactorEnrollmentSetup"];
+        };
+      };
+      400: components["responses"]["TwoFactorBadRequest"];
+      401: components["responses"]["TwoFactorSessionRequired"];
+      403: components["responses"]["TwoFactorForbidden"];
+      409: components["responses"]["TwoFactorConflict"];
+      429: components["responses"]["TwoFactorRateLimit"];
+      503: components["responses"]["TwoFactorKeyUnavailable"];
+    };
+  };
+  authTwoFactorConfirm: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TwoFactorEnrollmentConfirmRequest"];
+      };
+    };
+    responses: {
+      /** @description Two-factor authentication enabled. Save the one-use recovery codes now. */
+      200: {
+        headers: {
+          "Cache-Control": components["headers"]["TwoFactorNoStore"];
+          "Set-Cookie": components["headers"]["TwoFactorSessionCookie"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TwoFactorRecoveryCodes"];
+        };
+      };
+      400: components["responses"]["TwoFactorBadRequest"];
+      401: components["responses"]["TwoFactorSessionRequired"];
+      403: components["responses"]["TwoFactorProofForbidden"];
+      409: components["responses"]["TwoFactorConflict"];
+      429: components["responses"]["TwoFactorRateLimit"];
+      503: components["responses"]["TwoFactorKeyUnavailable"];
+    };
+  };
+  authTwoFactorVerify: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TwoFactorProof"];
+      };
+    };
+    responses: {
+      /** @description The second factor was accepted and a full session was issued. */
+      200: {
+        headers: {
+          "Cache-Control": components["headers"]["TwoFactorNoStore"];
+          "Set-Cookie": components["headers"]["TwoFactorCompletedSessionCookie"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["User"];
+        };
+      };
+      400: components["responses"]["TwoFactorBadRequest"];
+      401: components["responses"]["TwoFactorProofRejected"];
+      403: components["responses"]["TwoFactorForbidden"];
+      429: components["responses"]["TwoFactorRateLimit"];
+      503: components["responses"]["TwoFactorKeyUnavailable"];
+    };
+  };
+  authTwoFactorDisable: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TwoFactorProof"];
+      };
+    };
+    responses: {
+      /** @description Two-factor authentication disabled and recovery codes revoked. */
+      204: {
+        headers: {
+          "Cache-Control": components["headers"]["TwoFactorNoStore"];
+          "Set-Cookie": components["headers"]["TwoFactorSessionCookie"];
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["TwoFactorBadRequest"];
+      401: components["responses"]["TwoFactorSessionRequired"];
+      403: components["responses"]["TwoFactorProofForbidden"];
+      409: components["responses"]["TwoFactorConflict"];
+      429: components["responses"]["TwoFactorRateLimit"];
+      503: components["responses"]["TwoFactorKeyUnavailable"];
     };
   };
   listAuthEvents: {
@@ -4788,6 +5154,7 @@ export interface operations {
           "application/json": components["schemas"]["SsoCallbackResult"];
         };
       };
+      202: components["responses"]["TwoFactorPendingResponse"];
       /** @description State missing / consumed / malformed / tampered, or started by another browser (no `__Host-cfsso`, or not the one its start set: login CSRF), or userinfo returned no `email`, or — for the `google` provider — the `email_verified` claim was absent or false, or malformed body — same generic body for ALL branches. No session is issued; the KV state entry IS consumed when present, to prevent replay. Also `bad_request` when the request carries a Confeature cookie and its body is not JSON. */
       400: {
         headers: {
@@ -4869,6 +5236,7 @@ export interface operations {
           "application/json": components["schemas"]["User"];
         };
       };
+      202: components["responses"]["TwoFactorPendingResponse"];
       400: components["responses"]["NotJsonWrite"];
       /** @description Wrong password (timing-equalised against the unknown-user branch). No session is issued, and the same challenge may be retried. */
       401: {
@@ -4981,15 +5349,18 @@ export interface operations {
           "application/json": components["schemas"]["User"];
         };
       };
-      /** @description From a browser that did not ask for the link: nothing attached. The body names the address; a Google sign-in as it finishes the link. */
+      /** @description From a browser that did not ask for the link, the JSON response names the address; a matching Google sign-in finishes the link. The MFA media type indicates this browser proved the first factor and must finish the account's second factor. */
       202: {
         headers: {
-          /** @description `__Host-cflink`, the approval, 10 minutes. */
+          /** @description `no-store` on the `mfa_required` response. */
+          "Cache-Control"?: "no-store";
+          /** @description `__Host-cflink` (the 10-minute link approval) for `google_required`, or `__Host-cfmfa` (short-lived pending proof cookie) for `mfa_required`. Neither is a session. */
           "Set-Cookie"?: string;
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["LinkGoogleEmailPending"];
+          "application/vnd.confeature.mfa-required+json": components["schemas"]["TwoFactorPending"];
         };
       };
       /** @description The body is not JSON, from either of two sources: a body declared `application/json` that does not parse (a plain-text answer from the request parser), or, when the request carries a Confeature cookie, a body of another content type (the JSON `bad_request` envelope). Any other malformed body is the 410. */

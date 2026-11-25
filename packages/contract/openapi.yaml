@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Confeature API
-  version: 0.14.1
+  version: 0.15.0
   description: >
     Confeature's API. This file is the single source of truth — every Worker
     and every SDK imports types generated from this document.
@@ -93,14 +93,16 @@ paths:
       operationId: authLogin
       summary: Sign in with email + password
       description: >
-        Verifies the credential and, on success, issues a session cookie
+        Verifies the credential and, for an account without an enrolled
+        second factor, issues a session cookie
         (`__Host-cfsession`, HttpOnly, Secure, SameSite=Lax, Path=/,
         Max-Age=604800). The cookie value is opaque; revocation is
         server-side via POST /v1/auth/logout. Failures return the SAME
         shape and timing whether the email does not exist or the password
         is wrong (auth-side enumeration defence). Failed passwords are
         budgeted per IP and per address, and over budget the attempt is
-        refused before verification.
+        refused before verification. An enrolled account instead requires
+        a second factor before issuing a session.
       tags: [Auth]
       requestBody:
         required: true
@@ -134,6 +136,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "202":
+          $ref: "#/components/responses/TwoFactorPendingResponse"
         "400":
           description: >
             Malformed request body (e.g. not an email, or an empty password). Also `bad_request` when the request carries a Confeature cookie and its body is not JSON.
@@ -218,7 +222,8 @@ paths:
         existing account that asked for its link), or by the password. On a
         pending sign-up it creates the account (email verified) and signs in;
         on an existing account it marks the address verified, and signs in when
-        proven by the password. Five wrong passwords end the link.
+        proven by the password and any enrolled second factor. Five wrong
+        passwords end the link.
       tags: [Auth]
       requestBody:
         required: true
@@ -240,6 +245,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "202":
+          $ref: "#/components/responses/TwoFactorPendingResponse"
         "400":
           description: >
             The body is not JSON, from either of two sources: a body declared
@@ -412,6 +419,172 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionProbe"
+  /v1/auth/two-factor:
+    get:
+      operationId: authTwoFactorStatus
+      summary: Read whether two-factor authentication is enabled for this account
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The authenticated account's two-factor status.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/TwoFactorNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorStatus"
+        "401":
+          $ref: "#/components/responses/TwoFactorSessionRequired"
+        "403":
+          $ref: "#/components/responses/TwoFactorForbidden"
+  /v1/auth/two-factor/enrollment:
+    post:
+      operationId: authTwoFactorStart
+      summary: Start setting up an authenticator app for this account
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorEnrollmentRequest"
+      responses:
+        "200":
+          description: Setup material for pending enrollment. Confirm a valid authenticator code to enable two-factor authentication.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/TwoFactorNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorEnrollmentSetup"
+        "400":
+          $ref: "#/components/responses/TwoFactorBadRequest"
+        "401":
+          $ref: "#/components/responses/TwoFactorSessionRequired"
+        "403":
+          $ref: "#/components/responses/TwoFactorForbidden"
+        "409":
+          $ref: "#/components/responses/TwoFactorConflict"
+        "429":
+          $ref: "#/components/responses/TwoFactorRateLimit"
+        "503":
+          $ref: "#/components/responses/TwoFactorKeyUnavailable"
+  /v1/auth/two-factor/enrollment/confirm:
+    post:
+      operationId: authTwoFactorConfirm
+      summary: Confirm an authenticator and enable two-factor authentication
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorEnrollmentConfirmRequest"
+      responses:
+        "200":
+          description: Two-factor authentication enabled. Save the one-use recovery codes now.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/TwoFactorNoStore"
+            Set-Cookie:
+              $ref: "#/components/headers/TwoFactorSessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorRecoveryCodes"
+        "400":
+          $ref: "#/components/responses/TwoFactorBadRequest"
+        "401":
+          $ref: "#/components/responses/TwoFactorSessionRequired"
+        "403":
+          $ref: "#/components/responses/TwoFactorProofForbidden"
+        "409":
+          $ref: "#/components/responses/TwoFactorConflict"
+        "429":
+          $ref: "#/components/responses/TwoFactorRateLimit"
+        "503":
+          $ref: "#/components/responses/TwoFactorKeyUnavailable"
+  /v1/auth/two-factor/verify:
+    post:
+      operationId: authTwoFactorVerify
+      summary: Complete pending sign-in or reauthentication with a second factor
+      description: >
+        Completes the pending challenge for the browser that proved the first
+        factor. The server binds the challenge to its account and purpose. A
+        successful response consumes the challenge and proof, sets a new
+        session cookie, and clears the pending cookie.
+      tags: [Auth]
+      security:
+        - twoFactorPendingAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorProof"
+      responses:
+        "200":
+          description: The second factor was accepted and a full session was issued.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/TwoFactorNoStore"
+            Set-Cookie:
+              $ref: "#/components/headers/TwoFactorCompletedSessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/TwoFactorBadRequest"
+        "401":
+          $ref: "#/components/responses/TwoFactorProofRejected"
+        "403":
+          $ref: "#/components/responses/TwoFactorForbidden"
+        "429":
+          $ref: "#/components/responses/TwoFactorRateLimit"
+        "503":
+          $ref: "#/components/responses/TwoFactorKeyUnavailable"
+  /v1/auth/two-factor/disable:
+    post:
+      operationId: authTwoFactorDisable
+      summary: Disable two-factor authentication for this account after proof
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorProof"
+      responses:
+        "204":
+          description: Two-factor authentication disabled and recovery codes revoked.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/TwoFactorNoStore"
+            Set-Cookie:
+              $ref: "#/components/headers/TwoFactorSessionCookie"
+        "400":
+          $ref: "#/components/responses/TwoFactorBadRequest"
+        "401":
+          $ref: "#/components/responses/TwoFactorSessionRequired"
+        "403":
+          $ref: "#/components/responses/TwoFactorProofForbidden"
+        "409":
+          $ref: "#/components/responses/TwoFactorConflict"
+        "429":
+          $ref: "#/components/responses/TwoFactorRateLimit"
+        "503":
+          $ref: "#/components/responses/TwoFactorKeyUnavailable"
   /v1/auth/events:
     get:
       operationId: listAuthEvents
@@ -727,7 +900,8 @@ paths:
         provider's token endpoint, fetches the operator's email at
         the userinfo endpoint, upserts a single `users` row by
         email-match (preserving any existing `password_hash`),
-        creates a session, and sets the `__Host-cfsession` cookie
+        creates a session once any enrolled second factor is verified,
+        and sets the `__Host-cfsession` cookie
         using the same machinery as `/v1/auth/login` and
         `/v1/auth/accept-invite`. All 400-class failures (missing /
         consumed / malformed state, missing email, malformed body)
@@ -776,6 +950,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SsoCallbackResult"
+        "202":
+          $ref: "#/components/responses/TwoFactorPendingResponse"
         "400":
           description: >
             State missing / consumed / malformed / tampered, or started by
@@ -865,7 +1041,8 @@ paths:
         (timing-equalised on a wrong/unknown password), and — on success —
         spends the challenge, attaches `sso_provider_id='google'` +
         `sso_subject`, creates a session, and sets the `__Host-cfsession`
-        cookie. A wrong password spends one of the challenge's 5 attempts, not
+        cookie after any enrolled second factor is verified. A wrong password
+        spends one of the challenge's 5 attempts, not
         the challenge. No token or password is ever logged.
       tags: [Auth]
       requestBody:
@@ -890,6 +1067,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "202":
+          $ref: "#/components/responses/TwoFactorPendingResponse"
         "401":
           description: >
             Wrong password (timing-equalised against the unknown-user
@@ -1039,17 +1218,30 @@ paths:
                 $ref: "#/components/schemas/User"
         "202":
           description: >
-            From a browser that did not ask for the link: nothing attached. The
-            body names the address; a Google sign-in as it finishes the link.
+            From a browser that did not ask for the link, the JSON response
+            names the address; a matching Google sign-in finishes the link.
+            The MFA media type indicates this browser proved the first factor
+            and must finish the account's second factor.
           headers:
+            Cache-Control:
+              description: "`no-store` on the `mfa_required` response."
+              schema:
+                type: string
+                const: no-store
             Set-Cookie:
-              description: "`__Host-cflink`, the approval, 10 minutes."
+              description: >
+                `__Host-cflink` (the 10-minute link approval) for
+                `google_required`, or `__Host-cfmfa` (short-lived pending
+                proof cookie) for `mfa_required`. Neither is a session.
               schema:
                 type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LinkGoogleEmailPending"
+            application/vnd.confeature.mfa-required+json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorPending"
         "400":
           description: >
             The body is not JSON, from either of two sources: a body declared
@@ -7419,6 +7611,14 @@ components:
         Max-Age=604800. The api validates by point-reading the
         `sessions` table in D1; sign-out (POST /v1/auth/logout)
         deletes the session row globally.
+    twoFactorPendingAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-cfmfa
+      description: >
+        Short-lived, opaque pending challenge cookie, set only after first-factor
+        proof. HttpOnly, Secure, SameSite=Lax and Path=/. Allows only completion
+        of the challenge and never authorizes an authenticated route.
   parameters:
     ConfigIfNoneMatch:
       in: header
@@ -7470,6 +7670,76 @@ components:
         The `lastVersionId` the client last read. When it no longer matches
         the stored value, the write is refused with 409 and nothing changes.
   responses:
+    TwoFactorPendingResponse:
+      description: >
+        First-factor proof succeeded and the account still
+        requires a second factor. No full session or identity is returned.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/TwoFactorNoStore"
+        Set-Cookie:
+          required: true
+          description: Sets the short-lived pending `__Host-cfmfa` cookie.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TwoFactorPending"
+    TwoFactorBadRequest:
+      description: The request body is not JSON or does not match this operation's schema.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorProofRejected:
+      description: The pending challenge or second-factor proof was missing, expired or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorSessionRequired:
+      description: The required browser session was missing, expired or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorForbidden:
+      description: The credential cannot authorize this operation, or cross-origin request refused.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorProofForbidden:
+      description: The second-factor proof was invalid, the credential was unacceptable, or cross-origin request refused.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorConflict:
+      description: Current enrollment or factor state prevents the requested change.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorRateLimit:
+      description: Too many attempts. Wait the number of seconds specified by Retry-After.
+      headers:
+        Retry-After:
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TwoFactorKeyUnavailable:
+      description: The requested operation requires unavailable or invalid authenticator key configuration.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     CrossOriginWrite:
       description: >
         `forbidden` (cross-origin request refused): the request carries a
@@ -7644,6 +7914,21 @@ components:
           schema:
             $ref: "#/components/schemas/RateLimited"
   headers:
+    TwoFactorNoStore:
+      required: true
+      schema:
+        type: string
+        const: no-store
+    TwoFactorSessionCookie:
+      required: true
+      description: Rotates the authenticated browser's `__Host-cfsession` cookie.
+      schema:
+        type: string
+    TwoFactorCompletedSessionCookie:
+      required: true
+      description: Sets a new `__Host-cfsession` and expires `__Host-cfmfa` in separate Set-Cookie headers.
+      schema:
+        type: string
     BasicChallenge:
       required: false
       description: >
@@ -7677,6 +7962,83 @@ components:
       schema:
         type: string
   schemas:
+    TwoFactorPending:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: mfa_required
+    TwoFactorStatus:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+    TwoFactorEnrollmentRequest:
+      type: object
+      additionalProperties: false
+    TwoFactorEnrollmentSetup:
+      type: object
+      additionalProperties: false
+      required: [setupKey, authenticatorUri]
+      properties:
+        setupKey:
+          type: string
+          pattern: "^[A-Z2-7]+$"
+          description: Base32 authenticator key. Display only during setup.
+        authenticatorUri:
+          type: string
+          pattern: "^otpauth://totp/"
+          description: Authenticator URI for generating a QR code locally.
+    TwoFactorEnrollmentConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          $ref: "#/components/schemas/TwoFactorAuthenticatorCode"
+    TwoFactorAuthenticatorCode:
+      type: string
+      pattern: "^[0-9]{6}$"
+      writeOnly: true
+    TwoFactorRecoveryCodes:
+      type: object
+      additionalProperties: false
+      required: [recoveryCodes]
+      properties:
+        recoveryCodes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^[A-Z2-7]{5}(-[A-Z2-7]{5}){3}$"
+          description: One-use recovery codes, shown once when enabling two-factor authentication.
+    TwoFactorProof:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [method, code]
+          properties:
+            method:
+              type: string
+              const: authenticator
+            code:
+              $ref: "#/components/schemas/TwoFactorAuthenticatorCode"
+        - type: object
+          additionalProperties: false
+          required: [method, code]
+          properties:
+            method:
+              type: string
+              const: recovery
+            code:
+              type: string
+              pattern: "^[A-Za-z2-7]{5}(-[A-Za-z2-7]{5}){3}$"
+              writeOnly: true
     AuthError:
       type: object
       required: [error]
@@ -11241,10 +11603,7 @@ components:
       type: object
       description: >
         Describes an Organization Admin. ConfigCat parity
-        (organization-admin-model.ts). `twoFactorEnabled` always
-        reports `false` in Confeature v1 — the field is carried for
-        wire-shape parity; truthful values arrive when 2FA support
-        ships.
+        (organization-admin-model.ts).
       required: [userId, fullName, email, twoFactorEnabled]
       properties:
         userId:
@@ -11262,9 +11621,7 @@ components:
           description: Email of the Organization Admin.
         twoFactorEnabled:
           type: boolean
-          description: >
-            Determines whether 2FA is enabled for the Organization Admin.
-            Always `false` in Confeature v1 (no 2FA yet).
+          description: Whether two-factor authentication is enabled on the Administrator's account.
     OrganizationMemberModel:
       type: object
       description: >
@@ -11289,6 +11646,7 @@ components:
           format: email
         twoFactorEnabled:
           type: boolean
+          description: Whether two-factor authentication is enabled on the Member's account.
         permissions:
           type: array
           items:
@@ -11332,6 +11690,11 @@ components:
           type: string
           format: email
           description: Email of the Member.
+        twoFactorEnabled:
+          type: boolean
+          description: >
+            Optional Confeature extension used by the Team Members dashboard.
+            Whether two-factor authentication is enabled on the Member's account.
     OrganizationPermissionModel:
       type: object
       description: >
@@ -11803,6 +12166,9 @@ components:
         - name_changed
         - avatar_changed
         - avatar_removed
+        - two_factor_enabled
+        - two_factor_disabled
+        - two_factor_recovery_used
     AuditLogType:
       type: string
       description: >
