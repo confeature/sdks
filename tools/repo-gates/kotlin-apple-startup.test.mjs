@@ -10,7 +10,7 @@ const SOURCE = readFileSync(
   new URL("../../apps/sdk-kotlin-mp/openfeature/integration/check-apple.sh", import.meta.url),
   "utf8",
 );
-const XCODE = SOURCE.match(/grep -Fx '([^']+)'/)[1];
+const XCODE = "Xcode 26.2";
 const DEVICE = "54ADC2F6-A37C-48EA-B4C0-A0CFA960990E";
 const REPLACEMENT = "F67E1E2B-5B8F-4B6C-82E8-E81248E35749";
 const RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-26-2";
@@ -196,8 +196,8 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
     const result = run("ready");
     expect(result.status).toBe(0);
     expect(result.calls).toEqual([...STARTUP, `fixture ${DEVICE}`, ...CLEANUP]);
-    expect(result.githubEnv).toMatch(
-      /^DEVELOPER_DIR=\/Applications\/Xcode_.*\/Contents\/Developer\n$/,
+    expect(result.githubEnv).toBe(
+      "DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer\n",
     );
   });
 
