@@ -21,7 +21,9 @@ const CLEANUP = retire(DEVICE);
 const RECOVERY = [...STARTUP, ...CLEANUP, ...createAndBoot(REPLACEMENT)];
 const FIXTURE = `import { appendFileSync } from "node:fs";
 const { CONFEATURE_KOTLIN_SIMULATOR: device, SIM_MODE, CALL_LOG } = process.env;
-const expected = SIM_MODE === "slow-readiness" ? "${REPLACEMENT}" : "${DEVICE}";
+const expected = ["slow-readiness", "timed-out-retirement"].includes(SIM_MODE)
+  ? "${REPLACEMENT}"
+  : "${DEVICE}";
 if (process.argv[2] !== "apple" || device !== expected) process.exit(64);
 appendFileSync(CALL_LOG, "fixture " + device + "\\n");
 if (SIM_MODE.startsWith("fixture-failure")) process.exit(42);`;
@@ -35,6 +37,10 @@ const TOOLS = {
     case "$SIM_MODE:$5" in
       slow-list:list|stalled-list:list|stalled-create:create|slow-readiness:spawn|stalled-readiness:spawn|failed-retirement:spawn|interrupted-retirement:spawn)
         exec "$REAL_NODE" "$1" "$2" "$3" 0.15 "\${@:5}" ;;
+      timed-out-retirement:spawn|timed-out-retirement:shutdown|timed-out-retirement:delete)
+        if [ "$6" = "$FAKE_DEVICE" ] && [ ! -e "$SIM_TEST_DIR/first-$5" ]; then
+          exec "$REAL_NODE" "$1" "$2" "$3" 0.15 "\${@:5}"
+        fi ;;
     esac
   fi
   exec "$REAL_NODE" "$@"`,
@@ -56,8 +62,13 @@ const TOOLS = {
       printf "%s\\n" "$!" > "$SIM_TEST_DIR/descendant"
       wait "$!" ;;
     fixture-failure-cleanup:delete|failed-cleanup:delete|failed-retirement:delete) exit 32 ;;
+    timed-out-retirement:shutdown|timed-out-retirement:delete)
+      if [ "$3" = "$FAKE_DEVICE" ] && [ ! -e "$SIM_TEST_DIR/first-$2" ]; then
+        : > "$SIM_TEST_DIR/first-$2"
+        exec /bin/sleep 5
+      fi ;;
     stalled-list:list|stalled-readiness:spawn) exec /bin/sleep 5 ;;
-    slow-readiness:spawn|failed-retirement:spawn|interrupted-retirement:spawn)
+    slow-readiness:spawn|failed-retirement:spawn|interrupted-retirement:spawn|timed-out-retirement:spawn)
       if [ "$3" = "$FAKE_DEVICE" ]; then exec /bin/sleep 5; fi ;;
     slow-list:list)
       if [ ! -e "$SIM_TEST_DIR/listed" ]; then
@@ -120,6 +131,7 @@ function run(mode, args = []) {
       "stalled-readiness",
       "failed-retirement",
       "interrupted-retirement",
+      "timed-out-retirement",
     ].includes(mode);
     const script = shortened
       ? SOURCE.replace(
@@ -233,6 +245,18 @@ describe("Kotlin OpenFeature Apple simulator startup", () => {
     expect(result.elapsed).toBeLessThan(4_000);
     expect(["", "Z"]).toContain(result.descendantState?.charAt(0));
   });
+
+  it("tries the replacement when retiring the first simulator times out", () => {
+    const result = run("timed-out-retirement");
+    expect(result.status).toBe(0);
+    expect(result.calls).toEqual([
+      ...RECOVERY,
+      `fixture ${REPLACEMENT}`,
+      ...retire(REPLACEMENT),
+      ...CLEANUP,
+    ]);
+    expect(result.stderr).toContain("Retrying cleanup after the replacement attempt.");
+  }, 12_000);
 
   it("reports the replacement's state within a bounded diagnostic after final timeout", () => {
     const result = run("stalled-readiness");
