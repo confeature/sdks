@@ -102,6 +102,7 @@ if [[ "$available" != true ]]; then
 fi
 
 device=
+pending_retirement=
 start_device() {
   device=$(simctl 120 create 'Confeature Kotlin OpenFeature' \
     com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$ios_runtime")
@@ -141,19 +142,22 @@ wait_for_launchd() {
 }
 
 retire_device() {
-  local retiring=$device shutdown_status=0
-  device=
+  local retiring=$1 shutdown_status=0 delete_status=0
   # The device may already be stopped. Deletion still has to succeed.
   simctl 30 shutdown "$retiring" || shutdown_status=$?
-  simctl 30 delete "$retiring" || return "$?"
+  simctl 30 delete "$retiring" || delete_status=$?
   if [[ "$shutdown_status" == 130 || "$shutdown_status" == 143 ]]; then
     return "$shutdown_status"
   fi
+  return "$delete_status"
 }
 
 cleanup() {
   local status=$?
-  if [[ -n "$device" ]] && ! retire_device && [[ "$status" == 0 ]]; then
+  if [[ -n "$device" ]] && ! retire_device "$device" && [[ "$status" == 0 ]]; then
+    status=1
+  fi
+  if [[ -n "$pending_retirement" ]] && ! retire_device "$pending_retirement" && [[ "$status" == 0 ]]; then
     status=1
   fi
   return "$status"
@@ -164,7 +168,15 @@ wait_for_launchd || {
   status=$?
   [[ "$status" == 124 ]] || exit "$status"
   printf '%s\n' 'Retrying simulator readiness with a fresh device after a timeout.' >&2
-  retire_device
+  retiring=$device
+  device=
+  retire_device "$retiring" || {
+    status=$?
+    [[ "$status" == 124 ]] || exit "$status"
+    printf 'Retirement of simulator %s timed out. Retrying cleanup after the replacement attempt.\n' \
+      "$retiring" >&2
+    pending_retirement=$retiring
+  }
   start_device
   wait_for_launchd || {
     status=$?
