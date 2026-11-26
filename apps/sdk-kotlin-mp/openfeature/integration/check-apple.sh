@@ -3,7 +3,7 @@
 set -euo pipefail
 
 integration=$(cd "$(dirname "$0")" && pwd)
-export DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer
+export DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer
 readonly ios_version=26.2
 readonly ios_runtime="com.apple.CoreSimulator.SimRuntime.iOS-${ios_version//./-}"
 readonly readiness_deadline_seconds=180
@@ -14,7 +14,7 @@ if [[ "$#" != 0 ]]; then
   exit 64
 fi
 
-xcodebuild -version | grep -Fx 'Xcode 26.0.1'
+xcodebuild -version | grep -Fx 'Xcode 26.2'
 [[ "$(uname -m)" == arm64 ]]
 
 simctl() {
