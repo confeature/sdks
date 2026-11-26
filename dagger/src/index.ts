@@ -853,7 +853,7 @@ export class Confeature {
       .withWorkdir("/work/apps/sdk-android")
       // The SDK's declared bar (#793 FR-007): Android Lint, the unit tests,
       // the release AAR build.
-      .withExec(["sh", "-eu", "-c", "sh ./gradlew --no-daemon lint test assembleRelease"])
+      .withExec(["sh", "./gradle-ci.sh", "lint", "test", "assembleRelease"])
       .stdout();
     const lastLine = result.trim().split("\n").slice(-1)[0];
     return `${lastLine} (Tier 3 androidTest)`;
